@@ -9,7 +9,7 @@ fn process_file<P: AsRef<Path>>(file: P) -> Result<()> {
   let mut ctx = codegen::CodeGenCtx::new(&arena);
   let mut parser = parser::Parser::new(&arena, &content, &mut ctx);
   let tree = parser.parse()?;
-  std::println!("{}", tree);
+  std::println!("{tree}");
   Ok(())
 }
 

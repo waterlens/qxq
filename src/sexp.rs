@@ -34,6 +34,12 @@ pub enum Sexp<'a> {
   List(&'a [Sexp<'a>]),
 }
 
+impl Default for SexpPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SexpPool {
   pub fn new() -> Self {
     SexpPool { arena: Bump::new() }
@@ -89,14 +95,14 @@ impl std::fmt::Display for Sexp<'_> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     use Sexp::*;
     match self {
-      Atom(s) => write!(f, "{}", s),
+      Atom(s) => write!(f, "{s}"),
       List(xs) => {
         write!(f, "(")?;
         let mut iter = xs.iter();
         if let Some(x) = iter.next() {
-          write!(f, "{}", x)?;
+          write!(f, "{x}")?;
           for x in iter {
-            write!(f, " {}", x)?;
+            write!(f, " {x}")?;
           }
         }
         write!(f, ")")

@@ -16,9 +16,9 @@ impl From<u32> for TokenIndex {
   }
 }
 
-impl Into<u32> for TokenIndex {
-  fn into(self) -> u32 {
-    self.0
+impl From<TokenIndex> for u32 {
+  fn from(val: TokenIndex) -> Self {
+    val.0
   }
 }
 
@@ -30,9 +30,9 @@ impl<'a> From<&'a Token<'a>> for TokenRef<'a> {
   }
 }
 
-impl<'a> Into<&'a Token<'a>> for TokenRef<'a> {
-  fn into(self) -> &'a Token<'a> {
-    self.0
+impl<'a> From<TokenRef<'a>> for &'a Token<'a> {
+  fn from(val: TokenRef<'a>) -> Self {
+    val.0
   }
 }
 
@@ -138,7 +138,7 @@ impl std::fmt::Display for Expr<'_> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let pool = SexpPool::new();
     let sexp = self.to_sexp(&pool);
-    write!(f, "{}", sexp)
+    write!(f, "{sexp}")
   }
 }
 
@@ -150,7 +150,7 @@ impl std::fmt::Display for SynTree<'_> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let pool = SexpPool::new();
     let sexp = self.root.to_sexp(&pool);
-    write!(f, "{}", sexp)
+    write!(f, "{sexp}")
   }
 }
 
@@ -316,7 +316,7 @@ impl<'a> Parser<'a> {
   fn parse_ident_expr<'t>(&'t mut self, def_or_use: bool) -> PeekExpr<'a> {
     let arena = self.arena;
     let tok = self.next_ident(false)?;
-    let name = TokenStr::from_span(&arena, tok.inner.span);
+    let name = TokenStr::from_span(arena, tok.inner.span);
     if def_or_use {
       self.ctx.emit_ident_def(name);
     } else {
@@ -340,8 +340,8 @@ impl<'a> Parser<'a> {
         arena.alloc(ExprCon::StrLiteral(s))
       }
       Identifer => {
-        self.ctx.emit_ident_use_pre(TokenStr::from_span(&arena, lhs_token.inner.span));
-        arena.alloc(ExprCon::Ident(TokenStr::from_span(&arena, lhs_token.inner.span)))
+        self.ctx.emit_ident_use_pre(TokenStr::from_span(arena, lhs_token.inner.span));
+        arena.alloc(ExprCon::Ident(TokenStr::from_span(arena, lhs_token.inner.span)))
       }
       PairedOpen(po) => {
         let inner_token = self.peek_token()?;
@@ -445,7 +445,7 @@ impl<'a> Parser<'a> {
           }
 
           let name = self.next_ident(false)?;
-          let name = TokenStr::from_span(&arena, name.inner.span);
+          let name = TokenStr::from_span(arena, name.inner.span);
 
           let _ = self.expect_operator("=", false)?;
 
@@ -618,7 +618,7 @@ impl<'a> Parser<'a> {
 
   pub fn parse(&mut self) -> Result<SynTree<'a>> {
     let root = self.parse_exprs()?;
-    let _ = self.expect_reach_eof()?;
+    self.expect_reach_eof()?;
     Ok(SynTree { root: root.inner })
   }
 }

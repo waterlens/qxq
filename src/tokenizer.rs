@@ -67,7 +67,7 @@ impl AsRef<str> for TokenStr<'_> {
 
 impl<'a> From<&'a str> for TokenStr<'a> {
   fn from(s: &'a str) -> Self {
-    TokenStr::new(s.as_ref())
+    TokenStr::new(s)
   }
 }
 
@@ -101,7 +101,7 @@ impl AsRef<[char]> for TokenSpan<'_> {
 
 impl<'a> From<&'a [char]> for TokenSpan<'a> {
   fn from(s: &'a [char]) -> Self {
-    TokenSpan::new(s.as_ref())
+    TokenSpan::new(s)
   }
 }
 
@@ -213,7 +213,7 @@ impl std::fmt::Display for Token<'_> {
       Kw(kw) => write!(f, "<keyword {kw}>"),
       Op(op) => write!(f, "<op {op}>"),
       RawOp(op) => write!(f, "<raw op: `{op}`>"),
-      StrLiteral(s) => write!(f, "<string literal {:?}>", s),
+      StrLiteral(s) => write!(f, "<string literal {s:?}>"),
       IntLiteral(i) => write!(f, "<string literal {i}>"),
       PairedOpen(po) => write!(f, "<paired open {po}>"),
       PairedClose(pc) => write!(f, "<paired close {pc}>"),
