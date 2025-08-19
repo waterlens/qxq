@@ -6,7 +6,8 @@ use std::{fs, path::Path};
 fn process_file<P: AsRef<Path>>(file: P) -> Result<()> {
   let content = fs::read_to_string(file)?;
   let arena = Bump::new();
-  let mut parser = parser::Parser::new(&arena, &content);
+  let mut ctx = codegen::CodeGenCtx::new(&arena);
+  let mut parser = parser::Parser::new(&arena, &content, &mut ctx);
   let tree = parser.parse()?;
   std::println!("{}", tree);
   Ok(())

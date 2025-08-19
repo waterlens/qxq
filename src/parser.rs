@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use bumpalo::Bump;
 
+use crate::codegen::CodeGenCtx;
 use crate::sexp::{Sexp, SexpPool, ToSexp};
 use crate::tokenizer::{Keyword, Paired, Token, TokenStr, TokenTag, Tokenizer};
 
@@ -157,6 +158,7 @@ pub struct Parser<'a> {
   arena: &'a Bump,
   tokenizer: Tokenizer<'a>,
   token: Option<&'a Token<'a>>,
+  ctx: &'a mut CodeGenCtx<'a>,
 }
 
 pub struct PeekResult<'a, T> {
@@ -167,9 +169,9 @@ type PeekToken<'a> = Result<PeekResult<'a, Token<'a>>>;
 type PeekExpr<'a> = Result<PeekResult<'a, Expr<'a>>>;
 
 impl<'a> Parser<'a> {
-  pub fn new(arena: &'a Bump, src: &'a str) -> Self {
+  pub fn new(arena: &'a Bump, src: &'a str, ctx: &'a mut CodeGenCtx<'a>) -> Self {
     let tokenizer: Tokenizer<'a> = Tokenizer::new(arena, src);
-    Self { arena, tokenizer, token: None }
+    Self { arena, tokenizer, token: None, ctx }
   }
 
   fn skip_token(&mut self) {
@@ -311,10 +313,15 @@ impl<'a> Parser<'a> {
     self.parse_expr_with_affinity(0)
   }
 
-  fn parse_ident_expr<'t>(&'t mut self) -> PeekExpr<'a> {
+  fn parse_ident_expr<'t>(&'t mut self, def_or_use: bool) -> PeekExpr<'a> {
     let arena = self.arena;
     let tok = self.next_ident(false)?;
     let name = TokenStr::from_span(&arena, tok.inner.span);
+    if def_or_use {
+      self.ctx.emit_ident_def(name);
+    } else {
+      self.ctx.emit_ident_use(name);
+    }
     Ok(PeekResult { inner: arena.alloc(ExprCon::Ident(name)) })
   }
 
@@ -324,9 +331,18 @@ impl<'a> Parser<'a> {
     let lhs_token = self.next_token()?;
     let mut lhs_op = None;
     let mut lhs: &Expr = match lhs_token.inner.tag {
-      IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n)),
-      StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s)),
-      Identifer => arena.alloc(ExprCon::Ident(TokenStr::from_span(&arena, lhs_token.inner.span))),
+      IntLiteral(n) => {
+        self.ctx.emit_int_literal(n);
+        arena.alloc(ExprCon::IntLiteral(n))
+      }
+      StrLiteral(s) => {
+        self.ctx.emit_str_literal(s);
+        arena.alloc(ExprCon::StrLiteral(s))
+      }
+      Identifer => {
+        self.ctx.emit_ident_use_pre(TokenStr::from_span(&arena, lhs_token.inner.span));
+        arena.alloc(ExprCon::Ident(TokenStr::from_span(&arena, lhs_token.inner.span)))
+      }
       PairedOpen(po) => {
         let inner_token = self.peek_token()?;
         match inner_token.inner.tag {
@@ -337,10 +353,11 @@ impl<'a> Parser<'a> {
 
             let _ = self.expect_paired_close(po, false)?;
 
+            self.ctx.emit_op_obj_pre(op);
             arena.alloc(ExprCon::Op(op.into()))
           }
           _ => {
-            let expr = self.parse_exprs()?;
+            let expr = self.parse_expr()?;
 
             if self.peek_operator(",", false) {
               let mut exprs = vec![expr.inner];
@@ -358,6 +375,7 @@ impl<'a> Parser<'a> {
 
               let _ = self.expect_paired_close(po, false)?;
 
+              self.ctx.emit_tuple_pre(exprs.len());
               arena.alloc(ExprCon::Tuple(arena.alloc_slice_copy(&exprs)))
             } else {
               let _ = self.expect_paired_close(po, false)?;
@@ -369,12 +387,14 @@ impl<'a> Parser<'a> {
       }
       RawOp(op) => {
         lhs_op = Some(op);
+        self.ctx.emit_op_obj_pre(op);
         arena.alloc(ExprCon::Op(op.into()))
       }
       Op(op) => {
         let (_laff, raff) =
           Affinity::get_prefix(op).ok_or_else(|| anyhow::anyhow!("prefix operator expected"))?;
         let rhs_expr = self.parse_expr_with_affinity(raff)?;
+        self.ctx.emit_prefix_op(op);
         arena.alloc(ExprCon::OpApply {
           op: arena.alloc(ExprCon::Op(op.into())),
           pair: None,
@@ -388,7 +408,7 @@ impl<'a> Parser<'a> {
           let mut params = vec![];
 
           if !self.peek_paired_close(Paired::Parenthesis, false) {
-            let expr = self.parse_ident_expr()?;
+            let expr = self.parse_ident_expr(true)?;
             params.push(expr.inner);
 
             if self.peek_operator(",", false) {
@@ -399,7 +419,7 @@ impl<'a> Parser<'a> {
                   self.skip_token();
                 }
 
-                let expr = self.parse_ident_expr()?;
+                let expr = self.parse_ident_expr(true)?;
                 params.push(expr.inner);
               }
             }
@@ -415,6 +435,7 @@ impl<'a> Parser<'a> {
 
           let _ = self.expect_keyword(Keyword::End, true)?;
 
+          self.ctx.emit_fn();
           arena.alloc(ExprCon::Fn { params: arena.alloc_slice_copy(&params), body: body.inner })
         }
         Keyword::Let => {
@@ -608,7 +629,8 @@ mod tests {
 
   fn test_parse_exprs(source: &str, expected_sexp_str: &str) {
     let arena = Bump::new();
-    let mut parser = Parser::new(&arena, source);
+    let mut ctx = CodeGenCtx::new(&arena);
+    let mut parser = Parser::new(&arena, source, &mut ctx);
     let expr = parser.parse_exprs().unwrap();
 
     assert_eq!(expr.inner.to_sexp(&SexpPool::new()).to_string(), expected_sexp_str);
