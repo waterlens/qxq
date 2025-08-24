@@ -35,9 +35,9 @@ pub enum Sexp<'a> {
 }
 
 impl Default for SexpPool {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl SexpPool {

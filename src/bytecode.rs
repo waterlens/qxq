@@ -1,4 +1,4 @@
-use boxing::nan::NanBox;
+use bumpalo::Bump;
 
 pub struct Op8(u8);
 pub struct Op16(u16);
@@ -49,23 +49,33 @@ pub type OpCond = OpAB;
 pub type OpCondS = OpABS;
 
 impl From<u8> for Op8 {
-  fn from(x: u8) -> Self { Self(x) }
+  fn from(x: u8) -> Self {
+    Self(x)
+  }
 }
 
 impl From<u16> for Op16 {
-  fn from(x: u16) -> Self { Self(x) }
+  fn from(x: u16) -> Self {
+    Self(x)
+  }
 }
 
 impl From<u32> for Op24 {
-  fn from(x: u32) -> Self { Self { high: ((x & 0xffff00) >> 8) as u16, low: (x & 0xff) as u8 } }
+  fn from(x: u32) -> Self {
+    Self { high: ((x & 0xffff00) >> 8) as u16, low: (x & 0xff) as u8 }
+  }
 }
 
 impl From<u16> for Op24 {
-  fn from(x: u16) -> Self { Self { high: (x & 0xff00) >> 8, low: (x & 0xff) as u8 } }
+  fn from(x: u16) -> Self {
+    Self { high: (x & 0xff00) >> 8, low: (x & 0xff) as u8 }
+  }
 }
 
 impl From<u8> for Op24 {
-  fn from(x: u8) -> Self { Self { high: 0, low: x } }
+  fn from(x: u8) -> Self {
+    Self { high: 0, low: x }
+  }
 }
 
 pub enum OpKind {
@@ -73,6 +83,21 @@ pub enum OpKind {
   CInt,
   IInt,
 }
+
+/*
+trap                    {trap number}, {start register}, {end register}
+nop
+extra-argument          {payload}
+load-immediate          {value}
+load-unsigned-immediate {value}
+load-constant           {value}
+apply                   {callable base (closure)}
+call                    {callable base (function)} {function number}
+return
+return                  {return value register}
+return-n                {return value register}
+jump                    {pc offset}
+*/
 
 pub enum Bytecode {
   Trap(OpABC),
@@ -82,7 +107,7 @@ pub enum Bytecode {
   LoaduI(OpAB),
   LoadC(OpABS),
   Apply(OpAS),
-  Call(OpAS),
+  Call(OpABS),
   Retu,
   Ret(OpAS),
   Retn(OpABS),
@@ -100,12 +125,6 @@ pub enum Bytecode {
   MulDC(OpXYZ),
   DivDC(OpXYZ),
   ModDC(OpXYZ),
-
-  AddCD(OpXYZ),
-  SubCD(OpXYZ),
-  MulCD(OpXYZ),
-  DivCD(OpXYZ),
-  ModCD(OpXYZ),
 
   AddDD(OpXYZ),
   SubDD(OpXYZ),
@@ -126,21 +145,9 @@ pub enum Bytecode {
   CmpLeDC(OpCond),
   CmpGtDC(OpCond),
   CmpGeDC(OpCond),
-
-  CmpEQDD(OpCondS),
-  CmpNeDD(OpCondS),
-  CmpLtDD(OpCondS),
-  CmpLeDD(OpCondS),
-  CmpGtDD(OpCondS),
-  CmpGeDD(OpCondS),
 }
 
-pub struct Function<'a> {
-  pub strtab: Box<Box<[u8]>>,
-  pub numtab: Box<[NanBox<'a, ()>]>,
-  pub instrs: Box<[Bytecode]>,
-}
-
-pub struct Module<'a> {
-  pub functions: Box<[Function<'a>]>,
+pub struct BytecodeCtx<'a> {
+  arena: &'a Bump,
+  code: Vec<u8>,
 }
