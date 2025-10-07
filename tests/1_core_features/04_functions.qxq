@@ -1,0 +1,8 @@
+fn () 1 end;
+
+fn (x) x end;
+
+fn (x, y) x + y end;
+
+let add = fn (a, b) a + b end;
+add(1, 2)

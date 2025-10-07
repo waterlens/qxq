@@ -1,14 +1,19 @@
-use bumpalo::Bump;
+use std::fmt::{self, Display};
 
+#[derive(Copy, Clone)]
 pub struct Op8(u8);
+
+#[derive(Copy, Clone)]
 pub struct Op16(u16);
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct Op24 {
   high: u16,
   low: u8,
 }
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct OpXYZ {
   dst: Op8,
@@ -16,6 +21,7 @@ pub struct OpXYZ {
   o2: Op8,
 }
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct OpABC {
   dst: Op8,
@@ -23,23 +29,27 @@ pub struct OpABC {
   o2: Op8,
 }
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct OpAB {
   dst: Op8,
   o1: Op16,
 }
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct OpABS {
   dst: Op8,
   o1: Op8,
 }
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct OpA {
   o1: Op24,
 }
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct OpAS {
   dst: Op24,
@@ -47,6 +57,42 @@ pub struct OpAS {
 
 pub type OpCond = OpAB;
 pub type OpCondS = OpABS;
+
+pub struct Op;
+
+impl Op {
+  pub fn xyz(dst: u8, o1: u8, o2: u8) -> OpXYZ {
+    OpXYZ { dst: dst.into(), o1: o1.into(), o2: o2.into() }
+  }
+
+  pub fn abc(dst: u8, o1: u8, o2: u8) -> OpABC {
+    OpABC { dst: dst.into(), o1: o1.into(), o2: o2.into() }
+  }
+
+  pub fn ab(dst: u8, o1: u16) -> OpAB {
+    OpAB { dst: dst.into(), o1: o1.into() }
+  }
+
+  pub fn abs(dst: u8, o1: u8) -> OpABS {
+    OpABS { dst: dst.into(), o1: o1.into() }
+  }
+
+  pub fn a(o1: u32) -> OpA {
+    OpA { o1: o1.into() }
+  }
+
+  pub fn r#as(dst: u32) -> OpAS {
+    OpAS { dst: dst.into() }
+  }
+
+  pub fn cond(dst: u8, o1: u16) -> OpCond {
+    OpCond { dst: dst.into(), o1: o1.into() }
+  }
+
+  pub fn conds(dst: u8, o1: u8) -> OpCondS {
+    OpCondS { dst: dst.into(), o1: o1.into() }
+  }
+}
 
 impl From<u8> for Op8 {
   fn from(x: u8) -> Self {
@@ -105,7 +151,7 @@ pub enum Bytecode {
   Exta(Op24),
   LoadI(OpAB),
   LoaduI(OpAB),
-  LoadC(OpABS),
+  LoadC(OpAB),
   Apply(OpAS),
   Call(OpABS),
   Retu,
@@ -147,7 +193,149 @@ pub enum Bytecode {
   CmpGeDC(OpCond),
 }
 
-pub struct BytecodeCtx<'a> {
-  arena: &'a Bump,
-  code: Vec<u8>,
+pub struct BytecodeCtx {
+  code: Vec<Bytecode>,
+}
+
+impl Default for BytecodeCtx {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BytecodeCtx {
+  pub fn new() -> Self {
+    Self { code: Vec::new() }
+  }
+
+  pub fn push(&mut self, code: Bytecode) {
+    self.code.push(code);
+  }
+}
+
+impl Display for BytecodeCtx {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    for code in self.code.iter() {
+      writeln!(f, "{code}")?;
+    }
+    Ok(())
+  }
+}
+
+impl Display for Op8 {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", self.0)
+  }
+}
+
+impl Display for Op16 {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", self.0)
+  }
+}
+
+impl Display for Op24 {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let val = (self.high as u32) << 8 | self.low as u32;
+    write!(f, "{}", val)
+  }
+}
+
+impl Display for Bytecode {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    use Bytecode::*;
+    let padding = 10;
+    match self {
+      Trap(op) => write!(f, "{:<padding$} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
+      Nop => write!(f, "nop"),
+      Exta(op) => write!(f, "{:<padding$} #{}", "exta", op),
+      LoadI(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, #{}", "loadi", op.dst, o1)
+      }
+      LoaduI(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, #{}", "loadui", op.dst, o1)
+      }
+      LoadC(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, @{}", "loadc", op.dst, o1)
+      }
+      Apply(op) => write!(f, "{:<padding$} r{}", "apply", op.dst),
+      Call(op) => write!(f, "{:<padding$} r{}, f{}", "call", op.dst, op.o1),
+      Retu => write!(f, "retu"),
+      Ret(op) => write!(f, "{:<padding$} r{}", "ret", op.dst),
+      Retn(op) => write!(f, "{:<padding$} r{}", "retn", op.dst),
+      Jmp(op) => write!(f, "{:<padding$} #{}", "jmp", op.o1),
+      Goto(op) => write!(f, "{:<padding$} #{}", "goto", op.dst),
+
+      AddDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "add.di", op.dst, op.o1, op.o2),
+      SubDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
+      MulDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "mul.di", op.dst, op.o1, op.o2),
+      DivDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "div.di", op.dst, op.o1, op.o2),
+      ModDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "mod.di", op.dst, op.o1, op.o2),
+
+      AddDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "add.dc", op.dst, op.o1, op.o2),
+      SubDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "sub.dc", op.dst, op.o1, op.o2),
+      MulDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "mul.dc", op.dst, op.o1, op.o2),
+      DivDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "div.dc", op.dst, op.o1, op.o2),
+      ModDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "mod.dc", op.dst, op.o1, op.o2),
+
+      AddDD(op) => write!(f, "{:<padding$} r{}, r{}, r{}", "add.dd", op.dst, op.o1, op.o2),
+      SubDD(op) => write!(f, "{:<padding$} r{}, r{}, r{}", "sub.dd", op.dst, op.o1, op.o2),
+      MulDD(op) => write!(f, "{:<padding$} r{}, r{}, r{}", "mul.dd", op.dst, op.o1, op.o2),
+      DivDD(op) => write!(f, "{:<padding$} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
+      ModDD(op) => write!(f, "{:<padding$} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
+
+      CmpEqDI(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, #{}", "cmp.eq.di", op.dst, o1)
+      }
+      CmpNeDI(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, #{}", "cmp.ne.di", op.dst, o1)
+      }
+      CmpLtDI(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, #{}", "cmp.lt.di", op.dst, o1)
+      }
+      CmpLeDI(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, #{}", "cmp.le.di", op.dst, o1)
+      }
+      CmpGtDI(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, #{}", "cmp.gt.di", op.dst, o1)
+      }
+      CmpGeDI(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, #{}", "cmp.ge.di", op.dst, o1)
+      }
+
+      CmpEqDC(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, @{}", "cmp.eq.dc", op.dst, o1)
+      }
+      CmpNeDC(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, @{}", "cmp.ne.dc", op.dst, o1)
+      }
+      CmpLtDC(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, @{}", "cmp.lt.dc", op.dst, o1)
+      }
+      CmpLeDC(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, @{}", "cmp.le.dc", op.dst, o1)
+      }
+      CmpGtDC(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, @{}", "cmp.gt.dc", op.dst, o1)
+      }
+      CmpGeDC(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, @{}", "cmp.ge.dc", op.dst, o1)
+      }
+    }
+  }
 }

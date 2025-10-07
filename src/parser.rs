@@ -60,7 +60,6 @@ impl Affinity {
     "!=" => (Self::INFIX_START + 1, Self::INFIX_START + 2),
     "<=" => (Self::INFIX_START + 1, Self::INFIX_START + 2),
     ">=" => (Self::INFIX_START + 1, Self::INFIX_START + 2),
-    "@" => (Self::INFIX_START + 8, Self::INFIX_START + 7),
     "+" => (Self::INFIX_START + 3, Self::INFIX_START + 4),
     "-" => (Self::INFIX_START + 3, Self::INFIX_START + 4),
     "*" => (Self::INFIX_START + 5, Self::INFIX_START + 6),
@@ -158,7 +157,7 @@ pub struct Parser<'a> {
   arena: &'a Bump,
   tokenizer: Tokenizer<'a>,
   token: Option<&'a Token<'a>>,
-  ctx: &'a mut CodeGenCtx<'a>,
+  ctx: CodeGenCtx<'a>,
 }
 
 pub struct PeekResult<'a, T> {
@@ -169,9 +168,13 @@ type PeekToken<'a> = Result<PeekResult<'a, Token<'a>>>;
 type PeekExpr<'a> = Result<PeekResult<'a, Expr<'a>>>;
 
 impl<'a> Parser<'a> {
-  pub fn new(arena: &'a Bump, src: &'a str, ctx: &'a mut CodeGenCtx<'a>) -> Self {
+  pub fn new(arena: &'a Bump, src: &'a str, ctx: CodeGenCtx<'a>) -> Self {
     let tokenizer: Tokenizer<'a> = Tokenizer::new(arena, src);
     Self { arena, tokenizer, token: None, ctx }
+  }
+
+  pub fn to_codegen(self) -> CodeGenCtx<'a> {
+    self.ctx
   }
 
   fn skip_token(&mut self) {
@@ -411,7 +414,7 @@ impl<'a> Parser<'a> {
           args: arena.alloc_slice_clone(&[rhs_expr.inner]),
         });
 
-        self.ctx.emit_prefix_op(op);
+        self.ctx.emit_prefix_op_pre(op);
 
         e
       }
@@ -592,6 +595,8 @@ impl<'a> Parser<'a> {
 
         self.skip_token();
 
+        self.ctx.emit_infix_op_pre(op_str);
+
         let rhs = self.parse_expr_with_affinity(raff)?;
 
         let old_lhs: &Expr = lhs;
@@ -663,8 +668,8 @@ mod tests {
 
   fn test_parse_exprs(source: &str, expected_sexp_str: &str) {
     let arena = Bump::new();
-    let mut ctx = CodeGenCtx::new(&arena);
-    let mut parser = Parser::new(&arena, source, &mut ctx);
+    let ctx = CodeGenCtx::new(&arena);
+    let mut parser = Parser::new(&arena, source, ctx);
     let expr = parser.parse_exprs().unwrap();
 
     assert_eq!(expr.inner.to_sexp(&SexpPool::new()).to_string(), expected_sexp_str);

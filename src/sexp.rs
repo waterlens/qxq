@@ -45,7 +45,7 @@ impl SexpPool {
     SexpPool { arena: Bump::new() }
   }
 
-  pub fn atom<T: AsRef<str>>(&self, s: T) -> Sexp {
+  pub fn atom<T: AsRef<str>>(&self, s: T) -> Sexp<'_> {
     Sexp::Atom(self.arena.alloc_str(s.as_ref()))
   }
 

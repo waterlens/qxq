@@ -11,7 +11,7 @@ impl Diagnostic {
     Self {}
   }
 
-  pub fn error(&self, message: &str) {
+  pub fn error(&self, message: &str) -> ! {
     panic!("error: {message}");
   }
 }

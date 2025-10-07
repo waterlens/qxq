@@ -1,0 +1,19 @@
+let greeting = "hello";
+let name = "world";
+
+let greet = fn (n) greeting + ", " + n + "!" end;
+
+greet(name);
+
+let repeat = fn (s, n)
+  let rec iter = fn (i, acc)
+    if i >= n then
+      acc
+    else
+      iter(i + 1, acc + s)
+    end
+  end;
+  iter(0, "")
+end;
+
+repeat("ha", 3)

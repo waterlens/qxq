@@ -1,0 +1,21 @@
+let factorial = fn (n)
+  let rec iter = fn (i, acc)
+    if i > n then
+      acc
+    else
+      iter(i + 1, acc * i)
+    end
+  end;
+  iter(1, 1)
+end;
+
+let rec fib = fn (n)
+  if n <= 1 then
+    n
+  else
+    fib(n - 1) + fib(n - 2)
+  end
+end;
+
+factorial(5);
+fib(10)
