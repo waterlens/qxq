@@ -65,17 +65,9 @@ impl Display for ConstantPool {
 #[repr(u8)]
 enum ValDesc {
   Slot(u8),
-  Imm8(i8),
   IConst(u16),
   SConst(u16),
   Upvalue { idx: u8, level: u16 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u8)]
-enum DestDesc {
-  UnusedSlot(u8),
-  ClaimedSlot(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,7 +82,7 @@ struct ValInfo<'a> {
 }
 
 struct Frame<'a> {
-  regs: SmallVec<[ValInfo<'a>; 8]>,
+  regs: Vec<ValInfo<'a>>,
   symbols: IndexMap<TokenStr<'a>, usize>,
 }
 
@@ -100,7 +92,7 @@ struct Stack<'a> {
 
 impl<'a> Frame<'a> {
   fn new() -> Self {
-    Self { regs: smallvec![], symbols: IndexMap::new() }
+    Self { regs: vec![], symbols: IndexMap::new() }
   }
 }
 
@@ -111,13 +103,13 @@ impl<'a> Stack<'a> {
 }
 
 struct OperandStacks {
-  operands: SmallVec<[ValDesc; 8]>,
-  dest_hints: SmallVec<[DestDesc; 8]>,
+  operands: Vec<ValDesc>,
+  destinations: Vec<u8>,
 }
 
 impl OperandStacks {
   fn new() -> Self {
-    Self { operands: smallvec![], dest_hints: smallvec![] }
+    Self { operands: vec![], destinations: vec![] }
   }
 }
 
@@ -148,30 +140,6 @@ macro_rules! free_reg {
   };
 }
 
-macro_rules! operand_push {
-  ($self:ident, $value:expr) => {
-    $self.operand_stacks.operands.push($value)
-  };
-}
-
-macro_rules! dest_push {
-  ($self:ident, $value:expr) => {
-    $self.operand_stacks.dest_hints.push($value)
-  };
-}
-
-macro_rules! dest_pop {
-  ($self:ident) => {
-    $self.operand_stacks.dest_hints.pop()
-  };
-}
-
-macro_rules! dest_peek {
-  ($self:ident) => {
-    $self.operand_stacks.dest_hints.last()
-  };
-}
-
 macro_rules! reg_push {
   ($self:ident, $value:expr) => {
     frame_top!($self).regs.push($value)
@@ -187,6 +155,30 @@ macro_rules! reg_pop {
 macro_rules! reg_top {
   ($self:ident) => {
     frame_top!($self).regs.last()
+  };
+}
+
+macro_rules! dest_push {
+  ($self:ident, $value:expr) => {
+    $self.operand_stacks.destinations.push($value)
+  };
+}
+
+macro_rules! dest_pop {
+  ($self:ident) => {
+    $self.operand_stacks.destinations.pop()
+  };
+}
+
+macro_rules! dest_peek {
+  ($self:ident) => {
+    $self.operand_stacks.destinations.last()
+  };
+}
+
+macro_rules! operand_push {
+  ($self:ident, $value:expr) => {
+    $self.operand_stacks.operands.push($value)
   };
 }
 
@@ -250,48 +242,63 @@ macro_rules! deallocate_temporary {
   }};
 }
 
+macro_rules! write_operand_to_slot {
+  ($self:ident, $dst:expr) => {{
+    let opr = operand_pop!($self);
+    match opr {
+      Some(ValDesc::Slot(r)) => {
+        $self.bc.push(Bytecode::Move(Op::abs($dst, r)));
+        Ok(())
+      }
+      Some(ValDesc::IConst(i)) => {
+        $self.bc.push(Bytecode::LoadC(Op::ab($dst, i)));
+        Ok(())
+      }
+      Some(ValDesc::SConst(s)) => todo!(),
+      Some(ValDesc::Upvalue { idx, level }) => todo!(),
+      None => Err(anyhow::anyhow!(
+        "write_operand_to_slot: the expression does not produce a value, but you used it in a context requiring a value"
+      )),
+    }
+  }};
+}
+
+macro_rules! reify_operand {
+  ($self:ident) => {{
+    let opr = operand_pop!($self);
+    match opr {
+      Some(ValDesc::Slot(r)) => Ok((r, false)),
+      Some(ValDesc::IConst(i)) => {
+        let dst = allocate_temporary!($self);
+        $self.bc.push(Bytecode::LoadC(Op::ab(dst, i as u16)));
+        Ok((dst, true))
+      }
+      Some(ValDesc::SConst(s)) => todo!(),
+      Some(ValDesc::Upvalue { idx, level }) => todo!(),
+      None => Err(anyhow::anyhow!(
+        "reify_operand: the expression does not produce a value, but you used it in a context requiring a value"
+      )),
+    }
+  }};
+}
+
 macro_rules! impl_infix_op {
   ($self:ident, $operands:ident, ($($opDD:tt)*), ($($opDI:tt)*)) => {{
     let dst;
-    use DestDesc::*;
-    let mut claim_dest = None;
     match $operands {
       (ValDesc::Slot(r1), ValDesc::Slot(r2)) => {
-        match dest_peek!($self) {
-          Some(UnusedSlot(r)) => {
-            dst = *r;
-            $self.bc.push($($opDD)*(Op::xyz(dst, r1, r2)));
-            deallocate_temporary!($self, r1);
-            deallocate_temporary!($self, r2);
-            claim_dest = Some(*r);
-          },
-          Some(ClaimedSlot(_)) | None => {
-            dst = std::cmp::min(r1, r2);
-            $self.bc.push($($opDD)*(Op::xyz(dst, r1, r2)));
-            deallocate_temporary!($self, std::cmp::max(r1, r2));
-          }
-        }
+        dst = std::cmp::min(r1, r2);
+        $self.bc.push($($opDD)*(Op::xyz(dst, r1, r2)));
+        deallocate_temporary!($self, std::cmp::max(r1, r2));
       }
       (ValDesc::Slot(r1), ValDesc::IConst(i)) => {
-        match dest_peek!($self) {
-          Some(UnusedSlot(r)) => {
-            dst = *r;
-            deallocate_temporary!($self, r1);
-            claim_dest = Some(*r);
-          }
-          Some(ClaimedSlot(_)) | None => { dst = r1; }
-        }
+        dst = allocate_temporary!($self);
         $self.bc.push(Bytecode::LoadC(Op::ab(dst, i)));
         $self.bc.push($($opDD)*(Op::xyz(dst, r1, dst)));
+        deallocate_temporary!($self, r1);
       }
       (ValDesc::IConst(i1), ValDesc::IConst(i2)) => {
-        match dest_peek!($self) {
-          Some(UnusedSlot(r)) => {
-            dst = *r;
-            claim_dest = Some(*r);
-          }
-          Some(ClaimedSlot(_)) | None => dst = allocate_temporary!($self),
-        }
+        dst = allocate_temporary!($self);
         let dst2 = allocate_temporary!($self);
         $self.bc.push(Bytecode::LoadC(Op::ab(dst, i1)));
         $self.bc.push(Bytecode::LoadC(Op::ab(dst2, i2)));
@@ -299,24 +306,12 @@ macro_rules! impl_infix_op {
         deallocate_temporary!($self, dst2);
       }
       (ValDesc::IConst(i), ValDesc::Slot(r1)) => {
-        match dest_peek!($self) {
-          Some(UnusedSlot(r)) => {
-            dst = *r;
-            claim_dest = Some(*r);
-          }
-          Some(ClaimedSlot(_)) | None => {
-            dst = allocate_temporary!($self);
-          }
-        }
+        dst = allocate_temporary!($self);
         $self.bc.push(Bytecode::LoadC(Op::ab(dst, i)));
         $self.bc.push($($opDD)*(Op::xyz(dst, dst, r1)));
         deallocate_temporary!($self, r1);
       }
       _ => $self.diagnostic.error(&format!("unsupported operands: {:?}", $operands)),
-    }
-    if let Some(r) = claim_dest {
-      dest_pop!($self);
-      dest_push!($self, DestDesc::ClaimedSlot(r));
     }
     operand_push!($self, ValDesc::Slot(dst));
   }};
@@ -396,8 +391,6 @@ impl<'a> CodeGenCtx<'a> {
 
   pub fn emit_postfix_op(&mut self, op: &str) {}
 
-  pub fn emit_infix_op_pre(&mut self, op: &str) {}
-
   pub fn emit_infix_op(&mut self, op: &str) {
     self.codegen_action();
     let operands = operand_pop2!(self);
@@ -418,34 +411,78 @@ impl<'a> CodeGenCtx<'a> {
     self.codegen_action();
     let dst =
       if is_rec { allocate_named!(self, |_| name.as_ref()) } else { allocate_temporary!(self) };
-    dest_push!(self, DestDesc::UnusedSlot(dst));
+    dest_push!(self, dst);
   }
 
-  pub fn emit_binding_end(&mut self, is_rec: bool, name: TokenStr<'a>) {
+  pub fn finish_binder(&mut self, is_rec: bool, name: TokenStr<'a>) {
     self.codegen_action();
-
-    match dest_pop!(self) {
-      Some(DestDesc::ClaimedSlot(dst)) => {
-        if is_rec {
-          reify_temporary!(self, name, dst as usize);
-        }
-      }
-      Some(DestDesc::UnusedSlot(dst)) => {
-        deallocate_temporary!(self, dst as usize);
-      }
-      None => unreachable!("at least one destination hint must be present"),
+    let dst = dest_pop!(self).unwrap();
+    write_operand_to_slot!(self, dst).unwrap_or_else(|e| self.diagnostic.error(&e.to_string()));
+    if !is_rec {
+      reify_temporary!(self, name, dst as usize);
     }
   }
 
-  pub fn emit_if_cond(&mut self) {}
+  pub fn emit_if_begin(&mut self) {
+    self.codegen_action();
+  }
 
-  pub fn emit_if_then(&mut self) {}
+  pub fn emit_if_cond(&mut self) {
+    self.codegen_action();
+    let (opr1, is_tmp) =
+      reify_operand!(self).unwrap_or_else(|e| self.diagnostic.error(&e.to_string()));
+    self.bc.push(Bytecode::CmpEqDI(Op::cond(opr1, 0)));
+    self.bc.backpatch_next();
+    self.bc.push(Bytecode::Nop); // jump to the else block
+    if is_tmp {
+      deallocate_temporary!(self, opr1);
+    }
+  }
 
-  pub fn emit_if_else(&mut self) {}
+  pub fn emit_if_then(&mut self) {
+    self.codegen_action();
+    let first_jump_pc = self.bc.backpatch_pop();
+    self.bc.edit(first_jump_pc, Bytecode::Jmp(Op::a(self.bc.pc() - first_jump_pc)));
+    let (opr1, is_tmp) =
+      reify_operand!(self).unwrap_or_else(|e| self.diagnostic.error(&e.to_string()));
+    if let Some(dst) = dest_peek!(self) {
+      self.bc.push(Bytecode::Move(Op::abs(*dst, opr1)));
+    }
+    if is_tmp {
+      deallocate_temporary!(self, opr1);
+    }
+    self.bc.backpatch_next();
+    self.bc.push(Bytecode::Nop); // skip the else block
+  }
 
-  pub fn emit_if_done(&mut self) {}
+  pub fn emit_if_done(&mut self) {
+    self.codegen_action();
+    let second_jump_pc = self.bc.backpatch_pop();
+    self.bc.edit(second_jump_pc, Bytecode::Jmp(Op::a(self.bc.pc() - second_jump_pc - 1)));
+    let (opr1, is_tmp) =
+      reify_operand!(self).unwrap_or_else(|e| self.diagnostic.error(&e.to_string()));
+    if let Some(dst) = dest_peek!(self) {
+      self.bc.push(Bytecode::Move(Op::abs(*dst, opr1)));
+      operand_push!(self, ValDesc::Slot(*dst));
+    }
+    if is_tmp {
+      deallocate_temporary!(self, opr1);
+    }
+  }
 
   pub fn emit_apply(&mut self, func: ExprRef<'a>) {}
+
+  pub fn finish_expr(&mut self) {
+    self.operand_stacks.operands.clear();
+  }
+
+  pub fn enter_scope(&mut self) {
+    self.stack_frame.frames.push(Frame::new());
+  }
+
+  pub fn leave_scope(&mut self) {
+    self.stack_frame.frames.pop();
+  }
 }
 
 impl<'a> Display for CodeGenCtx<'a> {

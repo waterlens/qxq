@@ -152,6 +152,7 @@ pub enum Bytecode {
   LoadI(OpAB),
   LoaduI(OpAB),
   LoadC(OpAB),
+  Move(OpABS),
   Apply(OpAS),
   Call(OpABS),
   Retu,
@@ -196,6 +197,7 @@ macro_rules! commutative {
 
 pub struct BytecodeCtx {
   code: Vec<Bytecode>,
+  backpatch_pc: Vec<u32>,
 }
 
 impl Default for BytecodeCtx {
@@ -206,11 +208,27 @@ impl Default for BytecodeCtx {
 
 impl BytecodeCtx {
   pub fn new() -> Self {
-    Self { code: Vec::new() }
+    Self { code: Vec::new(), backpatch_pc: Vec::new() }
   }
 
   pub fn push(&mut self, code: Bytecode) {
     self.code.push(code);
+  }
+
+  pub fn backpatch_next(&mut self) {
+    self.backpatch_pc.push(self.code.len() as u32);
+  }
+
+  pub fn backpatch_pop(&mut self) -> u32 {
+    self.backpatch_pc.pop().unwrap()
+  }
+
+  pub fn pc(&self) -> u32 {
+    self.code.len() as u32
+  }
+
+  pub fn edit(&mut self, pc: u32, code: Bytecode) {
+    self.code[pc as usize] = code;
   }
 }
 
@@ -261,6 +279,10 @@ impl Display for Bytecode {
       LoadC(op) => {
         let o1 = op.o1;
         write!(f, "{:<padding$} r{}, @{}", "loadc", op.dst, o1)
+      }
+      Move(op) => {
+        let o1 = op.o1;
+        write!(f, "{:<padding$} r{}, r{}", "move", op.dst, o1)
       }
       Apply(op) => write!(f, "{:<padding$} r{}", "apply", op.dst),
       Call(op) => write!(f, "{:<padding$} r{}, f{}", "call", op.dst, op.o1),

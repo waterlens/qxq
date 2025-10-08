@@ -2,6 +2,8 @@
 name = "qxq"
 version = "0.1.0"
 edition = "2021"
+description = "A playground for interpreters and JIT compilers"
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.86"

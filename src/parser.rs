@@ -477,11 +477,13 @@ impl<'a> Parser<'a> {
 
           let e = arena.alloc(ExprCon::Bind { rec: is_rec, name, expr: body.inner });
 
-          self.ctx.emit_binding_end(is_rec, name);
+          self.ctx.finish_binder(is_rec, name);
 
           e
         }
         Keyword::If => {
+          self.ctx.emit_if_begin();
+
           let condition = self.parse_expr()?;
 
           let _ = self.expect_keyword(Keyword::Then, true)?;
@@ -505,8 +507,6 @@ impl<'a> Parser<'a> {
           while self.peek_newline() {
             self.skip_token();
           }
-
-          self.ctx.emit_if_else();
 
           let else_branch = self.parse_expr()?;
 
@@ -602,8 +602,6 @@ impl<'a> Parser<'a> {
 
         self.skip_token();
 
-        self.ctx.emit_infix_op_pre(op_str);
-
         let rhs = self.parse_expr_with_affinity(raff)?;
 
         let old_lhs: &Expr = lhs;
@@ -627,13 +625,20 @@ impl<'a> Parser<'a> {
     Ok(PeekResult { inner: lhs })
   }
 
+  // for code generation purpose
+  fn parse_expr_element<'t>(&'t mut self) -> PeekExpr<'a> {
+    let e = self.parse_expr();
+    self.ctx.finish_expr();
+    e
+  }
+
   fn parse_exprs<'t>(&'t mut self) -> PeekExpr<'a> {
     let arena = self.arena;
     while self.peek_newline() {
       self.skip_token();
     }
 
-    let first_expr = self.parse_expr()?;
+    let first_expr = self.parse_expr_element()?;
     if !self.peek_operator(";", false) {
       return Ok(first_expr);
     }
@@ -651,7 +656,7 @@ impl<'a> Parser<'a> {
         self.skip_token();
       }
 
-      let next_expr = self.parse_expr()?;
+      let next_expr = self.parse_expr_element()?;
       exprs.push(next_expr.inner);
     }
 

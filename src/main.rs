@@ -35,7 +35,7 @@ fn show_message() {
   );
   println!("QxQ REPL Version 0.1.0");
   println!("Copyright (c) 2024-{} waterlens", chrono::Local::now().format("%Y"));
-  println!("");
+  println!();
 }
 
 fn run_repl() -> Result<()> {
