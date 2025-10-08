@@ -166,12 +166,6 @@ pub enum Bytecode {
   DivDI(OpXYZ),
   ModDI(OpXYZ),
 
-  AddDC(OpXYZ),
-  SubDC(OpXYZ),
-  MulDC(OpXYZ),
-  DivDC(OpXYZ),
-  ModDC(OpXYZ),
-
   AddDD(OpXYZ),
   SubDD(OpXYZ),
   MulDD(OpXYZ),
@@ -191,6 +185,13 @@ pub enum Bytecode {
   CmpLeDC(OpCond),
   CmpGtDC(OpCond),
   CmpGeDC(OpCond),
+}
+
+#[macro_export]
+macro_rules! commutative {
+  (Bytecode::AddDD) => { true };
+  (Bytecode::MulDD) => { true };
+  ($($op:tt)*) => { false };
 }
 
 pub struct BytecodeCtx {
@@ -273,14 +274,8 @@ impl Display for Bytecode {
       SubDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
       MulDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "mul.di", op.dst, op.o1, op.o2),
       DivDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "div.di", op.dst, op.o1, op.o2),
+
       ModDI(op) => write!(f, "{:<padding$} r{}, r{}, #{}", "mod.di", op.dst, op.o1, op.o2),
-
-      AddDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "add.dc", op.dst, op.o1, op.o2),
-      SubDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "sub.dc", op.dst, op.o1, op.o2),
-      MulDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "mul.dc", op.dst, op.o1, op.o2),
-      DivDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "div.dc", op.dst, op.o1, op.o2),
-      ModDC(op) => write!(f, "{:<padding$} r{}, r{}, @{}", "mod.dc", op.dst, op.o1, op.o2),
-
       AddDD(op) => write!(f, "{:<padding$} r{}, r{}, r{}", "add.dd", op.dst, op.o1, op.o2),
       SubDD(op) => write!(f, "{:<padding$} r{}, r{}, r{}", "sub.dd", op.dst, op.o1, op.o2),
       MulDD(op) => write!(f, "{:<padding$} r{}, r{}, r{}", "mul.dd", op.dst, op.o1, op.o2),

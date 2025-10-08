@@ -346,7 +346,7 @@ impl<'a> Parser<'a> {
       }
       Identifer => {
         let e = arena.alloc(ExprCon::Ident(TokenStr::from_span(arena, lhs_token.inner.span)));
-        self.ctx.emit_ident_use_pre(TokenStr::from_span(arena, lhs_token.inner.span));
+        self.ctx.emit_ident_use(TokenStr::from_span(arena, lhs_token.inner.span));
         e
       }
       PairedOpen(po) => {
@@ -466,9 +466,10 @@ impl<'a> Parser<'a> {
           if is_rec {
             self.skip_token();
           }
-
           let name = self.next_ident(false)?;
           let name = TokenStr::from_span(arena, name.inner.span);
+
+          self.ctx.emit_binder(is_rec, name);
 
           let _ = self.expect_operator("=", false)?;
 
@@ -476,7 +477,7 @@ impl<'a> Parser<'a> {
 
           let e = arena.alloc(ExprCon::Bind { rec: is_rec, name, expr: body.inner });
 
-          self.ctx.emit_bind(is_rec, name, body.inner);
+          self.ctx.emit_binding_end(is_rec, name);
 
           e
         }
@@ -489,11 +490,15 @@ impl<'a> Parser<'a> {
             self.skip_token();
           }
 
+          self.ctx.emit_if_cond();
+
           let then_branch = self.parse_expr()?;
 
           while self.peek_newline() {
             self.skip_token();
           }
+
+          self.ctx.emit_if_then();
 
           let _ = self.expect_keyword(Keyword::Else, true)?;
 
@@ -501,13 +506,15 @@ impl<'a> Parser<'a> {
             self.skip_token();
           }
 
+          self.ctx.emit_if_else();
+
           let else_branch = self.parse_expr()?;
 
           let _ = self.expect_keyword(Keyword::End, true)?;
 
           let e = arena.alloc(ExprCon::If(condition.inner, then_branch.inner, else_branch.inner));
 
-          self.ctx.emit_if(condition.inner, then_branch.inner, else_branch.inner);
+          self.ctx.emit_if_done();
 
           e
         }
@@ -563,7 +570,7 @@ impl<'a> Parser<'a> {
               args: arena.alloc_slice_clone(&exprs),
             });
 
-            self.ctx.emit_op_apply(op, &exprs);
+            self.ctx.emit_op_apply(op);
           } else {
             lhs = arena.alloc(ExprCon::Apply {
               func: lhs,
@@ -571,7 +578,7 @@ impl<'a> Parser<'a> {
               args: arena.alloc_slice_clone(&exprs),
             });
 
-            self.ctx.emit_apply(lhs, &exprs);
+            self.ctx.emit_apply(lhs);
           }
         } else {
           let old_lhs: &Expr = lhs;
