@@ -452,7 +452,7 @@ impl<'a> Display for CodeGenCtx<'a> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     writeln!(f, "{}", self.constant_pool)?;
     writeln!(f, "--- Bytecode ---")?;
-    writeln!(f, "{}", self.bc)
+    write!(f, "{}", self.bc)
   }
 }
 
