@@ -5,7 +5,6 @@ use std::{
 
 use bumpalo::Bump;
 use indexmap::IndexMap;
-use smallvec::{smallvec, SmallVec};
 
 use crate::{
   bytecode::{Bytecode, BytecodeCtx, Op},
@@ -242,46 +241,6 @@ macro_rules! deallocate_temporary {
   }};
 }
 
-macro_rules! write_operand_to_slot {
-  ($self:ident, $dst:expr) => {{
-    let opr = operand_pop!($self);
-    match opr {
-      Some(ValDesc::Slot(r)) => {
-        $self.bc.push(Bytecode::Move(Op::abs($dst, r)));
-        Ok(())
-      }
-      Some(ValDesc::IConst(i)) => {
-        $self.bc.push(Bytecode::LoadC(Op::ab($dst, i)));
-        Ok(())
-      }
-      Some(ValDesc::SConst(s)) => todo!(),
-      Some(ValDesc::Upvalue { idx, level }) => todo!(),
-      None => Err(anyhow::anyhow!(
-        "write_operand_to_slot: the expression does not produce a value, but you used it in a context requiring a value"
-      )),
-    }
-  }};
-}
-
-macro_rules! reify_operand {
-  ($self:ident) => {{
-    let opr = operand_pop!($self);
-    match opr {
-      Some(ValDesc::Slot(r)) => Ok((r, false)),
-      Some(ValDesc::IConst(i)) => {
-        let dst = allocate_temporary!($self);
-        $self.bc.push(Bytecode::LoadC(Op::ab(dst, i as u16)));
-        Ok((dst, true))
-      }
-      Some(ValDesc::SConst(s)) => todo!(),
-      Some(ValDesc::Upvalue { idx, level }) => todo!(),
-      None => Err(anyhow::anyhow!(
-        "reify_operand: the expression does not produce a value, but you used it in a context requiring a value"
-      )),
-    }
-  }};
-}
-
 macro_rules! impl_infix_op {
   ($self:ident, $operands:ident, ($($opDD:tt)*), ($($opDI:tt)*)) => {{
     let dst;
@@ -417,10 +376,7 @@ impl<'a> CodeGenCtx<'a> {
   pub fn finish_binder(&mut self, is_rec: bool, name: TokenStr<'a>) {
     self.codegen_action();
     let dst = dest_pop!(self).unwrap();
-    write_operand_to_slot!(self, dst).unwrap_or_else(|e| self.diagnostic.error(&e.to_string()));
-    if !is_rec {
-      reify_temporary!(self, name, dst as usize);
-    }
+    // TODO
   }
 
   pub fn emit_if_begin(&mut self) {
@@ -429,28 +385,17 @@ impl<'a> CodeGenCtx<'a> {
 
   pub fn emit_if_cond(&mut self) {
     self.codegen_action();
-    let (opr1, is_tmp) =
-      reify_operand!(self).unwrap_or_else(|e| self.diagnostic.error(&e.to_string()));
-    self.bc.push(Bytecode::CmpEqDI(Op::cond(opr1, 0)));
+    // TODO
+    self.bc.push(Bytecode::CmpEqDI(Op::cond(todo!("condition"), 0)));
     self.bc.backpatch_next();
     self.bc.push(Bytecode::Nop); // jump to the else block
-    if is_tmp {
-      deallocate_temporary!(self, opr1);
-    }
   }
 
   pub fn emit_if_then(&mut self) {
     self.codegen_action();
     let first_jump_pc = self.bc.backpatch_pop();
     self.bc.edit(first_jump_pc, Bytecode::Jmp(Op::a(self.bc.pc() - first_jump_pc)));
-    let (opr1, is_tmp) =
-      reify_operand!(self).unwrap_or_else(|e| self.diagnostic.error(&e.to_string()));
-    if let Some(dst) = dest_peek!(self) {
-      self.bc.push(Bytecode::Move(Op::abs(*dst, opr1)));
-    }
-    if is_tmp {
-      deallocate_temporary!(self, opr1);
-    }
+    // TODO
     self.bc.backpatch_next();
     self.bc.push(Bytecode::Nop); // skip the else block
   }
@@ -459,15 +404,7 @@ impl<'a> CodeGenCtx<'a> {
     self.codegen_action();
     let second_jump_pc = self.bc.backpatch_pop();
     self.bc.edit(second_jump_pc, Bytecode::Jmp(Op::a(self.bc.pc() - second_jump_pc - 1)));
-    let (opr1, is_tmp) =
-      reify_operand!(self).unwrap_or_else(|e| self.diagnostic.error(&e.to_string()));
-    if let Some(dst) = dest_peek!(self) {
-      self.bc.push(Bytecode::Move(Op::abs(*dst, opr1)));
-      operand_push!(self, ValDesc::Slot(*dst));
-    }
-    if is_tmp {
-      deallocate_temporary!(self, opr1);
-    }
+    // TODO
   }
 
   pub fn emit_apply(&mut self, func: ExprRef<'a>) {}
