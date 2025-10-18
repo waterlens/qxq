@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use hashbrown::HashMap;
+
 #[derive(Copy, Clone)]
 pub struct Op8(u8);
 
@@ -190,41 +192,67 @@ pub enum Bytecode {
 
 #[macro_export]
 macro_rules! commutative {
-  (Bytecode::AddDD) => { true };
-  (Bytecode::MulDD) => { true };
-  ($($op:tt)*) => { false };
+  (Bytecode::AddDD) => {
+    true
+  };
+  (Bytecode::MulDD) => {
+    true
+  };
+  ($($op:tt)*) => {
+    false
+  };
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Label(i32);
+
+impl Label {
+  pub fn new() -> Self {
+    Self(-1) // invalid label
+  }
+  pub fn is_valid(&self) -> bool {
+    self.0 >= 0
+  }
 }
 
 pub struct BytecodeCtx {
   code: Vec<Bytecode>,
-  backpatch_pc: Vec<u32>,
+  relocate: Vec<(u32, Label)>, // (pc to be relocated, label)
+  labels: HashMap<Label, u32>, // (label, the pc of the label)
+  fresh: i32,
 }
 
 impl Default for BytecodeCtx {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl BytecodeCtx {
   pub fn new() -> Self {
-    Self { code: Vec::new(), backpatch_pc: Vec::new() }
+    Self { code: Vec::new(), relocate: Vec::new(), labels: HashMap::new(), fresh: 0 }
   }
 
   pub fn push(&mut self, code: Bytecode) {
     self.code.push(code);
   }
 
-  pub fn backpatch_next(&mut self) {
-    self.backpatch_pc.push(self.code.len() as u32);
-  }
-
-  pub fn backpatch_pop(&mut self) -> u32 {
-    self.backpatch_pc.pop().unwrap()
-  }
-
   pub fn pc(&self) -> u32 {
     self.code.len() as u32
+  }
+
+  pub fn fresh_label(&mut self) -> Label {
+    let label = Label(self.fresh);
+    self.fresh += 1;
+    label
+  }
+
+  pub fn push_label(&mut self, label: Label) {
+    self.labels.insert(*label, self.pc());
+  }
+
+  pub fn push_relocate(&mut self, label: Label) {
+    self.relocate.push((self.pc(), label));
   }
 
   pub fn edit(&mut self, pc: u32, code: Bytecode) {

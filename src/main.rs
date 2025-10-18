@@ -6,12 +6,13 @@ use std::{fs, path::Path};
 
 fn process_content(content: &str) -> Result<()> {
   let arena = Bump::new();
-  let ctx = codegen::CodeGenCtx::new(&arena);
-  let mut parser = parser::Parser::new(&arena, content, ctx);
+  let mut parser = parser::Parser::new(&arena, content);
+  let mut codegen = codegen::CodeGenCtx::new(&arena);
   let tree = parser.parse()?;
+  codegen.emit_tree(&tree);
   std::println!("--- Syntax Tree ---");
   std::println!("{tree}");
-  std::println!("{}", parser.to_codegen());
+  std::println!("{}", codegen);
   Ok(())
 }
 
