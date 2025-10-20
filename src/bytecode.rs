@@ -60,9 +60,9 @@ pub struct OpAS {
 pub type OpCond = OpAB;
 pub type OpCondS = OpABS;
 
-pub struct Op;
+pub struct Opcode;
 
-impl Op {
+impl Opcode {
   pub fn xyz(dst: u8, o1: u8, o2: u8) -> OpXYZ {
     OpXYZ { dst: dst.into(), o1: o1.into(), o2: o2.into() }
   }
@@ -248,7 +248,7 @@ impl BytecodeCtx {
   }
 
   pub fn push_label(&mut self, label: Label) {
-    self.labels.insert(*label, self.pc());
+    self.labels.insert(label, self.pc());
   }
 
   pub fn push_relocate(&mut self, label: Label) {

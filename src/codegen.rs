@@ -4,7 +4,7 @@ use bumpalo::Bump;
 use indexmap::IndexMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, Label, Op},
+  bytecode::{Bytecode, BytecodeCtx, Label, Opcode},
   diagnostic::Diagnostic,
   parser::{Expr, ExprRef, ExprsRef, SynTree},
   tokenizer::{Paired, TokenStr},
@@ -66,6 +66,7 @@ enum Control {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 enum Location {
+  Temporary,
   Slot(u8),
   Upvalue { idx: u8, level: u16 },
 }
@@ -73,8 +74,6 @@ enum Location {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 enum Value {
-  IConst(u16),
-  SConst(u16),
   Loc(Location),
 }
 
@@ -97,6 +96,7 @@ enum Test {
 
 struct ValInfo<'a> {
   name: Option<&'a str>,
+  index: u8,
 }
 
 struct Frame<'a> {
@@ -162,33 +162,35 @@ macro_rules! reg_push {
   };
 }
 
-macro_rules! reg_pop {
-  ($self:ident) => {
-    frame_top!($self).regs.pop()
-  };
-}
-
 macro_rules! reg_top {
   ($self:ident) => {
-    frame_top!($self).regs.last()
+    $self.stack_frame.frames.last().unwrap().regs.last().unwrap()
   };
 }
 
-macro_rules! allocate_named {
-  ($self:ident, $fmt:expr) => {{
-    let next_reg = free_reg!($self);
-    let symbols_top = symbols_top!($self);
-    let name = TokenStr::new($self.arena.alloc_str($fmt(next_reg)));
-    symbols_top.insert(name, next_reg);
-    reg_push!($self, ValInfo { name: Some(name.0) });
-    next_reg as u8
-  }};
+macro_rules! reg_pop {
+  ($self:ident) => {
+    $self.stack_frame.frames.last_mut().unwrap().regs.pop().unwrap()
+  };
 }
 
 macro_rules! allocate_temporary {
   ($self:ident) => {{
     let next_reg = free_reg!($self);
-    reg_push!($self, ValInfo { name: None });
+    reg_push!($self, ValInfo { name: None, index: next_reg as u8 });
+    next_reg as u8
+  }};
+}
+
+macro_rules! allocate_named {
+  ($self:ident, $name:expr) => {{
+    let next_reg = free_reg!($self);
+    let symbols_top = symbols_top!($self);
+    if symbols_top.contains_key($name) {
+      $self.diagnostic.error(&format!("redefined variable {}", $name.0))
+    }
+    symbols_top.insert(*$name, next_reg as u8);
+    reg_push!($self, ValInfo { name: Some($name.0), index: next_reg as u8 });
     next_reg as u8
   }};
 }
@@ -206,25 +208,40 @@ impl<'a> CodeGenCtx<'a> {
     use Location::*;
     use Value::*;
     match opr {
-      Value::IConst(idx) | Value::SConst(idx) => {
-        let r = allocate_temporary!(self);
-        self.bc.push(Bytecode::LoadC(Op::ab(r, idx)));
+      Loc(Slot(r)) => r,
+      Loc(Temporary) => {
+        let r = reg_top!(self).index;
+        reg_pop!(self);
         r
       }
-      Loc(Slot(r)) => r,
       Loc(Upvalue { idx, level }) => todo!(),
     }
   }
 
-  fn set_location(&mut self, loc: Location, opr: Value) {}
+  fn set_location(&mut self, loc: Location, opr: Value) {
+    use Location::*;
+    match (loc, opr) {
+      (Temporary, Value::Loc(Temporary)) => (),
+      (Temporary, Value::Loc(Upvalue { idx, level })) => todo!(),
+      (Temporary, Value::Loc(Slot(r))) => {
+        let r2 = allocate_temporary!(self);
+        self.bc.push(Bytecode::Move(crate::bytecode::Opcode::abs(r, r2)));
+      }
+      (Slot(r), _) => {
+        let r2 = self.get_value(opr);
+        self.bc.push(Bytecode::Move(Opcode::abs(r, r2)));
+      }
+      (Upvalue { idx, level }, _) => todo!(),
+    }
+  }
 
   fn emit_jump(&mut self, l: Control) {
     use Control::*;
     match l {
-      Return(r) => self.bc.push(Bytecode::Ret(Op::r#as(r as u32))),
+      Return(r) => self.bc.push(Bytecode::Ret(Opcode::r#as(r as u32))),
       Pos(l) => {
         self.bc.push_relocate(l);
-        self.bc.push(Bytecode::Jmp(Op::a(0)))
+        self.bc.push(Bytecode::Jmp(Opcode::a(0)))
       }
     }
   }
@@ -233,18 +250,18 @@ impl<'a> CodeGenCtx<'a> {
     use Test::*;
     let gen1 = |s: &mut Self, l1: Label, c2: Control| {
       match test {
-        EqI(r, imm) => s.bc.push(Bytecode::CmpNeDI(Op::ab(r, imm as u16))),
+        EqI(r, imm) => s.bc.push(Bytecode::CmpNeDI(Opcode::ab(r, imm as u16))),
       }
       s.bc.push_relocate(l1);
-      s.bc.push(Bytecode::Jmp(Op::a(0)));
+      s.bc.push(Bytecode::Jmp(Opcode::a(0)));
       s.emit_jump(c2);
     };
     let gen2 = |s: &mut Self, c1: Control, l2: Label| {
       match test {
-        EqI(r, imm) => s.bc.push(Bytecode::CmpEqDI(Op::ab(r, imm as u16))),
+        EqI(r, imm) => s.bc.push(Bytecode::CmpEqDI(Opcode::ab(r, imm as u16))),
       }
       s.bc.push_relocate(l2);
-      s.bc.push(Bytecode::Jmp(Op::a(0)));
+      s.bc.push(Bytecode::Jmp(Opcode::a(0)));
       s.emit_jump(c1);
     };
     match (c1, c2) {
@@ -265,14 +282,20 @@ impl<'a> CodeGenCtx<'a> {
     use ControlDest::*;
     use DataDest::*;
     match (data, control) {
-      (Effect, Uncond(l)) => self.emit_jump(l),
+      (Effect, Uncond(c)) => {
+        if c != next {
+          self.emit_jump(c);
+        }
+      }
       (Effect, Branch(l1, l2)) => {
         let r = self.get_value(opr);
         self.emit_test(Test::EqI(r, 0), l1, l2, next);
       }
-      (Loc(loc), Uncond(l)) => {
+      (Loc(loc), Uncond(c)) => {
         self.set_location(loc, opr);
-        self.emit_jump(l);
+        if c != next {
+          self.emit_jump(c);
+        }
       }
       (Loc(loc), Branch(l1, l2)) => {
         let r = self.get_value(opr);
@@ -282,16 +305,146 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
+  fn emit_op(
+    &mut self,
+    op: ExprRef<'a>,
+    _pair: Option<Paired>,
+    args: ExprsRef<'a>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) {
+    if let Expr::Op(op_str) = op {
+      match op_str.0 {
+        "+" => {
+          if args.len() == 2 {
+            let l1 = self.bc.fresh_label();
+            self.emit_expr(
+              args[0],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l1)),
+              Control::Pos(l1),
+            );
+            self.bc.push_label(l1);
+            let l2 = self.bc.fresh_label();
+            self.emit_expr(
+              args[1],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l2)),
+              Control::Pos(l2),
+            );
+            self.bc.push_label(l2);
+            let r2 = self.get_value(Value::Loc(Location::Temporary));
+            let r1 = self.get_value(Value::Loc(Location::Temporary));
+            let r = allocate_temporary!(self);
+            self.bc.push(Bytecode::AddDD(Opcode::xyz(r, r1, r2)));
+            self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+          } else {
+            self.diagnostic.error("expected two arguments for addition");
+          }
+        }
+        "*" => {
+          if args.len() == 2 {
+            let l1 = self.bc.fresh_label();
+            self.emit_expr(
+              args[0],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l1)),
+              Control::Pos(l1),
+            );
+            self.bc.push_label(l1);
+            let l2 = self.bc.fresh_label();
+            self.emit_expr(
+              args[1],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l2)),
+              Control::Pos(l2),
+            );
+            self.bc.push_label(l2);
+            let r2 = self.get_value(Value::Loc(Location::Temporary));
+            let r1 = self.get_value(Value::Loc(Location::Temporary));
+            let r = allocate_temporary!(self);
+            self.bc.push(Bytecode::MulDD(Opcode::xyz(r, r1, r2)));
+            self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+          } else {
+            self.diagnostic.error("expected two arguments for multiplication");
+          }
+        }
+        "-" => {
+          if args.len() == 2 {
+            let l1 = self.bc.fresh_label();
+            self.emit_expr(
+              args[0],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l1)),
+              Control::Pos(l1),
+            );
+            self.bc.push_label(l1);
+            let l2 = self.bc.fresh_label();
+            self.emit_expr(
+              args[1],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l2)),
+              Control::Pos(l2),
+            );
+            self.bc.push_label(l2);
+            let r2 = self.get_value(Value::Loc(Location::Temporary));
+            let r1 = self.get_value(Value::Loc(Location::Temporary));
+            let r = allocate_temporary!(self);
+            self.bc.push(Bytecode::SubDD(Opcode::xyz(r, r1, r2)));
+            self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+          } else {
+            self.diagnostic.error("expected two arguments for subtraction");
+          }
+        }
+        "/" => {
+          if args.len() == 2 {
+            let l1 = self.bc.fresh_label();
+            self.emit_expr(
+              args[0],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l1)),
+              Control::Pos(l1),
+            );
+            self.bc.push_label(l1);
+            let l2 = self.bc.fresh_label();
+            self.emit_expr(
+              args[1],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l2)),
+              Control::Pos(l2),
+            );
+            self.bc.push_label(l2);
+            let r2 = self.get_value(Value::Loc(Location::Temporary));
+            let r1 = self.get_value(Value::Loc(Location::Temporary));
+            let r = allocate_temporary!(self);
+            self.bc.push(Bytecode::DivDD(Opcode::xyz(r, r1, r2)));
+            self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+          } else {
+            self.diagnostic.error("expected two arguments for division");
+          }
+        }
+        _ => self.diagnostic.error(&format!("unknown operator: {}", op_str.0)),
+      }
+    } else {
+      self.diagnostic.error("expected operator");
+    }
+  }
+
   fn emit_expr(&mut self, expr: ExprRef<'a>, data: DataDest, control: ControlDest, next: Control) {
     use Expr::*;
     match expr {
       IntLiteral(i) => {
         let idx = self.constant_pool.add_int(*i);
-        self.emit_store(Value::IConst(idx as u16), data, control, next);
+        let r = allocate_temporary!(self);
+        self.bc.push(Bytecode::LoadC(crate::bytecode::Opcode::ab(r, idx)));
+        self.emit_store(Value::Loc(Location::Temporary), data, control, next);
       }
       StrLiteral(s) => {
         let idx = self.constant_pool.add_str(*s);
-        self.emit_store(Value::SConst(idx as u16), data, control, next);
+        let r = allocate_temporary!(self);
+        self.bc.push(Bytecode::LoadC(crate::bytecode::Opcode::ab(r, idx)));
+        self.emit_store(Value::Loc(Location::Temporary), data, control, next);
       }
       Ident(token_str) => {
         let r = *symbols_top!(self).get(token_str).unwrap_or_else(|| {
@@ -300,9 +453,12 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
       }
       Op(token_str) => todo!(),
-      OpApply { op, pair, args } => todo!(),
+      OpApply { op, pair, args } => self.emit_op(*op, *pair, args, data, control, next),
       Apply { func, pair, args } => todo!(),
-      Bind { rec, name, expr } => todo!(),
+      Bind { rec, name, expr } => {
+        let r = allocate_named!(self, name);
+        self.emit_expr(expr, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(next), next);
+      }
       Fn { params, body } => todo!(),
       Block(exprs) => match exprs {
         [] => todo!("empty block"),
@@ -324,17 +480,36 @@ impl<'a> CodeGenCtx<'a> {
         let c2 = Control::Pos(l2);
         self.emit_expr(c, DataDest::Effect, ControlDest::Branch(c1, c2), c1);
         self.bc.push_label(l1);
-        self.emit_expr(t, data, control, c2);
+        self.emit_expr(t, data, control, next);
         self.bc.push_label(l2);
         self.emit_expr(f, data, control, next);
       }
-      Tuple(exprs) => todo!(
-        
-      ),
+      Tuple(exprs) => {
+        let mut elems_regs = Vec::with_capacity(exprs.len());
+        elems_regs.fill_with(|| allocate_temporary!(self));
+        for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
+          let l = self.bc.fresh_label();
+          let c = Control::Pos(l);
+          self.emit_expr(elem, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(c), c);
+          self.bc.push_label(l);
+        }
+        self.bc.push(Bytecode::Nop); // MAKE TUPLE
+        match control {
+          ControlDest::Uncond(l) => self.emit_jump(l),
+          _ => self.diagnostic.error("tuple in conditional expression"),
+        }
+      }
     }
   }
 
-  pub fn emit_tree(&mut self, tree: &SynTree<'a>) {}
+  pub fn emit_tree(&mut self, tree: &SynTree<'a>) {
+    self.emit_expr(
+      tree.root,
+      DataDest::Effect,
+      ControlDest::Uncond(Control::Return(0)),
+      Control::Return(0),
+    );
+  }
 }
 
 impl<'a> Display for CodeGenCtx<'a> {
@@ -354,12 +529,8 @@ mod tests {
     let mut parser = Parser::new(&arena, source);
     let mut ctx = CodeGenCtx::new(&arena);
     let tree = parser.parse().unwrap();
+    ctx.emit_tree(&tree);
 
     assert_eq!(ctx.to_string(), expected_bytecode_str);
-  }
-
-  #[test]
-  fn test_parse_expressions() {
-    test_codegen("1 + 2 * 3 - 4 / 5", "");
   }
 }
