@@ -225,8 +225,9 @@ impl<'a> CodeGenCtx<'a> {
       (Temporary, Value::Loc(Upvalue { idx, level })) => todo!(),
       (Temporary, Value::Loc(Slot(r))) => {
         let r2 = allocate_temporary!(self);
-        self.bc.push(Bytecode::Move(crate::bytecode::Opcode::abs(r, r2)));
+        self.bc.push(Bytecode::Move(Opcode::abs(r, r2)));
       }
+      (Slot(r), Value::Loc(Slot(r2))) if r == r2 => (),
       (Slot(r), _) => {
         let r2 = self.get_value(opr);
         self.bc.push(Bytecode::Move(Opcode::abs(r, r2)));
@@ -305,6 +306,68 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
+  fn emit_binary_op_with_slots(
+    &mut self,
+    op: &'a str,
+    opr1: u8,
+    opr2: u8,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) {
+    match op {
+      "+" => match data {
+        DataDest::Loc(Location::Slot(r)) => {
+          self.bc.push(Bytecode::AddDD(Opcode::xyz(r, opr1, opr2)));
+          self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
+        }
+        DataDest::Effect | DataDest::Loc(Location::Temporary) => {
+          let r = allocate_temporary!(self);
+          self.bc.push(Bytecode::AddDD(Opcode::xyz(r, opr1, opr2)));
+          self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+        }
+        DataDest::Loc(Location::Upvalue { idx, level }) => {}
+      },
+      "*" => match data {
+        DataDest::Loc(Location::Slot(r)) => {
+          self.bc.push(Bytecode::MulDD(Opcode::xyz(r, opr1, opr2)));
+          self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
+        }
+        DataDest::Effect | DataDest::Loc(Location::Temporary) => {
+          let r = allocate_temporary!(self);
+          self.bc.push(Bytecode::MulDD(Opcode::xyz(r, opr1, opr2)));
+          self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+        }
+        DataDest::Loc(Location::Upvalue { idx, level }) => {}
+      },
+      "-" => match data {
+        DataDest::Loc(Location::Slot(r)) => {
+          self.bc.push(Bytecode::SubDD(Opcode::xyz(r, opr1, opr2)));
+          self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
+        }
+        DataDest::Effect | DataDest::Loc(Location::Temporary) => {
+          let r = allocate_temporary!(self);
+          self.bc.push(Bytecode::SubDD(Opcode::xyz(r, opr1, opr2)));
+          self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+        }
+        DataDest::Loc(Location::Upvalue { idx, level }) => {}
+      },
+      "/" => match data {
+        DataDest::Loc(Location::Slot(r)) => {
+          self.bc.push(Bytecode::DivDD(Opcode::xyz(r, opr1, opr2)));
+          self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
+        }
+        DataDest::Effect | DataDest::Loc(Location::Temporary) => {
+          let r = allocate_temporary!(self);
+          self.bc.push(Bytecode::DivDD(Opcode::xyz(r, opr1, opr2)));
+          self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+        }
+        DataDest::Loc(Location::Upvalue { idx, level }) => {}
+      },
+      _ => unreachable!("unknown binary operator: {}", op),
+    }
+  }
+
   fn emit_op(
     &mut self,
     op: ExprRef<'a>,
@@ -336,38 +399,9 @@ impl<'a> CodeGenCtx<'a> {
             self.bc.push_label(l2);
             let r2 = self.get_value(Value::Loc(Location::Temporary));
             let r1 = self.get_value(Value::Loc(Location::Temporary));
-            let r = allocate_temporary!(self);
-            self.bc.push(Bytecode::AddDD(Opcode::xyz(r, r1, r2)));
-            self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+            self.emit_binary_op_with_slots("+", r1, r2, data, control, next);
           } else {
             self.diagnostic.error("expected two arguments for addition");
-          }
-        }
-        "*" => {
-          if args.len() == 2 {
-            let l1 = self.bc.fresh_label();
-            self.emit_expr(
-              args[0],
-              DataDest::Loc(Location::Temporary),
-              ControlDest::Uncond(Control::Pos(l1)),
-              Control::Pos(l1),
-            );
-            self.bc.push_label(l1);
-            let l2 = self.bc.fresh_label();
-            self.emit_expr(
-              args[1],
-              DataDest::Loc(Location::Temporary),
-              ControlDest::Uncond(Control::Pos(l2)),
-              Control::Pos(l2),
-            );
-            self.bc.push_label(l2);
-            let r2 = self.get_value(Value::Loc(Location::Temporary));
-            let r1 = self.get_value(Value::Loc(Location::Temporary));
-            let r = allocate_temporary!(self);
-            self.bc.push(Bytecode::MulDD(Opcode::xyz(r, r1, r2)));
-            self.emit_store(Value::Loc(Location::Temporary), data, control, next);
-          } else {
-            self.diagnostic.error("expected two arguments for multiplication");
           }
         }
         "-" => {
@@ -390,11 +424,34 @@ impl<'a> CodeGenCtx<'a> {
             self.bc.push_label(l2);
             let r2 = self.get_value(Value::Loc(Location::Temporary));
             let r1 = self.get_value(Value::Loc(Location::Temporary));
-            let r = allocate_temporary!(self);
-            self.bc.push(Bytecode::SubDD(Opcode::xyz(r, r1, r2)));
-            self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+            self.emit_binary_op_with_slots("-", r1, r2, data, control, next);
           } else {
             self.diagnostic.error("expected two arguments for subtraction");
+          }
+        }
+        "*" => {
+          if args.len() == 2 {
+            let l1 = self.bc.fresh_label();
+            self.emit_expr(
+              args[0],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l1)),
+              Control::Pos(l1),
+            );
+            self.bc.push_label(l1);
+            let l2 = self.bc.fresh_label();
+            self.emit_expr(
+              args[1],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l2)),
+              Control::Pos(l2),
+            );
+            self.bc.push_label(l2);
+            let r2 = self.get_value(Value::Loc(Location::Temporary));
+            let r1 = self.get_value(Value::Loc(Location::Temporary));
+            self.emit_binary_op_with_slots("*", r1, r2, data, control, next);
+          } else {
+            self.diagnostic.error("expected two arguments for multiplication");
           }
         }
         "/" => {
@@ -417,9 +474,7 @@ impl<'a> CodeGenCtx<'a> {
             self.bc.push_label(l2);
             let r2 = self.get_value(Value::Loc(Location::Temporary));
             let r1 = self.get_value(Value::Loc(Location::Temporary));
-            let r = allocate_temporary!(self);
-            self.bc.push(Bytecode::DivDD(Opcode::xyz(r, r1, r2)));
-            self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+            self.emit_binary_op_with_slots("/", r1, r2, data, control, next);
           } else {
             self.diagnostic.error("expected two arguments for division");
           }
