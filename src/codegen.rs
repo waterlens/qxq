@@ -1,39 +1,71 @@
-use std::fmt::{self, Display};
+use std::{
+  fmt::{self, Display},
+  rc::Rc,
+};
 
 use bumpalo::Bump;
 use indexmap::IndexMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, Label, Opcode},
+  bytecode::{Bytecode, BytecodeCtx, Label, Operands, Operator, UnfinishedBytecode},
   diagnostic::Diagnostic,
   parser::{Expr, ExprRef, ExprsRef, SynTree},
   tokenizer::{Paired, TokenStr},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ConstantId(u16);
+
 pub struct ConstantPool {
-  ipool: IndexMap<i128, usize>,
-  spool: IndexMap<String, usize>,
+  diagnostic: Rc<Diagnostic>,
+  ipool: IndexMap<i128, ConstantId>,
+  spool: IndexMap<String, ConstantId>,
 }
 
-impl Default for ConstantPool {
-  fn default() -> Self {
-    Self::new()
+impl ConstantId {
+  pub fn new(id: u16) -> Self {
+    Self(id)
+  }
+}
+
+impl Display for ConstantId {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "@{}", self.0)
+  }
+}
+
+impl From<u16> for ConstantId {
+  fn from(id: u16) -> Self {
+    ConstantId::new(id)
+  }
+}
+
+impl TryFrom<usize> for ConstantId {
+  type Error = ();
+  fn try_from(value: usize) -> Result<Self, Self::Error> {
+    if value < u16::MAX as usize {
+      Ok(ConstantId::new(value as u16))
+    } else {
+      Err(())
+    }
   }
 }
 
 impl ConstantPool {
-  pub fn new() -> Self {
-    Self { ipool: IndexMap::new(), spool: IndexMap::new() }
+  pub fn new(diagnostic: Rc<Diagnostic>) -> Self {
+    Self { diagnostic, ipool: IndexMap::new(), spool: IndexMap::new() }
   }
 
-  pub fn add_int(&mut self, n: i128) -> u16 {
+  pub fn add_int(&mut self, n: i128) -> ConstantId {
     let id = self.ipool.len();
-    *self.ipool.entry(n).or_insert(id) as u16
+    let id = id.try_into().unwrap_or_else(|_| self.diagnostic.error("constant id overflow"));
+    *self.ipool.entry(n).or_insert(id)
   }
 
-  pub fn add_str(&mut self, s: &str) -> u16 {
+  pub fn add_str(&mut self, s: &str) -> ConstantId {
     let id = self.spool.len();
-    *self.spool.entry(s.to_string()).or_insert(id) as u16
+    let id = id.try_into().unwrap_or_else(|_| self.diagnostic.error("constant id overflow"));
+    *self.spool.entry(s.to_string()).or_insert(id)
   }
 }
 
@@ -58,8 +90,29 @@ impl Display for ConstantPool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RegId(u8);
+
+impl RegId {
+  pub fn new(id: u8) -> Self {
+    Self(id)
+  }
+}
+
+impl From<u8> for RegId {
+  fn from(id: u8) -> Self {
+    RegId::new(id)
+  }
+}
+
+impl From<RegId> for crate::bytecode::Op8 {
+  fn from(id: RegId) -> Self {
+    id.0.into()
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Control {
-  Return(u8),
+  Return(RegId),
   Pos(Label),
 }
 
@@ -67,7 +120,7 @@ enum Control {
 #[repr(u8)]
 enum Location {
   Temporary,
-  Slot(u8),
+  Slot(RegId),
   Upvalue { idx: u8, level: u16 },
 }
 
@@ -91,17 +144,17 @@ enum ControlDest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Test {
-  EqI(u8, u16),
+  EqI(RegId, u16),
 }
 
 struct ValInfo<'a> {
   name: Option<&'a str>,
-  index: u8,
+  index: RegId,
 }
 
 struct Frame<'a> {
   regs: Vec<ValInfo<'a>>,
-  symbols: IndexMap<TokenStr<'a>, u8>,
+  symbols: IndexMap<TokenStr<'a>, RegId>,
 }
 
 struct Stack<'a> {
@@ -120,19 +173,9 @@ impl<'a> Stack<'a> {
   }
 }
 
-struct OperandStacks {
-  operands: Vec<Value>,
-}
-
-impl OperandStacks {
-  fn new() -> Self {
-    Self { operands: vec![] }
-  }
-}
-
 pub struct CodeGenCtx<'a> {
   arena: &'a Bump,
-  diagnostic: Diagnostic,
+  diagnostic: Rc<Diagnostic>,
   stack_frame: Stack<'a>,
   constant_pool: ConstantPool,
   bc: BytecodeCtx,
@@ -174,37 +217,39 @@ macro_rules! reg_pop {
   };
 }
 
-macro_rules! allocate_temporary {
-  ($self:ident) => {{
-    let next_reg = free_reg!($self);
-    reg_push!($self, ValInfo { name: None, index: next_reg as u8 });
-    next_reg as u8
-  }};
-}
-
-macro_rules! allocate_named {
-  ($self:ident, $name:expr) => {{
-    let next_reg = free_reg!($self);
-    let symbols_top = symbols_top!($self);
-    if symbols_top.contains_key($name) {
-      $self.diagnostic.error(&format!("redefined variable {}", $name.0))
-    }
-    symbols_top.insert(*$name, next_reg as u8);
-    reg_push!($self, ValInfo { name: Some($name.0), index: next_reg as u8 });
-    next_reg as u8
-  }};
-}
-
 impl<'a> CodeGenCtx<'a> {
   pub fn new(arena: &'a Bump) -> Self {
-    let diagnostic = Diagnostic::new();
+    let diagnostic = Rc::new(Diagnostic::new());
     let stack_frame = Stack::new();
-    let constant_pool = ConstantPool::new();
+    let constant_pool = ConstantPool::new(diagnostic.clone());
     let bc = BytecodeCtx::new();
     Self { arena, diagnostic, stack_frame, constant_pool, bc }
   }
 
-  fn get_value(&mut self, opr: Value) -> u8 {
+  fn allocate_temporary(&mut self) -> RegId {
+    let next_reg = free_reg!(self);
+    if next_reg >= u8::MAX as usize {
+      self.diagnostic.error("register id overflow");
+    }
+    reg_push!(self, ValInfo { name: None, index: (next_reg as u8).into() });
+    (next_reg as u8).into()
+  }
+
+  fn allocate_named(&mut self, name: &TokenStr<'a>) -> RegId {
+    let next_reg = free_reg!(self);
+    if next_reg >= u8::MAX as usize {
+      self.diagnostic.error("register id overflow");
+    }
+    let symbols_top = symbols_top!(self);
+    if symbols_top.contains_key(name) {
+      self.diagnostic.error(&format!("redefined variable {}", name.0))
+    }
+    symbols_top.insert(*name, (next_reg as u8).into());
+    reg_push!(self, ValInfo { name: Some(name.0), index: (next_reg as u8).into() });
+    (next_reg as u8).into()
+  }
+
+  fn get_value(&mut self, opr: Value) -> RegId {
     use Location::*;
     use Value::*;
     match opr {
@@ -224,13 +269,13 @@ impl<'a> CodeGenCtx<'a> {
       (Temporary, Value::Loc(Temporary)) => (),
       (Temporary, Value::Loc(Upvalue { idx, level })) => todo!(),
       (Temporary, Value::Loc(Slot(r))) => {
-        let r2 = allocate_temporary!(self);
-        self.bc.push(Bytecode::Move(Opcode::abs(r, r2)));
+        let r2 = self.allocate_temporary();
+        self.bc.push(Bytecode::mov(r.into(), r2.into()));
       }
       (Slot(r), Value::Loc(Slot(r2))) if r == r2 => (),
       (Slot(r), _) => {
         let r2 = self.get_value(opr);
-        self.bc.push(Bytecode::Move(Opcode::abs(r, r2)));
+        self.bc.push(Bytecode::mov(r.into(), r2.into()));
       }
       (Upvalue { idx, level }, _) => todo!(),
     }
@@ -239,10 +284,10 @@ impl<'a> CodeGenCtx<'a> {
   fn emit_jump(&mut self, l: Control) {
     use Control::*;
     match l {
-      Return(r) => self.bc.push(Bytecode::Ret(Opcode::r#as(r as u32))),
+      Return(r) => self.bc.push(Bytecode::retn(r.into(), 0.into())),
       Pos(l) => {
         self.bc.push_relocate(l);
-        self.bc.push(Bytecode::Jmp(Opcode::a(0)))
+        self.bc.push(Bytecode::jmp(0u16.into()))
       }
     }
   }
@@ -251,18 +296,18 @@ impl<'a> CodeGenCtx<'a> {
     use Test::*;
     let gen1 = |s: &mut Self, l1: Label, c2: Control| {
       match test {
-        EqI(r, imm) => s.bc.push(Bytecode::CmpNeDI(Opcode::ab(r, imm as u16))),
+        EqI(r, imm) => s.bc.push(Bytecode::cmpnedi(r.into(), imm.into())),
       }
       s.bc.push_relocate(l1);
-      s.bc.push(Bytecode::Jmp(Opcode::a(0)));
+      s.bc.push(Bytecode::jmp(0u16.into()));
       s.emit_jump(c2);
     };
     let gen2 = |s: &mut Self, c1: Control, l2: Label| {
       match test {
-        EqI(r, imm) => s.bc.push(Bytecode::CmpEqDI(Opcode::ab(r, imm as u16))),
+        EqI(r, imm) => s.bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
       }
       s.bc.push_relocate(l2);
-      s.bc.push(Bytecode::Jmp(Opcode::a(0)));
+      s.bc.push(Bytecode::jmp(0u16.into()));
       s.emit_jump(c1);
     };
     match (c1, c2) {
@@ -309,62 +354,38 @@ impl<'a> CodeGenCtx<'a> {
   fn emit_binary_op_with_slots(
     &mut self,
     op: &'a str,
-    opr1: u8,
-    opr2: u8,
+    opr1: RegId,
+    opr2: RegId,
     data: DataDest,
     control: ControlDest,
     next: Control,
   ) {
-    match op {
-      "+" => match data {
-        DataDest::Loc(Location::Slot(r)) => {
-          self.bc.push(Bytecode::AddDD(Opcode::xyz(r, opr1, opr2)));
-          self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
-        }
-        DataDest::Effect | DataDest::Loc(Location::Temporary) => {
-          let r = allocate_temporary!(self);
-          self.bc.push(Bytecode::AddDD(Opcode::xyz(r, opr1, opr2)));
-          self.emit_store(Value::Loc(Location::Temporary), data, control, next);
-        }
-        DataDest::Loc(Location::Upvalue { idx, level }) => {}
-      },
-      "*" => match data {
-        DataDest::Loc(Location::Slot(r)) => {
-          self.bc.push(Bytecode::MulDD(Opcode::xyz(r, opr1, opr2)));
-          self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
-        }
-        DataDest::Effect | DataDest::Loc(Location::Temporary) => {
-          let r = allocate_temporary!(self);
-          self.bc.push(Bytecode::MulDD(Opcode::xyz(r, opr1, opr2)));
-          self.emit_store(Value::Loc(Location::Temporary), data, control, next);
-        }
-        DataDest::Loc(Location::Upvalue { idx, level }) => {}
-      },
-      "-" => match data {
-        DataDest::Loc(Location::Slot(r)) => {
-          self.bc.push(Bytecode::SubDD(Opcode::xyz(r, opr1, opr2)));
-          self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
-        }
-        DataDest::Effect | DataDest::Loc(Location::Temporary) => {
-          let r = allocate_temporary!(self);
-          self.bc.push(Bytecode::SubDD(Opcode::xyz(r, opr1, opr2)));
-          self.emit_store(Value::Loc(Location::Temporary), data, control, next);
-        }
-        DataDest::Loc(Location::Upvalue { idx, level }) => {}
-      },
-      "/" => match data {
-        DataDest::Loc(Location::Slot(r)) => {
-          self.bc.push(Bytecode::DivDD(Opcode::xyz(r, opr1, opr2)));
-          self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
-        }
-        DataDest::Effect | DataDest::Loc(Location::Temporary) => {
-          let r = allocate_temporary!(self);
-          self.bc.push(Bytecode::DivDD(Opcode::xyz(r, opr1, opr2)));
-          self.emit_store(Value::Loc(Location::Temporary), data, control, next);
-        }
-        DataDest::Loc(Location::Upvalue { idx, level }) => {}
-      },
+    let ubc = match op {
+      "+" => Operator::AddDD,
+      "-" => Operator::SubDD,
+      "*" => Operator::MulDD,
+      "/" => Operator::DivDD,
       _ => unreachable!("unknown binary operator: {}", op),
+    };
+    match data {
+      DataDest::Loc(Location::Slot(r)) => {
+        self.bc.push(UnfinishedBytecode::new(ubc).fill_operands(Operands::ABC(Operands::abc(
+          r.into(),
+          opr1.into(),
+          opr2.into(),
+        ))));
+        self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
+      }
+      DataDest::Effect | DataDest::Loc(Location::Temporary) => {
+        let r = self.allocate_temporary();
+        self.bc.push(UnfinishedBytecode::new(ubc).fill_operands(Operands::XYZ(Operands::xyz(
+          r.into(),
+          opr1.into(),
+          opr2.into(),
+        ))));
+        self.emit_store(Value::Loc(Location::Temporary), data, control, next);
+      }
+      DataDest::Loc(Location::Upvalue { idx, level }) => {}
     }
   }
 
@@ -491,14 +512,14 @@ impl<'a> CodeGenCtx<'a> {
     match expr {
       IntLiteral(i) => {
         let idx = self.constant_pool.add_int(*i);
-        let r = allocate_temporary!(self);
-        self.bc.push(Bytecode::LoadC(crate::bytecode::Opcode::ab(r, idx)));
+        let r = self.allocate_temporary();
+        self.bc.push(Bytecode::loadc(r.into(), idx.0.into()));
         self.emit_store(Value::Loc(Location::Temporary), data, control, next);
       }
       StrLiteral(s) => {
-        let idx = self.constant_pool.add_str(*s);
-        let r = allocate_temporary!(self);
-        self.bc.push(Bytecode::LoadC(crate::bytecode::Opcode::ab(r, idx)));
+        let idx = self.constant_pool.add_str(s);
+        let r = self.allocate_temporary();
+        self.bc.push(Bytecode::loadc(r.into(), idx.0.into()));
         self.emit_store(Value::Loc(Location::Temporary), data, control, next);
       }
       Ident(token_str) => {
@@ -508,10 +529,10 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
       }
       Op(token_str) => todo!(),
-      OpApply { op, pair, args } => self.emit_op(*op, *pair, args, data, control, next),
+      OpApply { op, pair, args } => self.emit_op(op, *pair, args, data, control, next),
       Apply { func, pair, args } => todo!(),
       Bind { rec, name, expr } => {
-        let r = allocate_named!(self, name);
+        let r = self.allocate_named(name);
         self.emit_expr(expr, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(next), next);
       }
       Fn { params, body } => todo!(),
@@ -541,14 +562,14 @@ impl<'a> CodeGenCtx<'a> {
       }
       Tuple(exprs) => {
         let mut elems_regs = Vec::with_capacity(exprs.len());
-        elems_regs.fill_with(|| allocate_temporary!(self));
+        elems_regs.fill_with(|| self.allocate_temporary());
         for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
           let l = self.bc.fresh_label();
           let c = Control::Pos(l);
           self.emit_expr(elem, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(c), c);
           self.bc.push_label(l);
         }
-        self.bc.push(Bytecode::Nop); // MAKE TUPLE
+        self.bc.push(Bytecode::nop()); // MAKE TUPLE
         match control {
           ControlDest::Uncond(l) => self.emit_jump(l),
           _ => self.diagnostic.error("tuple in conditional expression"),
@@ -561,8 +582,8 @@ impl<'a> CodeGenCtx<'a> {
     self.emit_expr(
       tree.root,
       DataDest::Effect,
-      ControlDest::Uncond(Control::Return(0)),
-      Control::Return(0),
+      ControlDest::Uncond(Control::Return(0.into())),
+      Control::Return(0.into()),
     );
   }
 }
@@ -579,6 +600,7 @@ impl<'a> Display for CodeGenCtx<'a> {
 mod tests {
   use super::*;
   use crate::parser::Parser;
+  #[allow(unused)]
   fn test_codegen(source: &str, expected_bytecode_str: &str) {
     let arena = Bump::new();
     let mut parser = Parser::new(&arena, source);

@@ -2,7 +2,6 @@ use std::fmt::Debug;
 
 use bumpalo::Bump;
 
-use crate::codegen::CodeGenCtx;
 use crate::sexp::{Sexp, SexpPool, ToSexp};
 use crate::tokenizer::{Keyword, Paired, Token, TokenStr, TokenTag, Tokenizer};
 
@@ -316,11 +315,6 @@ impl<'a> Parser<'a> {
     let tok = self.next_ident(false)?;
     let name = TokenStr::from_span(arena, tok.inner.span);
     Ok(PeekResult { inner: arena.alloc(ExprCon::Ident(name)) })
-  }
-
-  fn unwrap_ident_expr<'t>(&'t self, e: ExprRef<'a>) -> TokenStr<'a> {
-    let ExprCon::Ident(name) = e else { unreachable!() };
-    *name
   }
 
   fn parse_expr_with_affinity<'t>(&'t mut self, minaff: u32) -> PeekExpr<'a> {
