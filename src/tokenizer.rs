@@ -2,7 +2,7 @@ use anyhow::Result;
 use small_map::ASmallMap;
 
 use std::{
-  cell::OnceCell,
+  fmt::Display,
   hash::{Hash, Hasher},
 };
 
@@ -87,9 +87,9 @@ impl<'a> TokenSpan<'a> {
   }
 }
 
-impl ToString for TokenSpan<'_> {
-  fn to_string(&self) -> String {
-    self.0.iter().collect()
+impl Display for TokenSpan<'_> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", self.0.iter().collect::<String>())
   }
 }
 
@@ -255,23 +255,19 @@ impl<'a, 'b> Tokenizer<'a>
 where
   'a: 'b,
 {
-  const KEYWORDS: Lazy<OnceCell<ASmallMap<16, &'static [char], Keyword>>> = Lazy::new(|| {
-    let cell = OnceCell::new();
-    let _ = cell.set({
-      let mut map: ASmallMap<16, &'static [char], Keyword> = ASmallMap::new();
-      map.insert(&['f', 'n'], Keyword::Fn);
-      map.insert(&['l', 'e', 't'], Keyword::Let);
-      map.insert(&['r', 'e', 'c'], Keyword::Rec);
-      map.insert(&['w', 'i', 't', 'h'], Keyword::With);
-      map.insert(&['a', 'n', 'd'], Keyword::And);
-      map.insert(&['i', 's'], Keyword::Is);
-      map.insert(&['i', 'f'], Keyword::If);
-      map.insert(&['e', 'l', 's', 'e'], Keyword::Else);
-      map.insert(&['t', 'h', 'e', 'n'], Keyword::Then);
-      map.insert(&['e', 'n', 'd'], Keyword::End);
-      map
-    });
-    cell
+  const KEYWORDS: Lazy<ASmallMap<16, &'static [char], Keyword>> = Lazy::new(|| {
+    let mut map: ASmallMap<16, &'static [char], Keyword> = ASmallMap::new();
+    map.insert(&['f', 'n'], Keyword::Fn);
+    map.insert(&['l', 'e', 't'], Keyword::Let);
+    map.insert(&['r', 'e', 'c'], Keyword::Rec);
+    map.insert(&['w', 'i', 't', 'h'], Keyword::With);
+    map.insert(&['a', 'n', 'd'], Keyword::And);
+    map.insert(&['i', 's'], Keyword::Is);
+    map.insert(&['i', 'f'], Keyword::If);
+    map.insert(&['e', 'l', 's', 'e'], Keyword::Else);
+    map.insert(&['t', 'h', 'e', 'n'], Keyword::Then);
+    map.insert(&['e', 'n', 'd'], Keyword::End);
+    map
   });
 
   pub fn new<I>(arena: &'a Bump, input: I) -> Self
@@ -319,7 +315,7 @@ where
   }
 
   fn is_keyword(&self, s: &[char]) -> Option<Keyword> {
-    Self::KEYWORDS.get().unwrap().get(s).cloned()
+    Self::KEYWORDS.get(s).cloned()
   }
 
   fn ch(&self) -> char {
@@ -398,17 +394,15 @@ where
         _ => return self.make_error(InvalidIntLiteralPrefix, loc),
       }
     }
-    loop {
-      let n = match self.ch() {
-        '0'..='9' | 'a'..='f' | 'A'..='F' => match self.ch().to_digit(base) {
-          Some(n) => n as i128,
-          None => {
-            self.index += 1;
-            return self.make_error(InvalidIntLiteralDigit, loc);
-          }
-        },
-        _ => break,
+    while let '0'..='9' | 'a'..='f' | 'A'..='F' = self.ch() {
+      let n = match self.ch().to_digit(base) {
+        Some(n) => n as i128,
+        None => {
+          self.index += 1;
+          return self.make_error(InvalidIntLiteralDigit, loc);
+        }
       };
+
       value *= base as i128;
       value = if neg { value - n } else { value + n };
       self.index += 1;
@@ -556,7 +550,7 @@ where
   }
 
   pub fn next_with_err(&'b mut self) -> Result<Token<'a>> {
-    let tok = self.next();
+    let tok = self.next_token();
     if let TokenTag::Error(err) = tok.tag {
       Result::Err(anyhow::anyhow!(err))
     } else {
@@ -564,7 +558,7 @@ where
     }
   }
 
-  pub fn next(&'b mut self) -> Token<'a> {
+  pub fn next_token(&'b mut self) -> Token<'a> {
     loop {
       let c = self.ch();
       let loc = self.get_loc();
@@ -572,11 +566,8 @@ where
         '\0' => return self.eof(),
         ' ' | '\t' | '\r' => {
           self.index += 1;
-          loop {
-            match self.ch() {
-              ' ' | '\t' | '\r' => self.index += 1,
-              _ => break,
-            }
+          while let ' ' | '\t' | '\r' = self.ch() {
+            self.index += 1;
           }
           continue;
         }
@@ -654,11 +645,11 @@ mod tests {
     let mut arena = Bump::new();
     let mut tokenizer = Tokenizer::new(&mut arena, input);
     for expected_token in expected {
-      let token = tokenizer.next();
+      let token = tokenizer.next_token();
       assert_eq!(token.tag, expected_token.tag);
       assert_eq!(token.span.to_string().as_str(), expected_token.span);
     }
-    let last_token = tokenizer.next();
+    let last_token = tokenizer.next_token();
     assert_eq!(last_token.tag, TokenTag::Eof);
   }
 
