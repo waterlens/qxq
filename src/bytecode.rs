@@ -194,6 +194,7 @@ return-n                {return value register}
 jump                    {pc offset}
 */
 
+#[derive(Debug, Copy, Clone)]
 pub struct Bytecode(Operator, Operands);
 
 impl Bytecode {
@@ -246,8 +247,8 @@ impl Bytecode {
     UnfinishedBytecode(Operator::Retn).fill_operands(Operands::ABS(Operands::ab_signed(dst, o1)))
   }
 
-  pub fn jmp(o1: Op24) -> Self {
-    UnfinishedBytecode(Operator::Jmp).fill_operands(Operands::A(Operands::a(o1)))
+  pub fn jmp(o1: OpS24) -> Self {
+    UnfinishedBytecode(Operator::Jmp).fill_operands(Operands::AS(Operands::a_signed(o1)))
   }
 
   pub fn goto(dst: OpS24) -> Self {
@@ -450,13 +451,13 @@ impl UnfinishedBytecode {
       (LoadI, AB(_)) => Bytecode(self.0, operands),
       (LoaduI, AB(_)) => Bytecode(self.0, operands),
       (LoadC, AB(_)) => Bytecode(self.0, operands),
-      (Move, ABS(_)) => Bytecode(self.0, operands),
+      (Move, ABC(_)) => Bytecode(self.0, operands),
       (Apply, ABS(_)) => Bytecode(self.0, operands),
       (Call, ABS(_)) => Bytecode(self.0, operands),
       (Retu, N) => Bytecode(self.0, operands),
       (Ret, AS(_)) => Bytecode(self.0, operands),
       (Retn, ABS(_)) => Bytecode(self.0, operands),
-      (Jmp, A(_)) => Bytecode(self.0, operands),
+      (Jmp, AS(_)) => Bytecode(self.0, operands),
       (Goto, AS(_)) => Bytecode(self.0, operands),
       (AddDI, XYZ(_)) => Bytecode(self.0, operands),
       (SubDI, XYZ(_)) => Bytecode(self.0, operands),
@@ -546,6 +547,28 @@ impl BytecodeCtx {
   pub fn edit(&mut self, pc: u32, code: Bytecode) {
     self.code[pc as usize] = code;
   }
+
+  pub fn relocate_all(&mut self) {
+    let mut edit_list = vec![];
+    for (pc, label) in self.relocate.iter() {
+      debug_assert!(label.is_valid());
+      let target_pc = self.labels[label];
+      match self.code[*pc as usize] {
+        Bytecode(Operator::Jmp, Operands::AS(_)) => {
+          edit_list.push((
+            *pc,
+            Bytecode::jmp(
+              (target_pc as isize - *pc as isize - 1)
+                .try_into()
+                .unwrap_or_else(|_| panic!("jump target is too far: {} - {}", target_pc, *pc)),
+            ),
+          ));
+        }
+        bc => panic!("Invalid bytecode for relocation: {}", bc),
+      }
+    }
+    edit_list.into_iter().for_each(|(pc, code)| self.edit(pc, code));
+  }
 }
 
 impl Display for BytecodeCtx {
@@ -569,13 +592,13 @@ impl Display for Bytecode {
       (LoadI, AB(op)) => write!(f, "{:<padding$} r{}, #{}", "loadi", op.dst, op.o1),
       (LoaduI, AB(op)) => write!(f, "{:<padding$} r{}, #{}", "loadui", op.dst, op.o1),
       (LoadC, AB(op)) => write!(f, "{:<padding$} r{}, @{}", "loadc", op.dst, op.o1),
-      (Move, ABS(op)) => write!(f, "{:<padding$} r{}, r{}", "move", op.dst, op.o1),
+      (Move, ABC(op)) => write!(f, "{:<padding$} r{}, r{}", "move", op.dst, op.o1),
       (Apply, AS(op)) => write!(f, "{:<padding$} r{}", "apply", op.dst),
       (Call, ABS(op)) => write!(f, "{:<padding$} r{}, f{}", "call", op.dst, op.o1),
       (Retu, N) => write!(f, "retu"),
       (Ret, AS(op)) => write!(f, "{:<padding$} r{}", "ret", op.dst),
       (Retn, ABS(op)) => write!(f, "{:<padding$} r{}", "retn", op.dst),
-      (Jmp, A(op)) => write!(f, "{:<padding$} #{}", "jmp", op.o1),
+      (Jmp, AS(op)) => write!(f, "{:<padding$} #{}", "jmp", op.dst),
       (Goto, AS(op)) => write!(f, "{:<padding$} #{}", "goto", op.dst),
       (AddDI, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, #{}", "add.di", op.dst, op.o1, op.o2),
       (SubDI, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
