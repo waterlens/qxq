@@ -59,6 +59,7 @@ impl Affinity {
     "!=" => (Self::INFIX_START + 1, Self::INFIX_START + 2),
     "<=" => (Self::INFIX_START + 1, Self::INFIX_START + 2),
     ">=" => (Self::INFIX_START + 1, Self::INFIX_START + 2),
+    "@" => (Self::INFIX_START + 8, Self::INFIX_START + 7),
     "+" => (Self::INFIX_START + 3, Self::INFIX_START + 4),
     "-" => (Self::INFIX_START + 3, Self::INFIX_START + 4),
     "*" => (Self::INFIX_START + 5, Self::INFIX_START + 6),

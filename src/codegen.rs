@@ -153,7 +153,6 @@ struct ValInfo<'a> {
 
 struct Frame<'a> {
   regs: Vec<ValInfo<'a>>,
-  symbols: IndexMap<TokenStr<'a>, RegId>,
 }
 
 struct Stack<'a> {
@@ -162,7 +161,7 @@ struct Stack<'a> {
 
 impl<'a> Frame<'a> {
   fn new() -> Self {
-    Self { regs: vec![], symbols: IndexMap::new() }
+    Self { regs: vec![] }
   }
 }
 
@@ -172,10 +171,21 @@ impl<'a> Stack<'a> {
   }
 }
 
+struct Scope<'a> {
+  symbols: Vec<IndexMap<TokenStr<'a>, RegId>>,
+}
+
+impl<'a> Scope<'a> {
+  fn new() -> Self {
+    Self { symbols: vec![IndexMap::new()] }
+  }
+}
+
 pub struct CodeGenCtx<'a> {
   arena: &'a Bump,
   diagnostic: Rc<Diagnostic>,
   stack_frame: Stack<'a>,
+  scope: Scope<'a>,
   constant_pool: ConstantPool,
   bc: BytecodeCtx,
 }
@@ -188,10 +198,9 @@ macro_rules! frame_top {
 
 macro_rules! symbols_top {
   ($self:ident) => {
-    &mut frame_top!($self).symbols
+    &mut $self.scope.symbols.last_mut().unwrap()
   };
 }
-
 macro_rules! free_reg {
   ($self:ident) => {
     $self.stack_frame.frames.last().unwrap().regs.len()
@@ -220,9 +229,10 @@ impl<'a> CodeGenCtx<'a> {
   pub fn new(arena: &'a Bump) -> Self {
     let diagnostic = Rc::new(Diagnostic::new());
     let stack_frame = Stack::new();
+    let scope = Scope::new();
     let constant_pool = ConstantPool::new(diagnostic.clone());
     let bc = BytecodeCtx::new();
-    Self { arena, diagnostic, stack_frame, constant_pool, bc }
+    Self { arena, diagnostic, stack_frame, scope, constant_pool, bc }
   }
 
   fn allocate_temporary(&mut self) -> RegId {
@@ -463,7 +473,22 @@ impl<'a> CodeGenCtx<'a> {
       }
       Op(token_str) => todo!(),
       OpApply { op, pair, args } => self.emit_op(op, *pair, args, data, control, next),
-      Apply { func, pair, args } => todo!(),
+      Apply { func, pair, args } => {
+        let mut args_regs = Vec::with_capacity(args.len());
+        args_regs.fill_with(|| self.allocate_temporary());
+        for (elem, r) in (*args).iter().zip(args_regs.into_iter()) {
+          let l = self.bc.fresh_label();
+          let c = Control::Pos(l);
+          self.emit_expr(
+            elem,
+            DataDest::Loc(Location::Slot(r)),
+            ControlDest::Uncond(c),
+            Control::Pos(l),
+          );
+          self.bc.push_label(l);
+        }
+        // TODO: call prepare
+      }
       Bind { rec, name, expr } => {
         let r = self.allocate_named(name);
         if *rec {
@@ -474,7 +499,7 @@ impl<'a> CodeGenCtx<'a> {
           self.update_symbols(name, r);
         }
       }
-      Fn { params, body } => todo!(),
+      Fn { params, body } => {}
       Block(exprs) => match exprs {
         [] => todo!("empty block"),
         [expr] => self.emit_expr(expr, data, control, next),
@@ -505,7 +530,12 @@ impl<'a> CodeGenCtx<'a> {
         for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
           let l = self.bc.fresh_label();
           let c = Control::Pos(l);
-          self.emit_expr(elem, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(c), c);
+          self.emit_expr(
+            elem,
+            DataDest::Loc(Location::Slot(r)),
+            ControlDest::Uncond(c),
+            Control::Pos(l),
+          );
           self.bc.push_label(l);
         }
         self.bc.push(Bytecode::nop()); // MAKE TUPLE
