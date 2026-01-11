@@ -317,7 +317,7 @@ define_bytecode! {
   LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<10} r{}, #{}", "loadui", op.dst, op.o1),
   LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, @{}", "loadc", op.dst, op.o1),
   Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<10} r{}, r{}", "move", op.dst, op.o1),
-  Apply  (ABS, OpABS, op)   fn apply(dst: Op8, o1: OpS16)         { dst, o1 }     => ("{:<10} r{}", "apply", op.dst),
+  Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, #{}", "apply", op.dst, op.o1),
   Call   (ABS, OpABS, op)   fn call(dst: Op8, o1: OpS16)          { dst, o1 }     => ("{:<10} r{}, f{}", "call", op.dst, op.o1),
   Retu   (N)                fn retu()                             {}              => ("retu"),
   Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("{:<10} r{}", "ret", op.dst),
