@@ -7,7 +7,7 @@ use bumpalo::Bump;
 use indexmap::IndexMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, Label, Operands, Operator, UnfinishedBytecode},
+  bytecode::{Bytecode, BytecodeCtx, Label, Operands, Operator},
   diagnostic::Diagnostic,
   parser::{Expr, ExprRef, ExprsRef, SynTree},
   tokenizer::{Paired, TokenStr},
@@ -379,29 +379,27 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) {
-    let ubc = match op {
-      "+" => Operator::AddDD,
-      "-" => Operator::SubDD,
-      "*" => Operator::MulDD,
-      "/" => Operator::DivDD,
-      _ => unreachable!("unknown binary operator: {}", op),
+    let make_bc = |op_str: &str, dst: RegId, o1: RegId, o2: RegId| -> Bytecode {
+      let dst = dst.into();
+      let o1 = o1.into();
+      let o2 = o2.into();
+      match op_str {
+        "+" => Bytecode::adddd(dst, o1, o2),
+        "-" => Bytecode::subdd(dst, o1, o2),
+        "*" => Bytecode::muldd(dst, o1, o2),
+        "/" => Bytecode::divdd(dst, o1, o2),
+        _ => unreachable!("unknown binary operator: {}", op_str),
+      }
     };
+
     match data {
       DataDest::Loc(Location::Slot(r)) => {
-        self.bc.push(UnfinishedBytecode::new(ubc).fill_operands(Operands::XYZ(Operands::xyz(
-          r.into(),
-          opr1.into(),
-          opr2.into(),
-        ))));
+        self.bc.push(make_bc(op, r, opr1, opr2));
         self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
       }
       DataDest::Effect | DataDest::Loc(Location::Temporary) => {
         let r = self.allocate_temporary();
-        self.bc.push(UnfinishedBytecode::new(ubc).fill_operands(Operands::XYZ(Operands::xyz(
-          r.into(),
-          opr1.into(),
-          opr2.into(),
-        ))));
+        self.bc.push(make_bc(op, r, opr1, opr2));
         self.emit_store(Value::Loc(Location::Temporary), data, control, next);
       }
     }
@@ -583,6 +581,9 @@ mod tests {
 
   #[test]
   fn test1() {
-    test_codegen("let rec x = x + 1; 1", "");
+    test_codegen(
+      "let rec x = x + 1; 1",
+      "--- Integer Constants ---\n@0: 1\n--- String Constants ---\n\n--- Bytecode ---\nmove       r1, r0\nloadc      r2, @0\nadd.dd     r0, r1, r2\nloadc      r1, @0\n",
+    );
   }
 }

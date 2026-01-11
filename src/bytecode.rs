@@ -173,219 +173,11 @@ pub struct OpAS {
 pub type OpCond = OpAB;
 pub type OpCondS = OpABS;
 
+#[derive(Debug, Clone, Copy)]
 pub enum OpKind {
   Dyn,
   CInt,
   IInt,
-}
-
-/*
-trap                    {trap number}, {start register}, {end register}
-nop
-extra-argument          {payload}
-load-immediate          {value}
-load-unsigned-immediate {value}
-load-constant           {value}
-apply                   {callable base (closure)}
-call                    {callable base (function)} {function number}
-return
-return                  {return value register}
-return-n                {return value register}
-jump                    {pc offset}
-*/
-
-#[derive(Debug, Copy, Clone)]
-pub struct Bytecode(Operator, Operands);
-
-impl Bytecode {
-  pub fn trap(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::Trap).fill_operands(Operands::ABC(Operands::abc(dst, o1, o2)))
-  }
-
-  pub fn nop() -> Self {
-    UnfinishedBytecode(Operator::Nop).fill_operands(Operands::N)
-  }
-
-  pub fn exta(o1: Op24) -> Self {
-    UnfinishedBytecode(Operator::Exta).fill_operands(Operands::A(Operands::a(o1)))
-  }
-
-  pub fn loadi(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::LoadI).fill_operands(Operands::AB(Operands::ab(dst, o1)))
-  }
-
-  pub fn loadui(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::LoaduI).fill_operands(Operands::AB(Operands::ab(dst, o1)))
-  }
-
-  pub fn loadc(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::LoadC).fill_operands(Operands::AB(Operands::ab(dst, o1)))
-  }
-
-  pub fn mov(dst: Op8, o1: Op8) -> Self {
-    let o2 = 0.into();
-    UnfinishedBytecode(Operator::Move).fill_operands(Operands::ABC(Operands::abc(dst, o1, o2)))
-  }
-
-  pub fn apply(dst: Op8, o1: OpS16) -> Self {
-    UnfinishedBytecode(Operator::Apply).fill_operands(Operands::ABS(Operands::ab_signed(dst, o1)))
-  }
-
-  pub fn call(dst: Op8, o1: OpS16) -> Self {
-    UnfinishedBytecode(Operator::Call).fill_operands(Operands::ABS(Operands::ab_signed(dst, o1)))
-  }
-
-  pub fn retu() -> Self {
-    UnfinishedBytecode(Operator::Retu).fill_operands(Operands::N)
-  }
-
-  pub fn ret(dst: OpS24) -> Self {
-    UnfinishedBytecode(Operator::Ret).fill_operands(Operands::AS(Operands::a_signed(dst)))
-  }
-
-  pub fn retn(dst: Op8, o1: OpS16) -> Self {
-    UnfinishedBytecode(Operator::Retn).fill_operands(Operands::ABS(Operands::ab_signed(dst, o1)))
-  }
-
-  pub fn jmp(o1: OpS24) -> Self {
-    UnfinishedBytecode(Operator::Jmp).fill_operands(Operands::AS(Operands::a_signed(o1)))
-  }
-
-  pub fn goto(dst: OpS24) -> Self {
-    UnfinishedBytecode(Operator::Goto).fill_operands(Operands::AS(Operands::a_signed(dst)))
-  }
-
-  pub fn adddi(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::AddDI).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn subdi(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::SubDI).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn muldi(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::MulDI).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn divdi(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::DivDI).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn moddi(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::ModDI).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn adddd(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::AddDD).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn subdd(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::SubDD).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn muldd(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::MulDD).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn divdd(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::DivDD).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn moddd(dst: Op8, o1: Op8, o2: Op8) -> Self {
-    UnfinishedBytecode(Operator::ModDD).fill_operands(Operands::XYZ(Operands::xyz(dst, o1, o2)))
-  }
-
-  pub fn cmpeqdi(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpEqDI).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpnedi(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpNeDI).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpltdi(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpLtDI).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpledi(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpLeDI).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpgtdi(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpGtDI).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpgedi(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpGeDI).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpeqdc(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpEqDC).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpnedc(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpNeDC).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpltdc(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpLtDC).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpledc(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpLeDC).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpgtdc(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpGtDC).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-
-  pub fn cmpgedc(dst: Op8, o1: Op16) -> Self {
-    UnfinishedBytecode(Operator::CmpGeDC).fill_operands(Operands::Cond(Operands::cond(dst, o1)))
-  }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Operator {
-  Trap,
-  Nop,
-  Exta,
-  LoadI,
-  LoaduI,
-  LoadC,
-  Move,
-  Apply,
-  Call,
-  Retu,
-  Ret,
-  Retn,
-  Jmp,
-  Goto,
-
-  AddDI,
-  SubDI,
-  MulDI,
-  DivDI,
-  ModDI,
-
-  AddDD,
-  SubDD,
-  MulDD,
-  DivDD,
-  ModDD,
-
-  CmpEqDI,
-  CmpNeDI,
-  CmpLtDI,
-  CmpLeDI,
-  CmpGtDI,
-  CmpGeDI,
-
-  CmpEqDC,
-  CmpNeDC,
-  CmpLtDC,
-  CmpLeDC,
-  CmpGtDC,
-  CmpGeDC,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -435,55 +227,129 @@ impl Operands {
   }
 }
 
-pub struct UnfinishedBytecode(Operator);
-
-impl UnfinishedBytecode {
-  pub fn new(operator: Operator) -> Self {
-    Self(operator)
-  }
-  pub fn fill_operands(self, operands: Operands) -> Bytecode {
-    use Operands::*;
-    use Operator::*;
-    match (self.0, operands) {
-      (Trap, ABC(_)) => Bytecode(self.0, operands),
-      (Nop, N) => Bytecode(self.0, operands),
-      (Exta, A(_)) => Bytecode(self.0, operands),
-      (LoadI, AB(_)) => Bytecode(self.0, operands),
-      (LoaduI, AB(_)) => Bytecode(self.0, operands),
-      (LoadC, AB(_)) => Bytecode(self.0, operands),
-      (Move, ABC(_)) => Bytecode(self.0, operands),
-      (Apply, ABS(_)) => Bytecode(self.0, operands),
-      (Call, ABS(_)) => Bytecode(self.0, operands),
-      (Retu, N) => Bytecode(self.0, operands),
-      (Ret, AS(_)) => Bytecode(self.0, operands),
-      (Retn, ABS(_)) => Bytecode(self.0, operands),
-      (Jmp, AS(_)) => Bytecode(self.0, operands),
-      (Goto, AS(_)) => Bytecode(self.0, operands),
-      (AddDI, XYZ(_)) => Bytecode(self.0, operands),
-      (SubDI, XYZ(_)) => Bytecode(self.0, operands),
-      (MulDI, XYZ(_)) => Bytecode(self.0, operands),
-      (DivDI, XYZ(_)) => Bytecode(self.0, operands),
-      (ModDI, XYZ(_)) => Bytecode(self.0, operands),
-      (AddDD, XYZ(_)) => Bytecode(self.0, operands),
-      (SubDD, XYZ(_)) => Bytecode(self.0, operands),
-      (MulDD, XYZ(_)) => Bytecode(self.0, operands),
-      (DivDD, XYZ(_)) => Bytecode(self.0, operands),
-      (ModDD, XYZ(_)) => Bytecode(self.0, operands),
-      (CmpEqDI, Cond(_)) => Bytecode(self.0, operands),
-      (CmpNeDI, Cond(_)) => Bytecode(self.0, operands),
-      (CmpLtDI, Cond(_)) => Bytecode(self.0, operands),
-      (CmpLeDI, Cond(_)) => Bytecode(self.0, operands),
-      (CmpGtDI, Cond(_)) => Bytecode(self.0, operands),
-      (CmpGeDI, Cond(_)) => Bytecode(self.0, operands),
-      (CmpEqDC, Cond(_)) => Bytecode(self.0, operands),
-      (CmpNeDC, Cond(_)) => Bytecode(self.0, operands),
-      (CmpLtDC, Cond(_)) => Bytecode(self.0, operands),
-      (CmpLeDC, Cond(_)) => Bytecode(self.0, operands),
-      (CmpGtDC, Cond(_)) => Bytecode(self.0, operands),
-      (CmpGeDC, Cond(_)) => Bytecode(self.0, operands),
-      _ => panic!("Invalid operands for operator: {:?} {:?}", self.0, operands),
+macro_rules! define_operators {
+  ( $( $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Operator {
+      $( $variant, )*
     }
   }
+}
+
+macro_rules! define_constructors {
+  (@step $variant:ident ( $op_enum:ident ) fn $fn_name:ident () {} ) => {
+    pub fn $fn_name() -> Self {
+      Self(Operator::$variant, Operands::$op_enum)
+    }
+  };
+
+  (@step $variant:ident ( $op_enum:ident, $op_struct:ident, $op_var:ident ) fn $fn_name:ident ( $($arg:ident : $arg_ty:ty),* ) { $($field:ident $(: $val:expr)?),* } ) => {
+    pub fn $fn_name($($arg : $arg_ty),*) -> Self {
+      Self(
+        Operator::$variant,
+        Operands::$op_enum($op_struct {
+          $($field $(: $val)?),*
+        })
+      )
+    }
+  };
+
+  ( $( $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
+    impl Bytecode {
+      $(
+        define_constructors!(@step $variant $op_info fn $fn_name $params $construct);
+      )*
+    }
+  }
+}
+
+macro_rules! define_display {
+  // Entry point
+  ( $( $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
+    impl Display for Bytecode {
+      fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+          $(
+            Operator::$variant => {
+              define_display!(@fmt_inner self.1, f, $op_info, $display)
+            }
+          )*
+        }
+        Ok(())
+      }
+    }
+  };
+
+  // Inner helpers
+  (@fmt_inner $val:expr, $f:ident, ($op_enum:ident), ($($fmt:tt)+)) => {
+    if let Operands::$op_enum = $val {
+      write!($f, $($fmt)+)?;
+    } else {
+      unreachable!("mismatched operands")
+    }
+  };
+
+  (@fmt_inner $val:expr, $f:ident, ($op_enum:ident, $op_struct:ident, $op_var:ident), ($($fmt:tt)+)) => {
+    if let Operands::$op_enum($op_var) = $val {
+      write!($f, $($fmt)+)?;
+    } else {
+      unreachable!("mismatched operands")
+    }
+  };
+}
+
+macro_rules! define_bytecode {
+  ( $($all:tt)* ) => {
+    define_operators!($($all)*);
+    define_constructors!($($all)*);
+    define_display!($($all)*);
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Bytecode(pub Operator, pub Operands);
+
+define_bytecode! {
+  Trap   (ABC, OpABC, op)   fn trap(dst: Op8, o1: Op8, o2: Op8)   { dst, o1, o2 } => ("{:<10} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
+  Nop    (N)                fn nop()                              {}              => ("nop"),
+  Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("{:<10} #{}", "exta", op.o1),
+  LoadI  (AB, OpAB, op)     fn loadi(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, #{}", "loadi", op.dst, op.o1),
+  LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<10} r{}, #{}", "loadui", op.dst, op.o1),
+  LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, @{}", "loadc", op.dst, op.o1),
+  Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<10} r{}, r{}", "move", op.dst, op.o1),
+  Apply  (ABS, OpABS, op)   fn apply(dst: Op8, o1: OpS16)         { dst, o1 }     => ("{:<10} r{}", "apply", op.dst),
+  Call   (ABS, OpABS, op)   fn call(dst: Op8, o1: OpS16)          { dst, o1 }     => ("{:<10} r{}, f{}", "call", op.dst, op.o1),
+  Retu   (N)                fn retu()                             {}              => ("retu"),
+  Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("{:<10} r{}", "ret", op.dst),
+  Retn   (ABS, OpABS, op)   fn retn(dst: Op8, o1: OpS16)          { dst, o1 }     => ("{:<10} r{}", "retn", op.dst),
+  Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("{:<10} #{}", "jmp", op.dst),
+  Goto   (AS, OpAS, op)     fn goto(dst: OpS24)                   { dst }         => ("{:<10} #{}", "goto", op.dst),
+
+  AddDI  (XYZ, OpXYZ, op)   fn adddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "add.di", op.dst, op.o1, op.o2),
+  SubDI  (XYZ, OpXYZ, op)   fn subdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
+  MulDI  (XYZ, OpXYZ, op)   fn muldi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "mul.di", op.dst, op.o1, op.o2),
+  DivDI  (XYZ, OpXYZ, op)   fn divdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "div.di", op.dst, op.o1, op.o2),
+  ModDI  (XYZ, OpXYZ, op)   fn moddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "mod.di", op.dst, op.o1, op.o2),
+
+  AddDD  (XYZ, OpXYZ, op)   fn adddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "add.dd", op.dst, op.o1, op.o2),
+  SubDD  (XYZ, OpXYZ, op)   fn subdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "sub.dd", op.dst, op.o1, op.o2),
+  MulDD  (XYZ, OpXYZ, op)   fn muldd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "mul.dd", op.dst, op.o1, op.o2),
+  DivDD  (XYZ, OpXYZ, op)   fn divdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
+  ModDD  (XYZ, OpXYZ, op)   fn moddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
+
+  CmpEqDI (Cond, OpCond, op) fn cmpeqdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
+  CmpNeDI (Cond, OpCond, op) fn cmpnedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.ne.di", op.dst, op.o1),
+  CmpLtDI (Cond, OpCond, op) fn cmpltdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.lt.di", op.dst, op.o1),
+  CmpLeDI (Cond, OpCond, op) fn cmpledi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.le.di", op.dst, op.o1),
+  CmpGtDI (Cond, OpCond, op) fn cmpgtdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.gt.di", op.dst, op.o1),
+  CmpGeDI (Cond, OpCond, op) fn cmpgedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.ge.di", op.dst, op.o1),
+
+  CmpEqDC (Cond, OpCond, op) fn cmpeqdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.eq.dc", op.dst, op.o1),
+  CmpNeDC (Cond, OpCond, op) fn cmpnedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.ne.dc", op.dst, op.o1),
+  CmpLtDC (Cond, OpCond, op) fn cmpltdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.lt.dc", op.dst, op.o1),
+  CmpLeDC (Cond, OpCond, op) fn cmpledc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.le.dc", op.dst, op.o1),
+  CmpGtDC (Cond, OpCond, op) fn cmpgtdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.gt.dc", op.dst, op.o1),
+  CmpGeDC (Cond, OpCond, op) fn cmpgedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.ge.dc", op.dst, op.o1),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -577,52 +443,5 @@ impl Display for BytecodeCtx {
       writeln!(f, "{code}")?;
     }
     Ok(())
-  }
-}
-
-impl Display for Bytecode {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    use Operands::*;
-    use Operator::*;
-    let padding = 10;
-    match (self.0, self.1) {
-      (Trap, ABC(op)) => write!(f, "{:<padding$} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
-      (Nop, N) => write!(f, "nop"),
-      (Exta, A(op)) => write!(f, "{:<padding$} #{}", "exta", op.o1),
-      (LoadI, AB(op)) => write!(f, "{:<padding$} r{}, #{}", "loadi", op.dst, op.o1),
-      (LoaduI, AB(op)) => write!(f, "{:<padding$} r{}, #{}", "loadui", op.dst, op.o1),
-      (LoadC, AB(op)) => write!(f, "{:<padding$} r{}, @{}", "loadc", op.dst, op.o1),
-      (Move, ABC(op)) => write!(f, "{:<padding$} r{}, r{}", "move", op.dst, op.o1),
-      (Apply, AS(op)) => write!(f, "{:<padding$} r{}", "apply", op.dst),
-      (Call, ABS(op)) => write!(f, "{:<padding$} r{}, f{}", "call", op.dst, op.o1),
-      (Retu, N) => write!(f, "retu"),
-      (Ret, AS(op)) => write!(f, "{:<padding$} r{}", "ret", op.dst),
-      (Retn, ABS(op)) => write!(f, "{:<padding$} r{}", "retn", op.dst),
-      (Jmp, AS(op)) => write!(f, "{:<padding$} #{}", "jmp", op.dst),
-      (Goto, AS(op)) => write!(f, "{:<padding$} #{}", "goto", op.dst),
-      (AddDI, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, #{}", "add.di", op.dst, op.o1, op.o2),
-      (SubDI, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
-      (MulDI, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, #{}", "mul.di", op.dst, op.o1, op.o2),
-      (DivDI, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, #{}", "div.di", op.dst, op.o1, op.o2),
-      (ModDI, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, #{}", "mod.di", op.dst, op.o1, op.o2),
-      (AddDD, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, r{}", "add.dd", op.dst, op.o1, op.o2),
-      (SubDD, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, r{}", "sub.dd", op.dst, op.o1, op.o2),
-      (MulDD, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, r{}", "mul.dd", op.dst, op.o1, op.o2),
-      (DivDD, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
-      (ModDD, XYZ(op)) => write!(f, "{:<padding$} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
-      (CmpEqDI, Cond(op)) => write!(f, "{:<padding$} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
-      (CmpNeDI, Cond(op)) => write!(f, "{:<padding$} r{}, #{}", "cmp.ne.di", op.dst, op.o1),
-      (CmpLtDI, Cond(op)) => write!(f, "{:<padding$} r{}, #{}", "cmp.lt.di", op.dst, op.o1),
-      (CmpLeDI, Cond(op)) => write!(f, "{:<padding$} r{}, #{}", "cmp.le.di", op.dst, op.o1),
-      (CmpGtDI, Cond(op)) => write!(f, "{:<padding$} r{}, #{}", "cmp.gt.di", op.dst, op.o1),
-      (CmpGeDI, Cond(op)) => write!(f, "{:<padding$} r{}, #{}", "cmp.ge.di", op.dst, op.o1),
-      (CmpEqDC, Cond(op)) => write!(f, "{:<padding$} r{}, @{}", "cmp.eq.dc", op.dst, op.o1),
-      (CmpNeDC, Cond(op)) => write!(f, "{:<padding$} r{}, @{}", "cmp.ne.dc", op.dst, op.o1),
-      (CmpLtDC, Cond(op)) => write!(f, "{:<padding$} r{}, @{}", "cmp.lt.dc", op.dst, op.o1),
-      (CmpLeDC, Cond(op)) => write!(f, "{:<padding$} r{}, @{}", "cmp.le.dc", op.dst, op.o1),
-      (CmpGtDC, Cond(op)) => write!(f, "{:<padding$} r{}, @{}", "cmp.gt.dc", op.dst, op.o1),
-      (CmpGeDC, Cond(op)) => write!(f, "{:<padding$} r{}, @{}", "cmp.ge.dc", op.dst, op.o1),
-      _ => panic!("Invalid operands for operator: {:?} {:?}", self.0, self.1),
-    }
   }
 }
