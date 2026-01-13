@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
 use bumpalo::Bump;
+use slotmap::SlotMap;
 
 use crate::sexp::{Sexp, SexpPool, ToSexp};
 use crate::tokenizer::{Keyword, Paired, Token, TokenStr, TokenTag, Tokenizer};
@@ -78,62 +79,62 @@ impl Affinity {
 
 pub const BUILTIN_CTORS: phf::Map<&'static str, usize> = phf::phf_map!["true" => 0, "false" => 0];
 
-pub type ExprRef<'a> = &'a Expr<'a>;
-pub type ExprsRef<'a> = &'a [ExprRef<'a>];
+pub type ExprRef<'a, I> = &'a Expr<'a, I>;
+pub type ExprsRef<'a, I> = &'a [ExprRef<'a, I>];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Expr<'a> {
-  IntLiteral(i128),
-  StrLiteral(&'a str),
-  Ident(TokenStr<'a>),
-  Op(TokenStr<'a>),
-  OpApply { op: ExprRef<'a>, pair: Option<Paired>, args: ExprsRef<'a> },
-  Apply { func: ExprRef<'a>, pair: Option<Paired>, args: ExprsRef<'a> },
-  Bind { rec: bool, name: TokenStr<'a>, expr: ExprRef<'a> },
-  Fn { params: ExprsRef<'a>, body: ExprRef<'a> },
-  Block(ExprsRef<'a>),
-  If(ExprRef<'a>, ExprRef<'a>, ExprRef<'a>),
-  Tuple(ExprsRef<'a>),
+pub enum Expr<'a, I> {
+  IntLiteral(i128, I),
+  StrLiteral(&'a str, I),
+  Ident(TokenStr<'a>, I),
+  Op(TokenStr<'a>, I),
+  OpApply { op: ExprRef<'a, I>, pair: Option<Paired>, args: ExprsRef<'a, I>, info: I },
+  Apply { func: ExprRef<'a, I>, pair: Option<Paired>, args: ExprsRef<'a, I>, info: I },
+  Bind { rec: bool, name: TokenStr<'a>, expr: ExprRef<'a, I>, info: I },
+  Fn { params: ExprsRef<'a, I>, body: ExprRef<'a, I>, info: I },
+  Block(ExprsRef<'a, I>, I),
+  If(ExprRef<'a, I>, ExprRef<'a, I>, ExprRef<'a, I>, I),
+  Tuple(ExprsRef<'a, I>, I),
 }
 
-type ExprCon<'a> = Expr<'a>;
+type ExprCon<'a, I> = Expr<'a, I>;
 
-impl ToSexp for Expr<'_> {
+impl<I> ToSexp for Expr<'_, I> {
   fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
     use Expr::*;
     match self {
-      IntLiteral(n) => pool.atom(n.to_string()),
-      StrLiteral(s) => pool.atom(s),
-      Ident(s) => pool.atom(s.as_ref()),
-      Op(s) => pool.atom(s.as_ref()),
-      OpApply { op, pair: _, args } => pool
+      IntLiteral(n, _) => pool.atom(n.to_string()),
+      StrLiteral(s, _) => pool.atom(s),
+      Ident(s, _) => pool.atom(s.as_ref()),
+      Op(s, _) => pool.atom(s.as_ref()),
+      OpApply { op, pair: _, args, info: _ } => pool
         .non_empty_list(op.to_sexp(pool), args.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>()),
-      Apply { func, pair: _, args } => pool.non_empty_list(
+      Apply { func, pair: _, args, info: _ } => pool.non_empty_list(
         func.to_sexp(pool),
         args.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>(),
       ),
-      Bind { rec, name, expr } => pool.list(&[
+      Bind { rec, name, expr, info: _ } => pool.list(&[
         pool.atom(if *rec { "let-rec" } else { "let" }),
         pool.atom(name.as_ref()),
         expr.to_sexp(pool),
       ]),
-      Fn { params, body } => pool.list(&[
+      Fn { params, body, info: _ } => pool.list(&[
         pool.atom("fn"),
         pool.list(params.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>()),
         body.to_sexp(pool),
       ]),
-      Block(xs) => pool
+      Block(xs, _) => pool
         .non_empty_list(pool.atom("block"), xs.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>()),
-      If(a, b, c) => {
+      If(a, b, c, _) => {
         pool.list(&[pool.atom("if"), a.to_sexp(pool), b.to_sexp(pool), c.to_sexp(pool)])
       }
-      Tuple(xs) => pool
+      Tuple(xs, _) => pool
         .non_empty_list(pool.atom("tuple"), xs.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>()),
     }
   }
 }
 
-impl std::fmt::Display for Expr<'_> {
+impl<I> std::fmt::Display for Expr<'_, I> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let pool = SexpPool::new();
     let sexp = self.to_sexp(&pool);
@@ -141,11 +142,12 @@ impl std::fmt::Display for Expr<'_> {
   }
 }
 
-pub struct SynTree<'a> {
-  pub root: ExprRef<'a>,
+pub struct SynTree<'a, I> {
+  pub root: ExprRef<'a, I>,
+  pub information: SlotMap<InfoKey, ()>,
 }
 
-impl std::fmt::Display for SynTree<'_> {
+impl<I> std::fmt::Display for SynTree<'_, I> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let pool = SexpPool::new();
     let sexp = self.root.to_sexp(&pool);
@@ -153,10 +155,13 @@ impl std::fmt::Display for SynTree<'_> {
   }
 }
 
+pub type InfoKey = slotmap::DefaultKey;
+
 pub struct Parser<'a> {
   arena: &'a Bump,
   tokenizer: Tokenizer<'a>,
   token: Option<&'a Token<'a>>,
+  information: SlotMap<InfoKey, ()>,
 }
 
 pub struct PeekResult<'a, T> {
@@ -164,12 +169,13 @@ pub struct PeekResult<'a, T> {
 }
 
 type PeekToken<'a> = Result<PeekResult<'a, Token<'a>>>;
-type PeekExpr<'a> = Result<PeekResult<'a, Expr<'a>>>;
+type PeekExpr<'a> = Result<PeekResult<'a, Expr<'a, InfoKey>>>;
 
 impl<'a> Parser<'a> {
   pub fn new(arena: &'a Bump, src: &'a str) -> Self {
     let tokenizer: Tokenizer<'a> = Tokenizer::new(arena, src);
-    Self { arena, tokenizer, token: None }
+    let information: SlotMap<InfoKey, ()> = SlotMap::new();
+    Self { arena, tokenizer, token: None, information }
   }
 
   fn skip_token(&mut self) {
@@ -315,7 +321,7 @@ impl<'a> Parser<'a> {
     let arena = self.arena;
     let tok = self.next_ident(false)?;
     let name = TokenStr::from_span(arena, tok.inner.span);
-    Ok(PeekResult { inner: arena.alloc(ExprCon::Ident(name)) })
+    Ok(PeekResult { inner: arena.alloc(ExprCon::Ident(name, self.information.insert(()))) })
   }
 
   fn parse_expr_with_affinity<'t>(&'t mut self, minaff: u32) -> PeekExpr<'a> {
@@ -323,10 +329,13 @@ impl<'a> Parser<'a> {
     let arena = self.arena;
     let lhs_token = self.next_token()?;
     let mut lhs_op = None;
-    let mut lhs: &Expr = match lhs_token.inner.tag {
-      IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n)),
-      StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s)),
-      Identifer => arena.alloc(ExprCon::Ident(TokenStr::from_span(arena, lhs_token.inner.span))),
+    let mut lhs: ExprRef<'_, InfoKey> = match lhs_token.inner.tag {
+      IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n, self.information.insert(()))),
+      StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s, self.information.insert(()))),
+      Identifer => arena.alloc(ExprCon::Ident(
+        TokenStr::from_span(arena, lhs_token.inner.span),
+        self.information.insert(()),
+      )),
       PairedOpen(po) => {
         let inner_token = self.peek_token()?;
         match inner_token.inner.tag {
@@ -337,7 +346,7 @@ impl<'a> Parser<'a> {
 
             let _ = self.expect_paired_close(po, false)?;
 
-            arena.alloc(ExprCon::Op(op.into()))
+            arena.alloc(ExprCon::Op(op.into(), self.information.insert(())))
           }
           _ => {
             let expr = self.parse_expr()?;
@@ -357,7 +366,8 @@ impl<'a> Parser<'a> {
               }
 
               let _ = self.expect_paired_close(po, false)?;
-              arena.alloc(ExprCon::Tuple(arena.alloc_slice_copy(&exprs)))
+              arena
+                .alloc(ExprCon::Tuple(arena.alloc_slice_copy(&exprs), self.information.insert(())))
             } else {
               let _ = self.expect_paired_close(po, false)?;
 
@@ -368,7 +378,7 @@ impl<'a> Parser<'a> {
       }
       RawOp(op) => {
         lhs_op = Some(op);
-        arena.alloc(ExprCon::Op(op.into()))
+        arena.alloc(ExprCon::Op(op.into(), self.information.insert(())))
       }
       Op(op) => {
         let (_laff, raff) =
@@ -376,9 +386,10 @@ impl<'a> Parser<'a> {
         let rhs_expr = self.parse_expr_with_affinity(raff)?;
 
         arena.alloc(ExprCon::OpApply {
-          op: arena.alloc(ExprCon::Op(op.into())),
+          op: arena.alloc(ExprCon::Op(op.into(), self.information.insert(()))),
           pair: None,
           args: arena.alloc_slice_clone(&[rhs_expr.inner]),
+          info: self.information.insert(()),
         })
       }
       Kw(kw) => match kw {
@@ -414,7 +425,11 @@ impl<'a> Parser<'a> {
           let body = self.parse_exprs()?;
 
           let _ = self.expect_keyword(Keyword::End, true)?;
-          arena.alloc(ExprCon::Fn { params: arena.alloc_slice_copy(&params), body: body.inner })
+          arena.alloc(ExprCon::Fn {
+            params: arena.alloc_slice_copy(&params),
+            body: body.inner,
+            info: self.information.insert(()),
+          })
         }
         Keyword::Let => {
           let is_rec = self.peek_keyword(Keyword::Rec, false);
@@ -428,7 +443,12 @@ impl<'a> Parser<'a> {
 
           let body = self.parse_expr()?;
 
-          arena.alloc(ExprCon::Bind { rec: is_rec, name, expr: body.inner })
+          arena.alloc(ExprCon::Bind {
+            rec: is_rec,
+            name,
+            expr: body.inner,
+            info: self.information.insert(()),
+          })
         }
         Keyword::If => {
           let condition = self.parse_expr()?;
@@ -455,7 +475,12 @@ impl<'a> Parser<'a> {
 
           let _ = self.expect_keyword(Keyword::End, true)?;
 
-          arena.alloc(ExprCon::If(condition.inner, then_branch.inner, else_branch.inner))
+          arena.alloc(ExprCon::If(
+            condition.inner,
+            then_branch.inner,
+            else_branch.inner,
+            self.information.insert(()),
+          ))
         }
         _ => return Err(anyhow::anyhow!("unexpected keyword {}", lhs_token.inner)),
       },
@@ -504,24 +529,27 @@ impl<'a> Parser<'a> {
 
           if let Some(op) = lhs_op {
             lhs = arena.alloc(ExprCon::OpApply {
-              op: arena.alloc(ExprCon::Op(op.into())),
+              op: arena.alloc(ExprCon::Op(op.into(), self.information.insert(()))),
               pair: Some(po),
               args: arena.alloc_slice_clone(&exprs),
+              info: self.information.insert(()),
             });
           } else {
             lhs = arena.alloc(ExprCon::Apply {
               func: lhs,
               pair: Some(po),
               args: arena.alloc_slice_clone(&exprs),
+              info: self.information.insert(()),
             });
           }
         } else {
-          let old_lhs: &Expr = lhs;
+          let old_lhs: ExprRef<'_, InfoKey> = lhs;
 
           lhs = arena.alloc(ExprCon::OpApply {
-            op: arena.alloc(ExprCon::Op(op_str.into())),
+            op: arena.alloc(ExprCon::Op(op_str.into(), self.information.insert(()))),
             pair: None,
             args: arena.alloc_slice_clone(&[old_lhs]),
+            info: self.information.insert(()),
           });
         }
 
@@ -537,12 +565,13 @@ impl<'a> Parser<'a> {
 
         let rhs = self.parse_expr_with_affinity(raff)?;
 
-        let old_lhs: &Expr = lhs;
+        let old_lhs: ExprRef<'_, InfoKey> = lhs;
 
         lhs = arena.alloc(ExprCon::OpApply {
-          op: arena.alloc(ExprCon::Op(op_str.into())),
+          op: arena.alloc(ExprCon::Op(op_str.into(), self.information.insert(()))),
           pair: None,
           args: arena.alloc_slice_clone(&[old_lhs, rhs.inner]),
+          info: self.information.insert(()),
         });
 
         lhs_op = None;
@@ -588,13 +617,17 @@ impl<'a> Parser<'a> {
       self.skip_token();
     }
 
-    Ok(PeekResult { inner: arena.alloc(ExprCon::Block(arena.alloc_slice_clone(&exprs))) })
+    Ok(PeekResult {
+      inner: arena
+        .alloc(ExprCon::Block(arena.alloc_slice_clone(&exprs), self.information.insert(()))),
+    })
   }
 
-  pub fn parse(&mut self) -> Result<SynTree<'a>> {
+  pub fn parse(mut self) -> Result<SynTree<'a, InfoKey>> {
     let root = self.parse_exprs()?;
     self.expect_reach_eof()?;
-    Ok(SynTree { root: root.inner })
+    let information = self.information;
+    Ok(SynTree { root: root.inner, information })
   }
 }
 

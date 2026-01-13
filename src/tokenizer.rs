@@ -1,5 +1,5 @@
 use anyhow::Result;
-use small_map::ASmallMap;
+use small_map::RapidSmallMap;
 
 use std::{
   fmt::Display,
@@ -255,8 +255,8 @@ impl<'a, 'b> Tokenizer<'a>
 where
   'a: 'b,
 {
-  const KEYWORDS: Lazy<ASmallMap<16, &'static [char], Keyword>> = Lazy::new(|| {
-    let mut map: ASmallMap<16, &'static [char], Keyword> = ASmallMap::new();
+  const KEYWORDS: Lazy<RapidSmallMap<16, &'static [char], Keyword>> = Lazy::new(|| {
+    let mut map: RapidSmallMap<16, &'static [char], Keyword> = RapidSmallMap::new();
     map.insert(&['f', 'n'], Keyword::Fn);
     map.insert(&['l', 'e', 't'], Keyword::Let);
     map.insert(&['r', 'e', 'c'], Keyword::Rec);

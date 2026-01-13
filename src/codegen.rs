@@ -7,9 +7,9 @@ use bumpalo::Bump;
 use indexmap::IndexMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, Label, Operands, Operator},
+  bytecode::{Bytecode, BytecodeCtx, Label},
   diagnostic::Diagnostic,
-  parser::{Expr, ExprRef, ExprsRef, SynTree},
+  parser::{Expr, ExprRef, ExprsRef, SynTree, InfoKey},
   tokenizer::{Paired, TokenStr},
 };
 
@@ -442,14 +442,14 @@ impl<'a> CodeGenCtx<'a> {
 
   fn emit_op(
     &mut self,
-    op: ExprRef<'a>,
+    op: ExprRef<'a, InfoKey>,
     _pair: Option<Paired>,
-    args: ExprsRef<'a>,
+    args: ExprsRef<'a, InfoKey>,
     data: DataDest,
     control: ControlDest,
     next: Control,
   ) {
-    if let Expr::Op(op_str) = op {
+    if let Expr::Op(op_str, _) = op {
       match op_str.0 {
         "+" | "-" | "*" | "/" => {
           if args.len() == 2 {
@@ -491,16 +491,16 @@ impl<'a> CodeGenCtx<'a> {
 
   fn emit_expr_maybe_value<'b>(
     &'b mut self,
-    expr: ExprRef<'a>,
+    expr: ExprRef<'a, InfoKey>,
     data: DataDest,
     control: ControlDest,
     next: Control,
   ) -> Option<Value<'a>> {
     use Expr::*;
     match expr {
-      IntLiteral(i) => Some(Value::IntLiteral(*i)),
-      StrLiteral(s) => Some(Value::StrLiteral(s)),
-      Ident(token_str) => {
+      IntLiteral(i, _) => Some(Value::IntLiteral(*i)),
+      StrLiteral(s, _) => Some(Value::StrLiteral(s)),
+      Ident(token_str, _) => {
         let r = *symbols_top!(self).get(token_str).unwrap_or_else(|| {
           self.diagnostic.error(&format!("undeclared identifier: {}", token_str.0))
         });
@@ -513,24 +513,24 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
-  fn emit_expr(&mut self, expr: ExprRef<'a>, data: DataDest, control: ControlDest, next: Control) {
+  fn emit_expr(&mut self, expr: ExprRef<'a, InfoKey>, data: DataDest, control: ControlDest, next: Control) {
     use Expr::*;
     match expr {
-      IntLiteral(i) => {
+      IntLiteral(i, _) => {
         self.emit_store(Value::IntLiteral(*i), data, control, next);
       }
-      StrLiteral(s) => {
+      StrLiteral(s, _) => {
         self.emit_store(Value::StrLiteral(s), data, control, next);
       }
-      Ident(token_str) => {
+      Ident(token_str, _) => {
         let r = *symbols_top!(self).get(token_str).unwrap_or_else(|| {
           self.diagnostic.error(&format!("undeclared identifier: {}", token_str.0))
         });
         self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
       }
-      Op(token_str) => todo!(),
-      OpApply { op, pair, args } => self.emit_op(op, *pair, args, data, control, next),
-      Apply { func, pair: _, args } => {
+      Op(token_str, _) => todo!(),
+      OpApply { op, pair, args, info: _ } => self.emit_op(op, *pair, args, data, control, next),
+      Apply { func, pair: _, args, info: _ } => {
         let func_reg = self.allocate_temporary();
         let l = self.bc.fresh_label();
         let c = Control::Pos(l);
@@ -556,7 +556,7 @@ impl<'a> CodeGenCtx<'a> {
         self.bc.push(Bytecode::apply(func_reg.into(), args_len.into()));
         self.emit_store(Value::Loc(Location::Slot(func_reg)), data, control, next);
       }
-      Bind { rec, name, expr } => {
+      Bind { rec, name, expr, info: _ } => {
         let r = self.allocate_named(name);
         if *rec {
           self.update_symbols(name, r);
@@ -566,8 +566,8 @@ impl<'a> CodeGenCtx<'a> {
           self.update_symbols(name, r);
         }
       }
-      Fn { params, body } => {}
-      Block(exprs) => match exprs {
+      Fn { params, body, info: _ } => {}
+      Block(exprs, _) => match exprs {
         [] => todo!("empty block"),
         [expr] => self.emit_expr(expr, data, control, next),
         [exprs @ .., last_expr] => {
@@ -580,7 +580,7 @@ impl<'a> CodeGenCtx<'a> {
           self.emit_expr(last_expr, data, control, next);
         }
       },
-      If(c, t, f) => {
+      If(c, t, f, _) => {
         let l1 = self.bc.fresh_label();
         let l2 = self.bc.fresh_label();
         let c1 = Control::Pos(l1);
@@ -591,7 +591,7 @@ impl<'a> CodeGenCtx<'a> {
         self.bc.push_label(l2);
         self.emit_expr(f, data, control, next);
       }
-      Tuple(exprs) => {
+      Tuple(exprs, _) => {
         let mut elems_regs = Vec::with_capacity(exprs.len());
         elems_regs.resize_with(exprs.len(), || self.allocate_temporary());
         for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
@@ -614,7 +614,7 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
-  pub fn emit_tree(&mut self, tree: &SynTree<'a>) {
+  pub fn emit_tree(&mut self, tree: &SynTree<'a, InfoKey>) {
     self.emit_expr(
       tree.root,
       DataDest::Effect,
