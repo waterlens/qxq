@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use bumpalo::Bump;
@@ -142,9 +143,14 @@ impl<I> std::fmt::Display for Expr<'_, I> {
   }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct Info<'a> {
+  pub freevars: Vec<TokenStr<'a>>,
+}
+
 pub struct SynTree<'a, I> {
   pub root: ExprRef<'a, I>,
-  pub information: SlotMap<InfoKey, ()>,
+  pub information: SlotMap<InfoKey, Info<'a>>,
 }
 
 impl<I> std::fmt::Display for SynTree<'_, I> {
@@ -161,7 +167,8 @@ pub struct Parser<'a> {
   arena: &'a Bump,
   tokenizer: Tokenizer<'a>,
   token: Option<&'a Token<'a>>,
-  information: SlotMap<InfoKey, ()>,
+  information: SlotMap<InfoKey, Info<'a>>,
+  func_stack: Vec<FunctionCtx<'a>>,
 }
 
 pub struct PeekResult<'a, T> {
@@ -171,11 +178,99 @@ pub struct PeekResult<'a, T> {
 type PeekToken<'a> = Result<PeekResult<'a, Token<'a>>>;
 type PeekExpr<'a> = Result<PeekResult<'a, Expr<'a, InfoKey>>>;
 
+#[derive(Default)]
+struct FunctionCtx<'a> {
+  scopes: Vec<HashSet<TokenStr<'a>>>,
+  local_counts: HashMap<TokenStr<'a>, u32>,
+  freevars: HashSet<TokenStr<'a>>,
+}
+
 impl<'a> Parser<'a> {
   pub fn new(arena: &'a Bump, src: &'a str) -> Self {
     let tokenizer: Tokenizer<'a> = Tokenizer::new(arena, src);
-    let information: SlotMap<InfoKey, ()> = SlotMap::new();
-    Self { arena, tokenizer, token: None, information }
+    let information: SlotMap<InfoKey, Info<'a>> = SlotMap::new();
+    let mut parser =
+      Self { arena, tokenizer, token: None, information, func_stack: Vec::with_capacity(4) };
+    parser.enter_function();
+    parser
+  }
+
+  fn enter_function(&mut self) {
+    self.func_stack.push(FunctionCtx {
+      scopes: vec![HashSet::new()],
+      local_counts: HashMap::new(),
+      freevars: HashSet::new(),
+    });
+  }
+
+  fn leave_function(&mut self) -> Vec<TokenStr<'a>> {
+    let ctx = self.func_stack.pop().expect("function stack underflow");
+    let mut free_vec: Vec<_> = ctx.freevars.iter().cloned().collect();
+    free_vec.sort();
+
+    // Propagate free vars to the parent function (if any) as usages
+    if let Some(parent) = self.func_stack.last_mut() {
+      for fv in &ctx.freevars {
+        Self::use_var_in_ctx(parent, *fv);
+      }
+    }
+
+    free_vec
+  }
+
+  fn enter_scope(&mut self) {
+    self
+      .func_stack
+      .last_mut()
+      .expect("no active function")
+      .scopes
+      .push(HashSet::new());
+  }
+
+  fn leave_scope(&mut self) {
+    let ctx = self.func_stack.last_mut().expect("no active function");
+    if let Some(scope) = ctx.scopes.pop() {
+      for name in scope {
+        if let Some(count) = ctx.local_counts.get_mut(&name) {
+          *count -= 1;
+          if *count == 0 {
+            ctx.local_counts.remove(&name);
+          }
+        }
+      }
+    }
+  }
+
+  fn declare_local(&mut self, name: TokenStr<'a>) {
+    if let Some(ctx) = self.func_stack.last_mut() {
+      if let Some(scope) = ctx.scopes.last_mut() {
+        if scope.insert(name) {
+          *ctx.local_counts.entry(name).or_insert(0) += 1;
+        }
+      }
+    }
+  }
+
+  fn use_var(&mut self, name: TokenStr<'a>) {
+    if let Some(ctx) = self.func_stack.last_mut() {
+      Self::use_var_in_ctx(ctx, name);
+    }
+  }
+
+  fn use_var_in_ctx(ctx: &mut FunctionCtx<'a>, name: TokenStr<'a>) {
+    if ctx.local_counts.contains_key(&name) {
+      return; // Bound locally
+    }
+    // Not bound locally, so it's free
+    ctx.freevars.insert(name);
+  }
+
+  fn new_info(&mut self, freevars: Vec<TokenStr<'a>>) -> InfoKey {
+    self.information.insert(Info { freevars })
+  }
+
+  fn new_empty_info(&mut self) -> InfoKey {
+    self.information.insert(Info::default())
   }
 
   fn skip_token(&mut self) {
@@ -317,11 +412,16 @@ impl<'a> Parser<'a> {
     self.parse_expr_with_affinity(0)
   }
 
-  fn parse_ident_expr<'t>(&'t mut self) -> PeekExpr<'a> {
+  fn parse_ident_expr<'t>(&'t mut self, is_decl: bool) -> PeekExpr<'a> {
     let arena = self.arena;
     let tok = self.next_ident(false)?;
     let name = TokenStr::from_span(arena, tok.inner.span);
-    Ok(PeekResult { inner: arena.alloc(ExprCon::Ident(name, self.information.insert(()))) })
+    if is_decl {
+      self.declare_local(name);
+    } else {
+      self.use_var(name);
+    }
+    Ok(PeekResult { inner: arena.alloc(ExprCon::Ident(name, self.new_empty_info())) })
   }
 
   fn parse_expr_with_affinity<'t>(&'t mut self, minaff: u32) -> PeekExpr<'a> {
@@ -330,12 +430,13 @@ impl<'a> Parser<'a> {
     let lhs_token = self.next_token()?;
     let mut lhs_op = None;
     let mut lhs: ExprRef<'_, InfoKey> = match lhs_token.inner.tag {
-      IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n, self.information.insert(()))),
-      StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s, self.information.insert(()))),
-      Identifer => arena.alloc(ExprCon::Ident(
-        TokenStr::from_span(arena, lhs_token.inner.span),
-        self.information.insert(()),
-      )),
+      IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n, self.new_empty_info())),
+      StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s, self.new_empty_info())),
+      Identifer => {
+        let name = TokenStr::from_span(arena, lhs_token.inner.span);
+        self.use_var(name);
+        arena.alloc(ExprCon::Ident(name, self.new_empty_info()))
+      }
       PairedOpen(po) => {
         let inner_token = self.peek_token()?;
         match inner_token.inner.tag {
@@ -346,7 +447,7 @@ impl<'a> Parser<'a> {
 
             let _ = self.expect_paired_close(po, false)?;
 
-            arena.alloc(ExprCon::Op(op.into(), self.information.insert(())))
+            arena.alloc(ExprCon::Op(op.into(), self.new_empty_info()))
           }
           _ => {
             let expr = self.parse_expr()?;
@@ -367,7 +468,7 @@ impl<'a> Parser<'a> {
 
               let _ = self.expect_paired_close(po, false)?;
               arena
-                .alloc(ExprCon::Tuple(arena.alloc_slice_copy(&exprs), self.information.insert(())))
+                .alloc(ExprCon::Tuple(arena.alloc_slice_copy(&exprs), self.new_empty_info()))
             } else {
               let _ = self.expect_paired_close(po, false)?;
 
@@ -378,7 +479,7 @@ impl<'a> Parser<'a> {
       }
       RawOp(op) => {
         lhs_op = Some(op);
-        arena.alloc(ExprCon::Op(op.into(), self.information.insert(())))
+        arena.alloc(ExprCon::Op(op.into(), self.new_empty_info()))
       }
       Op(op) => {
         let (_laff, raff) =
@@ -386,20 +487,21 @@ impl<'a> Parser<'a> {
         let rhs_expr = self.parse_expr_with_affinity(raff)?;
 
         arena.alloc(ExprCon::OpApply {
-          op: arena.alloc(ExprCon::Op(op.into(), self.information.insert(()))),
+          op: arena.alloc(ExprCon::Op(op.into(), self.new_empty_info())),
           pair: None,
           args: arena.alloc_slice_clone(&[rhs_expr.inner]),
-          info: self.information.insert(()),
+          info: self.new_empty_info(),
         })
       }
       Kw(kw) => match kw {
         Keyword::Fn => {
+          self.enter_function();
           let _ = self.expect_paired_open(Paired::Parenthesis)?;
 
-          let mut params = vec![];
+          let mut params: Vec<ExprRef<'_, InfoKey>> = vec![];
 
           if !self.peek_paired_close(Paired::Parenthesis, false) {
-            let expr = self.parse_ident_expr()?;
+            let expr = self.parse_ident_expr(true)?;
             params.push(expr.inner);
 
             if self.peek_operator(",", false) {
@@ -410,7 +512,7 @@ impl<'a> Parser<'a> {
                   self.skip_token();
                 }
 
-                let expr = self.parse_ident_expr()?;
+                let expr = self.parse_ident_expr(true)?;
                 params.push(expr.inner);
               }
             }
@@ -425,10 +527,13 @@ impl<'a> Parser<'a> {
           let body = self.parse_exprs()?;
 
           let _ = self.expect_keyword(Keyword::End, true)?;
+
+          let freevars = self.leave_function();
+
           arena.alloc(ExprCon::Fn {
             params: arena.alloc_slice_copy(&params),
             body: body.inner,
-            info: self.information.insert(()),
+            info: self.new_info(freevars),
           })
         }
         Keyword::Let => {
@@ -436,18 +541,26 @@ impl<'a> Parser<'a> {
           if is_rec {
             self.skip_token();
           }
-          let name = self.next_ident(false)?;
-          let name = TokenStr::from_span(arena, name.inner.span);
+          let name_tok = self.next_ident(false)?;
+          let name = TokenStr::from_span(arena, name_tok.inner.span);
 
           let _ = self.expect_operator("=", false)?;
 
+          if is_rec {
+            self.declare_local(name);
+          }
+
           let body = self.parse_expr()?;
+
+          if !is_rec {
+            self.declare_local(name);
+          }
 
           arena.alloc(ExprCon::Bind {
             rec: is_rec,
             name,
             expr: body.inner,
-            info: self.information.insert(()),
+            info: self.new_empty_info(),
           })
         }
         Keyword::If => {
@@ -479,7 +592,7 @@ impl<'a> Parser<'a> {
             condition.inner,
             then_branch.inner,
             else_branch.inner,
-            self.information.insert(()),
+            self.new_empty_info(),
           ))
         }
         _ => return Err(anyhow::anyhow!("unexpected keyword {}", lhs_token.inner)),
@@ -529,27 +642,27 @@ impl<'a> Parser<'a> {
 
           if let Some(op) = lhs_op {
             lhs = arena.alloc(ExprCon::OpApply {
-              op: arena.alloc(ExprCon::Op(op.into(), self.information.insert(()))),
+              op: arena.alloc(ExprCon::Op(op.into(), self.new_empty_info())),
               pair: Some(po),
               args: arena.alloc_slice_clone(&exprs),
-              info: self.information.insert(()),
+              info: self.new_empty_info(),
             });
           } else {
             lhs = arena.alloc(ExprCon::Apply {
               func: lhs,
               pair: Some(po),
               args: arena.alloc_slice_clone(&exprs),
-              info: self.information.insert(()),
+              info: self.new_empty_info(),
             });
           }
         } else {
           let old_lhs: ExprRef<'_, InfoKey> = lhs;
 
           lhs = arena.alloc(ExprCon::OpApply {
-            op: arena.alloc(ExprCon::Op(op_str.into(), self.information.insert(()))),
+            op: arena.alloc(ExprCon::Op(op_str.into(), self.new_empty_info())),
             pair: None,
             args: arena.alloc_slice_clone(&[old_lhs]),
-            info: self.information.insert(()),
+            info: self.new_empty_info(),
           });
         }
 
@@ -568,10 +681,10 @@ impl<'a> Parser<'a> {
         let old_lhs: ExprRef<'_, InfoKey> = lhs;
 
         lhs = arena.alloc(ExprCon::OpApply {
-          op: arena.alloc(ExprCon::Op(op_str.into(), self.information.insert(()))),
+          op: arena.alloc(ExprCon::Op(op_str.into(), self.new_empty_info())),
           pair: None,
           args: arena.alloc_slice_clone(&[old_lhs, rhs.inner]),
-          info: self.information.insert(()),
+          info: self.new_empty_info(),
         });
 
         lhs_op = None;
@@ -587,12 +700,20 @@ impl<'a> Parser<'a> {
 
   fn parse_exprs<'t>(&'t mut self) -> PeekExpr<'a> {
     let arena = self.arena;
+    self.enter_scope();
     while self.peek_newline() {
       self.skip_token();
     }
 
-    let first_expr = self.parse_expr()?;
+    let first_expr = self.parse_expr();
+    if let Err(e) = first_expr {
+      self.leave_scope();
+      return Err(e);
+    }
+    let first_expr = first_expr?;
+
     if !self.peek_operator(";", false) {
+      self.leave_scope();
       return Ok(first_expr);
     }
 
@@ -609,17 +730,23 @@ impl<'a> Parser<'a> {
         self.skip_token();
       }
 
-      let next_expr = self.parse_expr()?;
-      exprs.push(next_expr.inner);
+      let next_expr = self.parse_expr();
+      if let Err(e) = next_expr {
+        self.leave_scope();
+        return Err(e);
+      }
+      exprs.push(next_expr?.inner);
     }
 
     while self.peek_newline() {
       self.skip_token();
     }
 
+    self.leave_scope();
+
     Ok(PeekResult {
       inner: arena
-        .alloc(ExprCon::Block(arena.alloc_slice_clone(&exprs), self.information.insert(()))),
+        .alloc(ExprCon::Block(arena.alloc_slice_clone(&exprs), self.new_empty_info())),
     })
   }
 
