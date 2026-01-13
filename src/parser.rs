@@ -1,7 +1,8 @@
-use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use bumpalo::Bump;
+use hashbrown::HashMap;
+use indexmap::{IndexMap, IndexSet};
 use slotmap::SlotMap;
 
 use crate::sexp::{Sexp, SexpPool, ToSexp};
@@ -143,9 +144,126 @@ impl<I> std::fmt::Display for Expr<'_, I> {
   }
 }
 
+impl<I> Expr<'_, I> {
+  pub fn get_info(&self) -> &I {
+    use Expr::*;
+    match self {
+      IntLiteral(_, i)
+      | StrLiteral(_, i)
+      | Ident(_, i)
+      | Op(_, i)
+      | OpApply { info: i, .. }
+      | Apply { info: i, .. }
+      | Bind { info: i, .. }
+      | Fn { info: i, .. }
+      | Block(_, i)
+      | If(.., i)
+      | Tuple(_, i) => i,
+    }
+  }
+}
+
+pub struct InfoExpr<'a> {
+  pub expr: ExprRef<'a, InfoKey>,
+  pub map: &'a SlotMap<InfoKey, Info<'a>>,
+}
+
+impl<'a> ToSexp for InfoExpr<'a> {
+  fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
+    use Expr::*;
+    let mut parts = Vec::new();
+    let is_atom = match &self.expr {
+      IntLiteral(n, _) => {
+        parts.push(pool.atom(n.to_string()));
+        true
+      }
+      StrLiteral(s, _) => {
+        parts.push(pool.atom(s));
+        true
+      }
+      Ident(s, _) => {
+        parts.push(pool.atom(s.as_ref()));
+        true
+      }
+      Op(s, _) => {
+        parts.push(pool.atom(s.as_ref()));
+        true
+      }
+      OpApply { op, pair: _, args, info: _ } => {
+        parts.push(InfoExpr { expr: op, map: self.map }.to_sexp(pool));
+        parts.extend(args.iter().map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool)));
+        false
+      }
+      Apply { func, pair: _, args, info: _ } => {
+        parts.push(InfoExpr { expr: func, map: self.map }.to_sexp(pool));
+        parts.extend(args.iter().map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool)));
+        false
+      }
+      Bind { rec, name, expr, info: _ } => {
+        parts.push(pool.atom(if *rec { "let-rec" } else { "let" }));
+        parts.push(pool.atom(name.as_ref()));
+        parts.push(InfoExpr { expr, map: self.map }.to_sexp(pool));
+        false
+      }
+      Fn { params, body, info: _ } => {
+        parts.push(pool.atom("fn"));
+        parts.push(
+          pool.list(
+            params
+              .iter()
+              .map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool))
+              .collect::<Vec<_>>(),
+          ),
+        );
+        parts.push(InfoExpr { expr: body, map: self.map }.to_sexp(pool));
+        false
+      }
+      Block(xs, _) => {
+        parts.push(pool.atom("block"));
+        parts.extend(xs.iter().map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool)));
+        false
+      }
+      If(a, b, c, _) => {
+        parts.push(pool.atom("if"));
+        parts.push(InfoExpr { expr: a, map: self.map }.to_sexp(pool));
+        parts.push(InfoExpr { expr: b, map: self.map }.to_sexp(pool));
+        parts.push(InfoExpr { expr: c, map: self.map }.to_sexp(pool));
+        false
+      }
+      Tuple(xs, _) => {
+        parts.push(pool.atom("tuple"));
+        parts.extend(xs.iter().map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool)));
+        false
+      }
+    };
+
+    let info_key = self.expr.get_info();
+    if let Some(info) = self.map.get(*info_key) {
+      if !info.freevars.is_empty() {
+        parts.push(info.to_sexp(pool));
+      }
+    }
+
+    if is_atom && parts.len() == 1 {
+      parts.pop().unwrap()
+    } else {
+      pool.list(&parts)
+    }
+  }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Info<'a> {
   pub freevars: Vec<TokenStr<'a>>,
+}
+
+impl ToSexp for Info<'_> {
+  fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
+    pool.non_empty_list(
+      pool.atom("freevars"),
+      self.freevars.iter().map(|s| pool.atom(s.as_ref())).collect::<Vec<_>>(),
+    )
+  }
 }
 
 pub struct SynTree<'a, I> {
@@ -180,9 +298,9 @@ type PeekExpr<'a> = Result<PeekResult<'a, Expr<'a, InfoKey>>>;
 
 #[derive(Default)]
 struct FunctionCtx<'a> {
-  scopes: Vec<HashSet<TokenStr<'a>>>,
+  scopes: Vec<IndexSet<TokenStr<'a>>>,
   local_counts: HashMap<TokenStr<'a>, u32>,
-  freevars: HashSet<TokenStr<'a>>,
+  freevars: IndexSet<TokenStr<'a>>,
 }
 
 impl<'a> Parser<'a> {
@@ -197,9 +315,9 @@ impl<'a> Parser<'a> {
 
   fn enter_function(&mut self) {
     self.func_stack.push(FunctionCtx {
-      scopes: vec![HashSet::new()],
+      scopes: vec![IndexSet::new()],
       local_counts: HashMap::new(),
-      freevars: HashSet::new(),
+      freevars: IndexSet::new(),
     });
   }
 
@@ -219,12 +337,7 @@ impl<'a> Parser<'a> {
   }
 
   fn enter_scope(&mut self) {
-    self
-      .func_stack
-      .last_mut()
-      .expect("no active function")
-      .scopes
-      .push(HashSet::new());
+    self.func_stack.last_mut().expect("no active function").scopes.push(IndexSet::new());
   }
 
   fn leave_scope(&mut self) {
@@ -467,8 +580,7 @@ impl<'a> Parser<'a> {
               }
 
               let _ = self.expect_paired_close(po, false)?;
-              arena
-                .alloc(ExprCon::Tuple(arena.alloc_slice_copy(&exprs), self.new_empty_info()))
+              arena.alloc(ExprCon::Tuple(arena.alloc_slice_copy(&exprs), self.new_empty_info()))
             } else {
               let _ = self.expect_paired_close(po, false)?;
 
@@ -745,8 +857,7 @@ impl<'a> Parser<'a> {
     self.leave_scope();
 
     Ok(PeekResult {
-      inner: arena
-        .alloc(ExprCon::Block(arena.alloc_slice_clone(&exprs), self.new_empty_info())),
+      inner: arena.alloc(ExprCon::Block(arena.alloc_slice_clone(&exprs), self.new_empty_info())),
     })
   }
 
@@ -764,13 +875,19 @@ mod tests {
 
   fn test_parse_exprs(source: &str, expected_sexp_str: &str) {
     let arena = Bump::new();
-    let mut parser = Parser::new(&arena, source);
-    let expr = parser.parse_exprs().unwrap();
+    let parser = Parser::new(&arena, source);
+    let tree = parser.parse().unwrap();
+    assert_eq!(tree.root.to_sexp(&SexpPool::new()).to_string(), expected_sexp_str);
+  }
 
-    assert_eq!(expr.inner.to_sexp(&SexpPool::new()).to_string(), expected_sexp_str);
-
-    let last = parser.next_token().unwrap();
-    assert_eq!(last.inner.tag, TokenTag::Eof);
+  fn test_parse_with_info(source: &str, expected_sexp_str: &str) {
+    let arena = Bump::new();
+    let parser = Parser::new(&arena, source);
+    let tree = parser.parse().unwrap();
+    let info_expr = InfoExpr { expr: tree.root, map: &tree.information };
+    let pool = SexpPool::new();
+    let sexp = info_expr.to_sexp(&pool);
+    assert_eq!(sexp.to_string(), expected_sexp_str);
   }
 
   #[test]
@@ -843,6 +960,31 @@ mod tests {
       end;
       x(1, 2)"#,
       "(block (let x (fn (x y) (if (== x 0) (+ y 1) (- y 1)))) (x 1 2))",
+    );
+  }
+
+  #[test]
+  fn test_freevars() {
+    test_parse_with_info("fn (x) y + z end", "(fn (x) (+ y z) (freevars y z))");
+    test_parse_with_info(
+      "fn (x) fn (y) x + y + z end end",
+      "(fn (x) (fn (y) (+ (+ x y) z) (freevars x z)) (freevars z))",
+    );
+    test_parse_with_info(
+      "fn (x) let x = 1; x + y end",
+      "(fn (x) (block (let x 1) (+ x y)) (freevars y))",
+    );
+    test_parse_with_info(
+      "fn (a) fn (b) fn (c) a + b + c + d end end end",
+      "(fn (a) (fn (b) (fn (c) (+ (+ (+ a b) c) d) (freevars a b d)) (freevars a d)) (freevars d))",
+    );
+    test_parse_with_info(
+      "fn (y) let rec f = fn (x) f(x) + y + z end; f(1) end",
+      "(fn (y) (block (let-rec f (fn (x) (+ (+ (f x) y) z) (freevars f y z))) (f 1)) (freevars z))",
+    );
+    test_parse_with_info(
+      "fn (x) let y = 1; x + y + z end",
+      "(fn (x) (block (let y 1) (+ (+ x y) z)) (freevars z))",
     );
   }
 }
