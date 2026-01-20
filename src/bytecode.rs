@@ -370,22 +370,23 @@ impl Label {
   }
 }
 
-pub struct BytecodeCtx {
+pub struct ThunkCtx {
+  name: String,
   code: Vec<Bytecode>,
   relocate: Vec<(u32, Label)>, // (pc to be relocated, label)
   labels: HashMap<Label, u32>, // (label, the pc of the label)
   fresh: i32,
 }
 
-impl Default for BytecodeCtx {
-  fn default() -> Self {
-    Self::new()
-  }
+pub struct Thunk {
+  name: String,
+  code: Box<[Bytecode]>,
+  // TODO: add free variables
 }
 
-impl BytecodeCtx {
-  pub fn new() -> Self {
-    Self { code: Vec::new(), relocate: Vec::new(), labels: HashMap::new(), fresh: 0 }
+impl ThunkCtx {
+  pub fn new(name: &str) -> Self {
+    Self { name: name.to_string(), code: Vec::new(), relocate: Vec::new(), labels: HashMap::new(), fresh: 0 }
   }
 
   pub fn push(&mut self, code: Bytecode) {
@@ -414,7 +415,7 @@ impl BytecodeCtx {
     self.code[pc as usize] = code;
   }
 
-  pub fn relocate_all(&mut self) {
+  pub fn relocate_all(mut self) -> Thunk {
     let mut edit_list = vec![];
     for (pc, label) in self.relocate.iter() {
       debug_assert!(label.is_valid());
@@ -434,14 +435,74 @@ impl BytecodeCtx {
       }
     }
     edit_list.into_iter().for_each(|(pc, code)| self.edit(pc, code));
+    Thunk { name: self.name, code: self.code.into_boxed_slice() }
   }
 }
 
-impl Display for BytecodeCtx {
+impl Display for Thunk {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    writeln!(f, "thunk::{}", self.name)?;
     for code in self.code.iter() {
       writeln!(f, "{code}")?;
     }
     Ok(())
+  }
+}
+
+pub struct BytecodeCtx {
+  buffer: Vec<ThunkCtx>,
+  current: ThunkCtx,
+}
+
+impl Default for BytecodeCtx {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl BytecodeCtx {
+  pub fn new() -> Self {
+    Self { buffer: Vec::new(), current: ThunkCtx::new("__top_thunk__") }
+  }
+
+  pub fn push_thunk(&mut self, name: &str) {
+    self.buffer.push(std::mem::replace(&mut self.current, ThunkCtx::new(name)))
+  }
+
+  pub fn pop_thunk(&mut self) -> ThunkCtx {
+    std::mem::replace(&mut self.current, self.buffer.pop().unwrap())
+  }
+
+  pub fn push(&mut self, code: Bytecode) {
+    self.current.push(code);
+  }
+
+  pub fn pc(&self) -> u32 {
+    self.current.pc()
+  }
+
+  pub fn fresh_label(&mut self) -> Label {
+    self.current.fresh_label()
+  }
+
+  pub fn push_label(&mut self, label: Label) {
+    self.current.push_label(label)
+  }
+
+  pub fn push_relocate(&mut self, label: Label) {
+    self.current.push_relocate(label)
+  }
+
+  pub fn edit(&mut self, pc: u32, code: Bytecode) {
+    self.current.edit(pc, code)
+  }
+
+  pub fn finalize(mut self) -> Vec<Thunk> {
+    let mut thunks = vec![];
+    while let Some(thunk) = self.buffer.pop() {
+      thunks.push(thunk.relocate_all());
+    }
+    thunks.push(self.current.relocate_all());
+    thunks
   }
 }
