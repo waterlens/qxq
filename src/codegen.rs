@@ -184,7 +184,6 @@ impl<'a> Scope<'a> {
 }
 
 pub struct CodeGenCtx<'a> {
-  arena: &'a Bump,
   diagnostic: Rc<Diagnostic>,
   stack_frame: Stack<'a>,
   scope: Scope<'a>,
@@ -228,13 +227,13 @@ macro_rules! reg_pop {
 }
 
 impl<'a> CodeGenCtx<'a> {
-  pub fn new(arena: &'a Bump) -> Self {
+  pub fn new(_arena: &'a Bump) -> Self {
     let diagnostic = Rc::new(Diagnostic::new());
     let stack_frame = Stack::new();
     let scope = Scope::new();
     let constant_pool = ConstantPool::new(diagnostic.clone());
     let bc = BytecodeCtx::new();
-    Self { arena, diagnostic, stack_frame, scope, constant_pool, bc }
+    Self { diagnostic, stack_frame, scope, constant_pool, bc }
   }
 
   fn allocate_temporary(&mut self) -> RegId {
@@ -528,7 +527,7 @@ impl<'a> CodeGenCtx<'a> {
         });
         self.emit_store(Value::Loc(Location::Slot(r)), data, control, next);
       }
-      Op(token_str, _) => todo!(),
+      Op(op_str, _) => self.diagnostic.error(&format!("use operator `{}` as a first-class value is not supported yet", op_str.0)),
       OpApply { op, pair, args, info: _ } => self.emit_op(op, *pair, args, data, control, next),
       Apply { func, pair: _, args, info: _ } => {
         let func_reg = self.allocate_temporary();
