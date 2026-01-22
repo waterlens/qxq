@@ -15,7 +15,7 @@ fn process_content(content: &str) -> Result<()> {
   codegen.emit_tree(&mut bc);
   std::println!("--- Constant Pool ---");
   std::println!("{}", codegen.constant_pool);
-  std::println!("--- Bytecode ---");
+  std::println!("--- Thunk ---");
   std::print!(
     "{}",
     bc.finalize().into_iter().map(|t| t.to_string()).collect::<Vec<_>>().join("\n--- Thunk ---\n")

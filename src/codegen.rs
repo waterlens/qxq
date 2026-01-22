@@ -323,12 +323,12 @@ impl<'a> CodeGenCtx<'a> {
     self.scope.insert_slot(name, reg);
   }
 
-  fn allocate_named(&mut self, name: &TokenStr<'a>) -> RegId {
+  fn allocate_named(&mut self, name: &'a str) -> RegId {
     let next_reg = free_reg!(self);
     if next_reg >= u8::MAX as usize {
       self.diagnostic.error("register id overflow");
     }
-    reg_push!(self, ValInfo { name: Some(name.0), index: (next_reg as u8).into() });
+    reg_push!(self, ValInfo { name: Some(name), index: (next_reg as u8).into() });
     (next_reg as u8).into()
   }
 
@@ -682,7 +682,7 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_store(bc, Value::Loc(Location::Slot(func_reg)), data, control, next);
       }
       Bind { rec, name, expr, info: _ } => {
-        let r = self.allocate_named(name);
+        let r = self.allocate_named(name.0);
         if *rec {
           self.update_symbols(name, r);
         }
@@ -700,16 +700,25 @@ impl<'a> CodeGenCtx<'a> {
           self.update_symbols(param, reg);
         }
         bc.push_thunk("fn");
+        let r =  if params.is_empty() {
+          self.allocate_named("__return_value__")
+        } else {
+          0.into()
+        };
+        println!("return value: {}", r.0);
         self.emit_expr(
           bc,
           body,
-          DataDest::Effect,
-          ControlDest::Uncond(Control::Return(0.into())),
-          Control::Return(0.into()),
+          DataDest::Loc(Location::Slot(r)),
+          ControlDest::Uncond(Control::Return(r)),
+          Control::Return(r),
         );
         bc.pop_thunk();
         self.leave_frame();
         self.scope.leave();
+        bc.push(Bytecode::nop())
+        // TODO: move func to a slot
+        // maybe a new value location?
       }
       Block(exprs, _) => match exprs {
         [] => todo!("empty block"),
@@ -761,12 +770,13 @@ impl<'a> CodeGenCtx<'a> {
 
   pub fn emit_tree(&mut self, bc: &mut BytecodeCtx) {
     self.scope.enter();
+    let r = 0.into();
     self.emit_expr(
       bc,
       self.tree,
-      DataDest::Effect,
-      ControlDest::Uncond(Control::Return(0.into())),
-      Control::Return(0.into()),
+      DataDest::Loc(Location::Slot(r)),
+      ControlDest::Uncond(Control::Return(r)),
+      Control::Return(r),
     );
     self.scope.leave();
   }

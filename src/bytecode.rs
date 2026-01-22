@@ -388,7 +388,13 @@ pub struct Thunk {
 
 impl ThunkCtx {
   pub fn new(name: &str) -> Self {
-    Self { name: name.to_string(), code: Vec::new(), relocate: Vec::new(), labels: HashMap::new(), fresh: 0 }
+    Self {
+      name: name.to_string(),
+      code: Vec::new(),
+      relocate: Vec::new(),
+      labels: HashMap::new(),
+      fresh: 0,
+    }
   }
 
   pub fn push(&mut self, code: Bytecode) {
@@ -454,6 +460,7 @@ impl Display for Thunk {
 pub struct BytecodeCtx {
   buffer: Vec<ThunkCtx>,
   current: ThunkCtx,
+  finished: Vec<Thunk>,
 }
 
 impl Default for BytecodeCtx {
@@ -464,15 +471,17 @@ impl Default for BytecodeCtx {
 
 impl BytecodeCtx {
   pub fn new() -> Self {
-    Self { buffer: Vec::new(), current: ThunkCtx::new("__top_thunk__") }
+    Self { buffer: Vec::new(), current: ThunkCtx::new("__top_thunk__"), finished: Vec::new() }
   }
 
   pub fn push_thunk(&mut self, name: &str) {
     self.buffer.push(std::mem::replace(&mut self.current, ThunkCtx::new(name)))
   }
 
-  pub fn pop_thunk(&mut self) -> ThunkCtx {
-    std::mem::replace(&mut self.current, self.buffer.pop().unwrap())
+  pub fn pop_thunk(&mut self) {
+    self
+      .finished
+      .push(std::mem::replace(&mut self.current, self.buffer.pop().unwrap()).relocate_all());
   }
 
   pub fn push(&mut self, code: Bytecode) {
@@ -499,11 +508,9 @@ impl BytecodeCtx {
     self.current.edit(pc, code)
   }
 
-  pub fn finalize(mut self) -> Vec<Thunk> {
-    let mut thunks = vec![];
-    while let Some(thunk) = self.buffer.pop() {
-      thunks.push(thunk.relocate_all());
-    }
+  pub fn finalize(self) -> Vec<Thunk> {
+    assert!(self.buffer.is_empty());
+    let mut thunks = self.finished;
     thunks.push(self.current.relocate_all());
     thunks
   }
