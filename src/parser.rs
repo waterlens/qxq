@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use bumpalo::Bump;
 use hashbrown::HashMap;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexSet;
 use slotmap::SlotMap;
 
 use crate::sexp::{Sexp, SexpPool, ToSexp};
@@ -93,7 +93,7 @@ pub enum Expr<'a, I> {
   OpApply { op: ExprRef<'a, I>, pair: Option<Paired>, args: ExprsRef<'a, I>, info: I },
   Apply { func: ExprRef<'a, I>, pair: Option<Paired>, args: ExprsRef<'a, I>, info: I },
   Bind { rec: bool, name: TokenStr<'a>, expr: ExprRef<'a, I>, info: I },
-  Fn { params: ExprsRef<'a, I>, body: ExprRef<'a, I>, info: I },
+  Fn { params: &'a [TokenStr<'a>], body: ExprRef<'a, I>, info: I },
   Block(ExprsRef<'a, I>, I),
   If(ExprRef<'a, I>, ExprRef<'a, I>, ExprRef<'a, I>, I),
   Tuple(ExprsRef<'a, I>, I),
@@ -122,7 +122,7 @@ impl<I> ToSexp for Expr<'_, I> {
       ]),
       Fn { params, body, info: _ } => pool.list(&[
         pool.atom("fn"),
-        pool.list(params.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>()),
+        pool.list(params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>()),
         body.to_sexp(pool),
       ]),
       Block(xs, _) => pool
@@ -207,14 +207,7 @@ impl<'a> ToSexp for InfoExpr<'a> {
       }
       Fn { params, body, info: _ } => {
         parts.push(pool.atom("fn"));
-        parts.push(
-          pool.list(
-            params
-              .iter()
-              .map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool))
-              .collect::<Vec<_>>(),
-          ),
-        );
+        parts.push(pool.list(params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>()));
         parts.push(InfoExpr { expr: body, map: self.map }.to_sexp(pool));
         false
       }
@@ -525,16 +518,15 @@ impl<'a> Parser<'a> {
     self.parse_expr_with_affinity(0)
   }
 
-  fn parse_ident_expr<'t>(&'t mut self, is_decl: bool) -> PeekExpr<'a> {
-    let arena = self.arena;
+  fn parse_ident<'t>(&'t mut self, is_decl: bool) -> Result<TokenStr<'a>> {
     let tok = self.next_ident(false)?;
-    let name = TokenStr::from_span(arena, tok.inner.span);
+    let name = TokenStr::from_span(self.arena, tok.inner.span);
     if is_decl {
       self.declare_local(name);
     } else {
       self.use_var(name);
     }
-    Ok(PeekResult { inner: arena.alloc(ExprCon::Ident(name, self.new_empty_info())) })
+    Ok(name)
   }
 
   fn parse_expr_with_affinity<'t>(&'t mut self, minaff: u32) -> PeekExpr<'a> {
@@ -610,11 +602,11 @@ impl<'a> Parser<'a> {
           self.enter_function();
           let _ = self.expect_paired_open(Paired::Parenthesis)?;
 
-          let mut params: Vec<ExprRef<'_, InfoKey>> = vec![];
+          let mut params = vec![];
 
           if !self.peek_paired_close(Paired::Parenthesis, false) {
-            let expr = self.parse_ident_expr(true)?;
-            params.push(expr.inner);
+            let param_name = self.parse_ident(true)?;
+            params.push(param_name);
 
             if self.peek_operator(",", false) {
               while self.peek_operator(",", false) {
@@ -624,8 +616,8 @@ impl<'a> Parser<'a> {
                   self.skip_token();
                 }
 
-                let expr = self.parse_ident_expr(true)?;
-                params.push(expr.inner);
+                let param_name = self.parse_ident(true)?;
+                params.push(param_name);
               }
             }
           }

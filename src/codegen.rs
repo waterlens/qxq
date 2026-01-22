@@ -112,6 +112,27 @@ impl From<RegId> for crate::bytecode::Op8 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FreeVarId(u16);
+
+impl FreeVarId {
+  pub fn new(id: u16) -> Self {
+    Self(id)
+  }
+}
+
+impl From<u16> for FreeVarId {
+  fn from(id: u16) -> Self {
+    FreeVarId::new(id)
+  }
+}
+
+impl From<FreeVarId> for crate::bytecode::Op16 {
+  fn from(id: FreeVarId) -> Self {
+    id.0.into()
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Control {
   Return(RegId),
   Pos(Label),
@@ -122,6 +143,7 @@ enum Control {
 enum Location {
   Temporary,
   Slot(RegId),
+  FreeVar(FreeVarId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -175,17 +197,28 @@ impl<'a> Stack<'a> {
 }
 
 struct Scope<'a> {
-  symbols: IndexMap<TokenStr<'a>, Vec<RegId>>,
+  diagnostic: Rc<Diagnostic>,
+  symbols: IndexMap<TokenStr<'a>, Vec<Location>>,
   bound: Vec<IndexSet<TokenStr<'a>>>,
 }
 
 impl<'a> Scope<'a> {
-  fn new() -> Self {
-    Self { symbols: IndexMap::new(), bound: vec![] }
+  fn new(diagnostic: Rc<Diagnostic>) -> Self {
+    Self { diagnostic, symbols: IndexMap::new(), bound: vec![] }
   }
 
   fn enter(&mut self) {
     self.bound.push(IndexSet::new());
+  }
+
+  fn enter_function(&mut self, freevars: &[TokenStr<'a>]) {
+    for (i, name) in freevars.iter().enumerate() {
+      let i: u16 =
+        i.try_into().unwrap_or_else(|_| self.diagnostic.error("free variable id overflow"));
+      self.symbols.entry(*name).or_insert(vec![]).push(Location::FreeVar(i.into()));
+    }
+    let freevars = IndexSet::from_iter(freevars.iter().cloned());
+    self.bound.push(freevars);
   }
 
   fn leave(&mut self) {
@@ -200,25 +233,22 @@ impl<'a> Scope<'a> {
     }
   }
 
-  fn insert(&mut self, name: &TokenStr<'a>, reg: RegId) {
-    self.symbols.entry(*name).or_insert(vec![]).push(reg);
+  fn insert_slot(&mut self, name: &TokenStr<'a>, reg: RegId) {
+    self.symbols.entry(*name).or_insert(vec![]).push(Location::Slot(reg));
     self.bound.last_mut().unwrap().insert(*name);
   }
 
-  fn _is_bound(&self, name: &TokenStr<'a>) -> bool {
-    self.symbols.contains_key(name)
-  }
-
-  fn _is_bound_in_nth_nested_scope(&self, name: &TokenStr<'a>, n: usize) -> bool {
+  fn get_bound_in_nth_nested_scope(&self, name: &TokenStr<'a>, n: usize) -> Option<Location> {
     let i = self.bound.len() as isize - n as isize - 1;
-    if i < 0 {
-      return false;
+    if i >= 0 && self.bound[i as usize].contains(name) {
+      self.symbols.get(name).and_then(|locs| locs.last().copied())
+    } else {
+      None
     }
-    self.bound[i as usize].contains(name)
   }
 
-  fn get_bound(&self, name: &TokenStr<'a>) -> Option<RegId> {
-    self.symbols.get(name).and_then(|regs| regs.last().copied())
+  fn get_bound(&self, name: &TokenStr<'a>) -> Option<Location> {
+    self.get_bound_in_nth_nested_scope(name, 0)
   }
 }
 
@@ -265,8 +295,8 @@ impl<'a> CodeGenCtx<'a> {
   pub fn new(_arena: &'a Bump, tree: SynTree<'a, InfoKey>) -> Self {
     let diagnostic = Rc::new(Diagnostic::new());
     let stack_frame = Stack::new();
-    let scope = Scope::new();
-    let constant_pool = ConstantPool::new(diagnostic.clone());
+    let scope = Scope::new(Rc::clone(&diagnostic));
+    let constant_pool = ConstantPool::new(Rc::clone(&diagnostic));
     let information = tree.information;
     let tree = tree.root;
     Self { diagnostic, stack_frame, scope, constant_pool, tree, information }
@@ -281,8 +311,16 @@ impl<'a> CodeGenCtx<'a> {
     (next_reg as u8).into()
   }
 
+  fn enter_new_frame(&mut self) {
+    self.stack_frame.frames.push(Frame::new());
+  }
+
+  fn leave_frame(&mut self) {
+    self.stack_frame.frames.pop().unwrap();
+  }
+
   fn update_symbols(&mut self, name: &TokenStr<'a>, reg: RegId) {
-    self.scope.insert(name, reg);
+    self.scope.insert_slot(name, reg);
   }
 
   fn allocate_named(&mut self, name: &TokenStr<'a>) -> RegId {
@@ -314,11 +352,20 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::loadc(r.into(), idx.0.into()));
   }
 
+  fn reify_freevar(&mut self, bc: &mut BytecodeCtx, r: RegId, i: FreeVarId) {
+    bc.push(Bytecode::loadf(r.into(), i.0.into()));
+  }
+
   fn get_value(&mut self, bc: &mut BytecodeCtx, opr: Value) -> RegId {
     use Location::*;
     use Value::*;
     match opr {
       Loc(Slot(r)) => r,
+      Loc(FreeVar(i)) => {
+        let r = self.allocate_temporary();
+        self.reify_freevar(bc, r, i);
+        self.get_temporary()
+      }
       Loc(Temporary) => self.get_temporary(),
       IntLiteral(i) => {
         let r = self.allocate_temporary();
@@ -349,6 +396,10 @@ impl<'a> CodeGenCtx<'a> {
         let r = self.allocate_temporary();
         self.reify_string_literal(bc, r, i);
       }
+      (Temporary, Value::Loc(FreeVar(i))) => {
+        let r = self.allocate_temporary();
+        self.reify_freevar(bc, r, i);
+      }
       (Slot(r), Value::Loc(Slot(r2))) if r == r2 => (),
       (Slot(r), Value::Loc(Slot(r2))) => {
         bc.push(Bytecode::mov(r.into(), r2.into()));
@@ -358,6 +409,12 @@ impl<'a> CodeGenCtx<'a> {
       (Slot(r), Value::Loc(Temporary)) => {
         let r2 = self.get_temporary();
         bc.push(Bytecode::mov(r.into(), r2.into()));
+      }
+      (Slot(r), Value::Loc(FreeVar(i))) => self.reify_freevar(bc, r, i),
+      (FreeVar(i), Value::Loc(FreeVar(j))) if i == j => {}
+      (FreeVar(i), _) => {
+        let r = self.get_value(bc, opr);
+        bc.push(Bytecode::setf(i.into(), r.into()));
       }
     }
   }
@@ -478,7 +535,9 @@ impl<'a> CodeGenCtx<'a> {
         bc.push(make_bc(op, r, opr1, opr2));
         self.emit_store(bc, Value::Loc(Location::Slot(r)), data, control, next);
       }
-      DataDest::Effect | DataDest::Loc(Location::Temporary) => {
+      DataDest::Effect
+      | DataDest::Loc(Location::Temporary)
+      | DataDest::Loc(Location::FreeVar(_)) => {
         let r = self.allocate_temporary();
         bc.push(make_bc(op, r, opr1, opr2));
         self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next);
@@ -551,10 +610,10 @@ impl<'a> CodeGenCtx<'a> {
       IntLiteral(i, _) => Some(Value::IntLiteral(*i)),
       StrLiteral(s, _) => Some(Value::StrLiteral(s)),
       Ident(token_str, _) => {
-        let r = self.scope.get_bound(token_str).unwrap_or_else(|| {
+        let loc = self.scope.get_bound(token_str).unwrap_or_else(|| {
           self.diagnostic.error(&format!("undeclared identifier: {}", token_str.0))
         });
-        Some(Value::Loc(Location::Slot(r)))
+        Some(Value::Loc(loc))
       }
       _ => {
         self.emit_expr(bc, expr, data, control, next);
@@ -580,10 +639,10 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_store(bc, Value::StrLiteral(s), data, control, next);
       }
       Ident(token_str, _) => {
-        let r = self.scope.get_bound(token_str).unwrap_or_else(|| {
+        let loc = self.scope.get_bound(token_str).unwrap_or_else(|| {
           self.diagnostic.error(&format!("undeclared identifier: {}", token_str.0))
         });
-        self.emit_store(bc, Value::Loc(Location::Slot(r)), data, control, next);
+        self.emit_store(bc, Value::Loc(loc), data, control, next);
       }
       Op(op_str, _) => self
         .diagnostic
@@ -634,7 +693,22 @@ impl<'a> CodeGenCtx<'a> {
       }
       Fn { params, body, info } => {
         let freevars = &self.information.get(*info).unwrap().freevars;
-        self.scope.enter();
+        self.scope.enter_function(freevars);
+        self.enter_new_frame();
+        for param in *params {
+          let reg = self.allocate_temporary();
+          self.update_symbols(param, reg);
+        }
+        bc.push_thunk("fn");
+        self.emit_expr(
+          bc,
+          body,
+          DataDest::Effect,
+          ControlDest::Uncond(Control::Return(0.into())),
+          Control::Return(0.into()),
+        );
+        bc.pop_thunk();
+        self.leave_frame();
         self.scope.leave();
       }
       Block(exprs, _) => match exprs {

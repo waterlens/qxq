@@ -316,6 +316,8 @@ define_bytecode! {
   LoadI  (AB, OpAB, op)     fn loadi(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, #{}", "loadi", op.dst, op.o1),
   LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<10} r{}, #{}", "loadui", op.dst, op.o1),
   LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, @{}", "loadc", op.dst, op.o1),
+  LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, f{}", "loadf", op.dst, op.o1),
+  SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("{:<10} r{}, f{}", "setf", op.dst, op.o1),
   Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<10} r{}, r{}", "move", op.dst, op.o1),
   Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, #{}", "apply", op.dst, op.o1),
   Call   (ABS, OpABS, op)   fn call(dst: Op8, o1: OpS16)          { dst, o1 }     => ("{:<10} r{}, f{}", "call", op.dst, op.o1),
