@@ -310,48 +310,49 @@ macro_rules! define_bytecode {
 pub struct Bytecode(pub Operator, pub Operands);
 
 define_bytecode! {
-  Trap   (ABC, OpABC, op)   fn trap(dst: Op8, o1: Op8, o2: Op8)   { dst, o1, o2 } => ("{:<10} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
+  Trap   (ABC, OpABC, op)   fn trap(dst: Op8, o1: Op8, o2: Op8)   { dst, o1, o2 } => ("  {:<8} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
   Nop    (N)                fn nop()                              {}              => ("nop"),
-  Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("{:<10} #{}", "exta", op.o1),
-  LoadI  (AB, OpAB, op)     fn loadi(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, #{}", "loadi", op.dst, op.o1),
-  LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<10} r{}, #{}", "loadui", op.dst, op.o1),
-  LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, @{}", "loadc", op.dst, op.o1),
-  LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, f{}", "loadf", op.dst, op.o1),
-  SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("{:<10} r{}, f{}", "setf", op.dst, op.o1),
-  Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<10} r{}, r{}", "move", op.dst, op.o1),
-  Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<10} r{}, #{}", "apply", op.dst, op.o1),
-  Call   (ABS, OpABS, op)   fn call(dst: Op8, o1: OpS16)          { dst, o1 }     => ("{:<10} r{}, f{}", "call", op.dst, op.o1),
+  Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("  {:<8} #{}", "exta", op.o1),
+  LoadI  (AB, OpAB, op)     fn loadi(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "loadi", op.dst, op.o1),
+  LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("  {:<8} r{}, #{}", "loadui", op.dst, op.o1),
+  LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, @{}", "loadc", op.dst, op.o1),
+  LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, f{}", "loadf", op.dst, op.o1),
+  SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("  {:<8} r{}, f{}", "setf", op.dst, op.o1),
+  Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("  {:<8} r{}, r{}", "move", op.dst, op.o1),
+  Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "apply", op.dst, op.o1),
+  Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("  {:<8} r{}, f{}", "call", op.dst, op.o1),
   Retu   (N)                fn retu()                             {}              => ("retu"),
-  Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("{:<10} r{}", "ret", op.dst),
-  Retn   (ABS, OpABS, op)   fn retn(dst: Op8, o1: OpS16)          { dst, o1 }     => ("{:<10} r{}", "retn", op.dst),
-  Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("{:<10} #{}", "jmp", op.dst),
-  Goto   (AS, OpAS, op)     fn goto(dst: OpS24)                   { dst }         => ("{:<10} #{}", "goto", op.dst),
+  Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("  {:<8} r{}", "ret", op.dst),
+  Retn   (ABS, OpABS, op)   fn retn(dst: Op8, o1: OpS16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "retn", op.dst, op.o1),
+  Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("  {:<8} r{}, f{}", "clos", op.dst, op.o1),
+  Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("  {:<8} #{}", "jmp", op.dst),
+  Goto   (AS, OpAS, op)     fn goto(dst: OpS24)                   { dst }         => ("  {:<8} #{}", "goto", op.dst),
 
-  AddDI  (XYZ, OpXYZ, op)   fn adddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "add.di", op.dst, op.o1, op.o2),
-  SubDI  (XYZ, OpXYZ, op)   fn subdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
-  MulDI  (XYZ, OpXYZ, op)   fn muldi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "mul.di", op.dst, op.o1, op.o2),
-  DivDI  (XYZ, OpXYZ, op)   fn divdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "div.di", op.dst, op.o1, op.o2),
-  ModDI  (XYZ, OpXYZ, op)   fn moddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, #{}", "mod.di", op.dst, op.o1, op.o2),
+  AddDI  (XYZ, OpXYZ, op)   fn adddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, #{}", "add.di", op.dst, op.o1, op.o2),
+  SubDI  (XYZ, OpXYZ, op)   fn subdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
+  MulDI  (XYZ, OpXYZ, op)   fn muldi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, #{}", "mul.di", op.dst, op.o1, op.o2),
+  DivDI  (XYZ, OpXYZ, op)   fn divdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, #{}", "div.di", op.dst, op.o1, op.o2),
+  ModDI  (XYZ, OpXYZ, op)   fn moddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, #{}", "mod.di", op.dst, op.o1, op.o2),
 
-  AddDD  (XYZ, OpXYZ, op)   fn adddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "add.dd", op.dst, op.o1, op.o2),
-  SubDD  (XYZ, OpXYZ, op)   fn subdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "sub.dd", op.dst, op.o1, op.o2),
-  MulDD  (XYZ, OpXYZ, op)   fn muldd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "mul.dd", op.dst, op.o1, op.o2),
-  DivDD  (XYZ, OpXYZ, op)   fn divdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
-  ModDD  (XYZ, OpXYZ, op)   fn moddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<10} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
+  AddDD  (XYZ, OpXYZ, op)   fn adddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "add.dd", op.dst, op.o1, op.o2),
+  SubDD  (XYZ, OpXYZ, op)   fn subdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "sub.dd", op.dst, op.o1, op.o2),
+  MulDD  (XYZ, OpXYZ, op)   fn muldd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "mul.dd", op.dst, op.o1, op.o2),
+  DivDD  (XYZ, OpXYZ, op)   fn divdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
+  ModDD  (XYZ, OpXYZ, op)   fn moddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
 
-  CmpEqDI (Cond, OpCond, op) fn cmpeqdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
-  CmpNeDI (Cond, OpCond, op) fn cmpnedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.ne.di", op.dst, op.o1),
-  CmpLtDI (Cond, OpCond, op) fn cmpltdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.lt.di", op.dst, op.o1),
-  CmpLeDI (Cond, OpCond, op) fn cmpledi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.le.di", op.dst, op.o1),
-  CmpGtDI (Cond, OpCond, op) fn cmpgtdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.gt.di", op.dst, op.o1),
-  CmpGeDI (Cond, OpCond, op) fn cmpgedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, #{}", "cmp.ge.di", op.dst, op.o1),
+  CmpEqDI (Cond, OpCond, op) fn cmpeqdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
+  CmpNeDI (Cond, OpCond, op) fn cmpnedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.ne.di", op.dst, op.o1),
+  CmpLtDI (Cond, OpCond, op) fn cmpltdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.lt.di", op.dst, op.o1),
+  CmpLeDI (Cond, OpCond, op) fn cmpledi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.le.di", op.dst, op.o1),
+  CmpGtDI (Cond, OpCond, op) fn cmpgtdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.gt.di", op.dst, op.o1),
+  CmpGeDI (Cond, OpCond, op) fn cmpgedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.ge.di", op.dst, op.o1),
 
-  CmpEqDC (Cond, OpCond, op) fn cmpeqdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.eq.dc", op.dst, op.o1),
-  CmpNeDC (Cond, OpCond, op) fn cmpnedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.ne.dc", op.dst, op.o1),
-  CmpLtDC (Cond, OpCond, op) fn cmpltdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.lt.dc", op.dst, op.o1),
-  CmpLeDC (Cond, OpCond, op) fn cmpledc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.le.dc", op.dst, op.o1),
-  CmpGtDC (Cond, OpCond, op) fn cmpgtdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.gt.dc", op.dst, op.o1),
-  CmpGeDC (Cond, OpCond, op) fn cmpgedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<10} r{}, @{}", "cmp.ge.dc", op.dst, op.o1),
+  CmpEqDC (Cond, OpCond, op) fn cmpeqdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.eq.dc", op.dst, op.o1),
+  CmpNeDC (Cond, OpCond, op) fn cmpnedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.ne.dc", op.dst, op.o1),
+  CmpLtDC (Cond, OpCond, op) fn cmpltdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.lt.dc", op.dst, op.o1),
+  CmpLeDC (Cond, OpCond, op) fn cmpledc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.le.dc", op.dst, op.o1),
+  CmpGtDC (Cond, OpCond, op) fn cmpgtdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.gt.dc", op.dst, op.o1),
+  CmpGeDC (Cond, OpCond, op) fn cmpgedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.ge.dc", op.dst, op.o1),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -478,10 +479,12 @@ impl BytecodeCtx {
     self.buffer.push(std::mem::replace(&mut self.current, ThunkCtx::new(name)))
   }
 
-  pub fn pop_thunk(&mut self) {
+  pub fn pop_thunk(&mut self) -> usize {
+    let len = self.finished.len();
     self
       .finished
       .push(std::mem::replace(&mut self.current, self.buffer.pop().unwrap()).relocate_all());
+    len
   }
 
   pub fn push(&mut self, code: Bytecode) {

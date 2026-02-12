@@ -152,6 +152,7 @@ enum Value<'a> {
   Loc(Location),
   IntLiteral(i128),
   StrLiteral(&'a str),
+  Closure { id: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -356,6 +357,14 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::loadf(r.into(), i.0.into()));
   }
 
+  fn reify_closure(&mut self, bc: &mut BytecodeCtx, r: RegId, id: usize) {
+    bc.push(Bytecode::clos(
+      r.into(),
+      id.try_into()
+        .unwrap_or_else(|_| self.diagnostic.error("exceeding maximium number of functions")),
+    ))
+  }
+
   fn get_value(&mut self, bc: &mut BytecodeCtx, opr: Value) -> RegId {
     use Location::*;
     use Value::*;
@@ -377,45 +386,50 @@ impl<'a> CodeGenCtx<'a> {
         self.reify_string_literal(bc, r, s);
         self.get_temporary()
       }
+      Closure { id } => {
+        let r = self.allocate_temporary();
+        self.reify_closure(bc, r, id);
+        self.get_temporary()
+      }
+    }
+  }
+
+  fn is_register_destination(&mut self, loc: Location) -> Option<RegId> {
+    use Location::*;
+    match loc {
+      Temporary => Some(self.allocate_temporary()),
+      Slot(r) => Some(r),
+      FreeVar(_) => None,
     }
   }
 
   fn set_location(&mut self, bc: &mut BytecodeCtx, loc: Location, opr: Value) {
     use Location::*;
+
     match (loc, opr) {
       (Temporary, Value::Loc(Temporary)) => (),
-      (Temporary, Value::Loc(Slot(r))) => {
-        let r2 = self.allocate_temporary();
-        bc.push(Bytecode::mov(r2.into(), r.into()));
-      }
-      (Temporary, Value::IntLiteral(i)) => {
-        let r = self.allocate_temporary();
-        self.reify_int_literal(bc, r, i);
-      }
-      (Temporary, Value::StrLiteral(i)) => {
-        let r = self.allocate_temporary();
-        self.reify_string_literal(bc, r, i);
-      }
-      (Temporary, Value::Loc(FreeVar(i))) => {
-        let r = self.allocate_temporary();
-        self.reify_freevar(bc, r, i);
-      }
       (Slot(r), Value::Loc(Slot(r2))) if r == r2 => (),
-      (Slot(r), Value::Loc(Slot(r2))) => {
-        bc.push(Bytecode::mov(r.into(), r2.into()));
-      }
-      (Slot(r), Value::IntLiteral(i)) => self.reify_int_literal(bc, r, i),
-      (Slot(r), Value::StrLiteral(i)) => self.reify_string_literal(bc, r, i),
-      (Slot(r), Value::Loc(Temporary)) => {
-        let r2 = self.get_temporary();
-        bc.push(Bytecode::mov(r.into(), r2.into()));
-      }
-      (Slot(r), Value::Loc(FreeVar(i))) => self.reify_freevar(bc, r, i),
       (FreeVar(i), Value::Loc(FreeVar(j))) if i == j => {}
       (FreeVar(i), _) => {
         let r = self.get_value(bc, opr);
         bc.push(Bytecode::setf(i.into(), r.into()));
       }
+      (_, _) => match self.is_register_destination(loc) {
+        Some(r) => match opr {
+          Value::Loc(Slot(r2)) => bc.push(Bytecode::mov(r.into(), r2.into())),
+          Value::Loc(Temporary) => {
+            let r2 = self.get_temporary();
+            bc.push(Bytecode::mov(r.into(), r2.into()));
+          }
+          Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
+          Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
+          Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
+          Value::Closure { id } => self.reify_closure(bc, r, id),
+        },
+        None => unreachable!(
+          "all non-register-destination cases should be handled in the outer pattern match"
+        ),
+      },
     }
   }
 
@@ -700,11 +714,8 @@ impl<'a> CodeGenCtx<'a> {
           self.update_symbols(param, reg);
         }
         bc.push_thunk("fn");
-        let r =  if params.is_empty() {
-          self.allocate_named("__return_value__")
-        } else {
-          0.into()
-        };
+        // reuse the first slot location of parameters for the return value
+        let r = if params.is_empty() { self.allocate_named("__return_value__") } else { 0.into() };
         println!("return value: {}", r.0);
         self.emit_expr(
           bc,
@@ -713,12 +724,10 @@ impl<'a> CodeGenCtx<'a> {
           ControlDest::Uncond(Control::Return(r)),
           Control::Return(r),
         );
-        bc.pop_thunk();
+        let id = bc.pop_thunk();
         self.leave_frame();
         self.scope.leave();
-        bc.push(Bytecode::nop())
-        // TODO: move func to a slot
-        // maybe a new value location?
+        self.emit_store(bc, Value::Closure { id }, data, control, next)
       }
       Block(exprs, _) => match exprs {
         [] => todo!("empty block"),

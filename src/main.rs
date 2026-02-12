@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bumpalo::Bump;
 use qxq::*;
-use rustyline::{error::ReadlineError, DefaultEditor};
+use rustyline::{config::Configurer, error::ReadlineError, DefaultEditor};
 use std::{fs, path::Path};
 
 fn process_content(content: &str) -> Result<()> {
@@ -49,6 +49,17 @@ fn show_message() {
 fn run_repl() -> Result<()> {
   show_message();
   let mut rl = DefaultEditor::new()?;
+  let history_path = dirs::home_dir().map(|f| f.join(".qxq_history"));
+
+  rl.set_history_ignore_space(true);
+  rl.set_max_history_size(1024)?;
+
+  history_path.as_ref().inspect(|path| {
+    if let Ok(true) = path.try_exists() {
+      rl.load_history(path).expect("unable to load history");
+    }
+  });
+
   loop {
     let readline = rl.readline("> ");
     match readline {
@@ -74,6 +85,8 @@ fn run_repl() -> Result<()> {
       }
     }
   }
+
+  history_path.inspect(|path| rl.save_history(path).expect("unable to save history"));
   Ok(())
 }
 

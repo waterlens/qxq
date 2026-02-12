@@ -251,25 +251,25 @@ use Paired::*;
 use TokenErr::*;
 use TokenTag::*;
 
+static KEYWORDS: Lazy<RapidSmallMap<16, &'static [char], Keyword>> = Lazy::new(|| {
+  let mut map: RapidSmallMap<16, &'static [char], Keyword> = RapidSmallMap::new();
+  map.insert(&['f', 'n'], Keyword::Fn);
+  map.insert(&['l', 'e', 't'], Keyword::Let);
+  map.insert(&['r', 'e', 'c'], Keyword::Rec);
+  map.insert(&['w', 'i', 't', 'h'], Keyword::With);
+  map.insert(&['a', 'n', 'd'], Keyword::And);
+  map.insert(&['i', 's'], Keyword::Is);
+  map.insert(&['i', 'f'], Keyword::If);
+  map.insert(&['e', 'l', 's', 'e'], Keyword::Else);
+  map.insert(&['t', 'h', 'e', 'n'], Keyword::Then);
+  map.insert(&['e', 'n', 'd'], Keyword::End);
+  map
+});
+
 impl<'a, 'b> Tokenizer<'a>
 where
   'a: 'b,
 {
-  const KEYWORDS: Lazy<RapidSmallMap<16, &'static [char], Keyword>> = Lazy::new(|| {
-    let mut map: RapidSmallMap<16, &'static [char], Keyword> = RapidSmallMap::new();
-    map.insert(&['f', 'n'], Keyword::Fn);
-    map.insert(&['l', 'e', 't'], Keyword::Let);
-    map.insert(&['r', 'e', 'c'], Keyword::Rec);
-    map.insert(&['w', 'i', 't', 'h'], Keyword::With);
-    map.insert(&['a', 'n', 'd'], Keyword::And);
-    map.insert(&['i', 's'], Keyword::Is);
-    map.insert(&['i', 'f'], Keyword::If);
-    map.insert(&['e', 'l', 's', 'e'], Keyword::Else);
-    map.insert(&['t', 'h', 'e', 'n'], Keyword::Then);
-    map.insert(&['e', 'n', 'd'], Keyword::End);
-    map
-  });
-
   pub fn new<I>(arena: &'a Bump, input: I) -> Self
   where
     I: AsRef<str>,
@@ -315,7 +315,7 @@ where
   }
 
   fn is_keyword(&self, s: &[char]) -> Option<Keyword> {
-    Self::KEYWORDS.get(s).cloned()
+    KEYWORDS.get(s).cloned()
   }
 
   fn ch(&self) -> char {
@@ -642,8 +642,8 @@ mod tests {
   }
 
   fn test_tokenize(input: &str, expected: &[TestToken]) {
-    let mut arena = Bump::new();
-    let mut tokenizer = Tokenizer::new(&mut arena, input);
+    let arena = Bump::new();
+    let mut tokenizer = Tokenizer::new(&arena, input);
     for expected_token in expected {
       let token = tokenizer.next_token();
       assert_eq!(token.tag, expected_token.tag);
