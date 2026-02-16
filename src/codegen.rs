@@ -134,8 +134,9 @@ impl From<FreeVarId> for crate::bytecode::Op16 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Control {
-  Return(RegId),
+  Return,
   Pos(Label),
+  End,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -168,6 +169,7 @@ enum Value<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum DataDest {
+  RetValue,
   Effect,
   Loc(Location),
 }
@@ -448,20 +450,27 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
-  fn emit_jump(&mut self, bc: &mut BytecodeCtx, l: Control) {
+  fn emit_jump(&mut self, bc: &mut BytecodeCtx, l: Control, v: Option<RegId>) {
     use Control::*;
     match l {
-      Return(r) => bc.push(Bytecode::retn(r.into(), 0.into())),
       Pos(l) => {
         bc.push_relocate(l);
         bc.push(Bytecode::jmp(0i16.into()))
       }
+      Return => {
+        let Some(r) = v else {
+          self.diagnostic.error("return without a value");
+        };
+        bc.push(Bytecode::retn(r.into(), 0.into()))
+      }
+      End => unreachable!("end control can only be used for hinting"),
     }
   }
 
   fn emit_test(
     &mut self,
     bc: &mut BytecodeCtx,
+    value: RegId,
     test: Test,
     c1: Control,
     c2: Control,
@@ -475,7 +484,7 @@ impl<'a> CodeGenCtx<'a> {
       bc.push_relocate(l1);
       bc.push(Bytecode::jmp(0i16.into()));
       if c2 != next {
-        s.emit_jump(bc, c2);
+        s.emit_jump(bc, c2, Some(value));
       }
     };
     let gen2 = |s: &mut Self, bc: &mut BytecodeCtx, c1: Control, l2: Label| {
@@ -485,11 +494,11 @@ impl<'a> CodeGenCtx<'a> {
       bc.push_relocate(l2);
       bc.push(Bytecode::jmp(0i16.into()));
       if c1 != next {
-        s.emit_jump(bc, c1);
+        s.emit_jump(bc, c1, Some(value));
       }
     };
     match (c1, c2) {
-      (Control::Pos(l1), Control::Return(_)) => gen1(self, bc, l1, c2),
+      (Control::Pos(l1), Control::Return) => gen1(self, bc, l1, c2),
       (Control::Pos(l1), Control::Pos(l2)) => {
         if c2 == next {
           gen1(self, bc, l1, c2)
@@ -497,7 +506,7 @@ impl<'a> CodeGenCtx<'a> {
           gen2(self, bc, c1, l2)
         }
       }
-      (Control::Return(_), Control::Pos(l2)) => gen2(self, bc, c1, l2),
+      (Control::Return, Control::Pos(l2)) => gen2(self, bc, c1, l2),
       _ => unreachable!("return on both branches"),
     }
   }
@@ -515,23 +524,33 @@ impl<'a> CodeGenCtx<'a> {
     match (data, control) {
       (Effect, Uncond(c)) => {
         if c != next {
-          self.emit_jump(bc, c);
+          self.emit_jump(bc, c, None);
         }
       }
       (Effect, Branch(l1, l2)) => {
         let r = self.get_value(bc, opr);
-        self.emit_test(bc, Test::EqI(r, 1), l1, l2, next);
+        self.emit_test(bc, r, Test::EqI(r, 1), l1, l2, next);
       }
       (Loc(loc), Uncond(c)) => {
         self.set_location(bc, loc, opr);
         if c != next {
-          self.emit_jump(bc, c);
+          self.emit_jump(bc, c, None);
         }
       }
       (Loc(loc), Branch(l1, l2)) => {
         let r = self.get_value(bc, opr);
         self.set_location(bc, loc, Value::Loc(Location::Slot(r)));
-        self.emit_test(bc, Test::EqI(r, 1), l1, l2, next);
+        self.emit_test(bc, r, Test::EqI(r, 1), l1, l2, next);
+      }
+      (RetValue, Uncond(c)) => {
+        if c != Control::Return {
+          self.diagnostic.error("data destination: return value; control destination: not return");
+        }
+        let r = self.get_value(bc, opr);
+        self.emit_jump(bc, c, Some(r));
+      }
+      (RetValue, Branch(_l1, _l2)) => {
+        self.diagnostic.error("data destination: return value; control destination: branch");
       }
     }
   }
@@ -566,7 +585,8 @@ impl<'a> CodeGenCtx<'a> {
       }
       DataDest::Effect
       | DataDest::Loc(Location::Temporary)
-      | DataDest::Loc(Location::FreeVar(_)) => {
+      | DataDest::Loc(Location::FreeVar(_))
+      | DataDest::RetValue => {
         let r = self.allocate_temporary();
         bc.push(make_bc(op, r, opr1, opr2));
         self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next);
@@ -614,7 +634,7 @@ impl<'a> CodeGenCtx<'a> {
               Some(v) => self.get_value(bc, v),
               None => self.get_temporary(),
             };
-            self.emit_binary_op_with_slots(bc, "+", r1, r2, data, control, next);
+            self.emit_binary_op_with_slots(bc, op_str.0, r1, r2, data, control, next);
           } else {
             self.diagnostic.error("expected two arguments for addition");
           }
@@ -737,15 +757,12 @@ impl<'a> CodeGenCtx<'a> {
           self.update_symbols(param, reg);
         }
         bc.push_thunk("fn", fvlocs.into_boxed_slice());
-        // reuse the first slot location of parameters for the return value
-        let r = if params.is_empty() { self.allocate_named("__return_value__") } else { 0.into() };
-        println!("return value: {}", r.0);
         self.emit_expr(
           bc,
           body,
-          DataDest::Loc(Location::Slot(r)),
-          ControlDest::Uncond(Control::Return(r)),
-          Control::Return(r),
+          DataDest::RetValue,
+          ControlDest::Uncond(Control::Return),
+          Control::End,
         );
         let id = bc.pop_thunk();
         self.leave_frame();
@@ -779,6 +796,7 @@ impl<'a> CodeGenCtx<'a> {
       Tuple(exprs, _) => {
         let mut elems_regs = Vec::with_capacity(exprs.len());
         elems_regs.resize_with(exprs.len(), || self.allocate_temporary());
+        let tuple_reg = if let Some(r) = elems_regs.first() { *r } else { todo!("unit") };
         for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
           let l = bc.fresh_label();
           let c = Control::Pos(l);
@@ -793,7 +811,7 @@ impl<'a> CodeGenCtx<'a> {
         }
         bc.push(Bytecode::nop()); // MAKE TUPLE
         match control {
-          ControlDest::Uncond(l) => self.emit_jump(bc, l),
+          ControlDest::Uncond(l) => self.emit_jump(bc, l, Some(tuple_reg)),
           _ => self.diagnostic.error("tuple in conditional expression"),
         }
       }
@@ -802,13 +820,12 @@ impl<'a> CodeGenCtx<'a> {
 
   pub fn emit_tree(&mut self, bc: &mut BytecodeCtx) {
     self.scope.enter();
-    let r = 0.into();
     self.emit_expr(
       bc,
       self.tree,
-      DataDest::Loc(Location::Slot(r)),
-      ControlDest::Uncond(Control::Return(r)),
-      Control::Return(r),
+      DataDest::RetValue,
+      ControlDest::Uncond(Control::Return),
+      Control::End,
     );
     self.scope.leave();
   }

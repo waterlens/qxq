@@ -318,15 +318,15 @@ define_bytecode! {
   LoadI  (AB, OpAB, op)     fn loadi(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "loadi", op.dst, op.o1),
   LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("  {:<8} r{}, #{}", "loadui", op.dst, op.o1),
   LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, @{}", "loadc", op.dst, op.o1),
-  LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, f{}", "loadf", op.dst, op.o1),
-  SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("  {:<8} r{}, f{}", "setf", op.dst, op.o1),
+  LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, ^{}", "loadf", op.dst, op.o1),
+  SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("  {:<8} r{}, ^{}", "setf", op.dst, op.o1),
   Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("  {:<8} r{}, r{}", "move", op.dst, op.o1),
   Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "apply", op.dst, op.o1),
-  Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("  {:<8} r{}, f{}", "call", op.dst, op.o1),
+  Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("  {:<8} r{}, fn{}", "call", op.dst, op.o1),
   Retu   (N)                fn retu()                             {}              => ("retu"),
   Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("  {:<8} r{}", "ret", op.dst),
   Retn   (ABS, OpABS, op)   fn retn(dst: Op8, o1: OpS16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "retn", op.dst, op.o1),
-  Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("  {:<8} r{}, f{}", "clos", op.dst, op.o1),
+  Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("  {:<8} r{}, fn{}", "clos", op.dst, op.o1),
   Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("  {:<8} #{}", "jmp", op.dst),
   Goto   (AS, OpAS, op)     fn goto(dst: OpS24)                   { dst }         => ("  {:<8} #{}", "goto", op.dst),
 
@@ -457,10 +457,11 @@ impl Display for Thunk {
     write!(f, "thunk::{} captured::[", self.name)?;
     let mut fvlocs = self.fvlocs.iter();
     if let Some(fvloc) = fvlocs.next() {
-      write!(f, "{fvloc} as f0")?;
+      write!(f, "{fvloc} as ^0")?;
 
       for (i, fvloc) in fvlocs.enumerate() {
-        write!(f, " ,{fvloc} as f{i}")?;
+        let i = i + 1;
+        write!(f, " ,{fvloc} as ^{i}")?;
       }
     }
     writeln!(f, "]")?;
