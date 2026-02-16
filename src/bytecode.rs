@@ -2,6 +2,8 @@ use std::fmt::{self, Display};
 
 use hashbrown::HashMap;
 
+use crate::codegen::Location;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Op8(u8);
 
@@ -379,22 +381,24 @@ pub struct ThunkCtx {
   relocate: Vec<(u32, Label)>, // (pc to be relocated, label)
   labels: HashMap<Label, u32>, // (label, the pc of the label)
   fresh: i32,
+  fvlocs: Box<[Location]>,
 }
 
 pub struct Thunk {
   name: String,
   code: Box<[Bytecode]>,
-  // TODO: add free variables
+  fvlocs: Box<[Location]>,
 }
 
 impl ThunkCtx {
-  pub fn new(name: &str) -> Self {
+  pub fn new(name: &str, fvlocs: Box<[Location]>) -> Self {
     Self {
       name: name.to_string(),
       code: Vec::new(),
       relocate: Vec::new(),
       labels: HashMap::new(),
       fresh: 0,
+      fvlocs,
     }
   }
 
@@ -444,13 +448,22 @@ impl ThunkCtx {
       }
     }
     edit_list.into_iter().for_each(|(pc, code)| self.edit(pc, code));
-    Thunk { name: self.name, code: self.code.into_boxed_slice() }
+    Thunk { name: self.name, code: self.code.into_boxed_slice(), fvlocs: self.fvlocs }
   }
 }
 
 impl Display for Thunk {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    writeln!(f, "thunk::{}", self.name)?;
+    write!(f, "thunk::{} captured::[", self.name)?;
+    let mut fvlocs = self.fvlocs.iter();
+    if let Some(fvloc) = fvlocs.next() {
+      write!(f, "{fvloc} as f0")?;
+
+      for (i, fvloc) in fvlocs.enumerate() {
+        write!(f, " ,{fvloc} as f{i}")?;
+      }
+    }
+    writeln!(f, "]")?;
     for code in self.code.iter() {
       writeln!(f, "{code}")?;
     }
@@ -472,11 +485,15 @@ impl Default for BytecodeCtx {
 
 impl BytecodeCtx {
   pub fn new() -> Self {
-    Self { buffer: Vec::new(), current: ThunkCtx::new("__top_thunk__"), finished: Vec::new() }
+    Self {
+      buffer: Vec::new(),
+      current: ThunkCtx::new("__top_thunk__", Box::new([])),
+      finished: Vec::new(),
+    }
   }
 
-  pub fn push_thunk(&mut self, name: &str) {
-    self.buffer.push(std::mem::replace(&mut self.current, ThunkCtx::new(name)))
+  pub fn push_thunk(&mut self, name: &str, fvlocs: Box<[Location]>) {
+    self.buffer.push(std::mem::replace(&mut self.current, ThunkCtx::new(name, fvlocs)))
   }
 
   pub fn pop_thunk(&mut self) -> usize {

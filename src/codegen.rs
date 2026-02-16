@@ -140,10 +140,21 @@ enum Control {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
-enum Location {
+pub enum Location {
   Temporary,
   Slot(RegId),
   FreeVar(FreeVarId),
+}
+
+impl std::fmt::Display for Location {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    use Location::*;
+    match self {
+      Temporary => write!(f, "?t"),
+      Slot(r) => write!(f, "r{}", r.0),
+      FreeVar(fv) => write!(f, "^{}", fv.0),
+    }
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -333,12 +344,16 @@ impl<'a> CodeGenCtx<'a> {
     (next_reg as u8).into()
   }
 
-  fn get_temporary(&mut self) -> RegId {
+  fn peek_temporary(&self) -> RegId {
     let val_info = reg_top!(self);
     if val_info.name.is_some() {
       self.diagnostic.error("no temporary variable on the stack");
     }
-    let r = val_info.index;
+    val_info.index
+  }
+
+  fn get_temporary(&mut self) -> RegId {
+    let r = self.peek_temporary();
     reg_pop!(self);
     r
   }
@@ -707,13 +722,21 @@ impl<'a> CodeGenCtx<'a> {
       }
       Fn { params, body, info } => {
         let freevars = &self.information.get(*info).unwrap().freevars;
+        let mut fvlocs = vec![];
+        for fv in freevars {
+          let loc = self.scope.get_bound(fv).unwrap_or_else(|| {
+            self.diagnostic.error(&format!("unable to find captured variable: {}", fv.0))
+          });
+          assert!(!matches!(loc, Location::Temporary));
+          fvlocs.push(loc);
+        }
         self.scope.enter_function(freevars);
         self.enter_new_frame();
         for param in *params {
           let reg = self.allocate_temporary();
           self.update_symbols(param, reg);
         }
-        bc.push_thunk("fn");
+        bc.push_thunk("fn", fvlocs.into_boxed_slice());
         // reuse the first slot location of parameters for the return value
         let r = if params.is_empty() { self.allocate_named("__return_value__") } else { 0.into() };
         println!("return value: {}", r.0);
