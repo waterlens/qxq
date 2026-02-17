@@ -784,8 +784,11 @@ impl<'a> CodeGenCtx<'a> {
           .len()
           .try_into()
           .unwrap_or_else(|_| self.diagnostic.error("argument length overflow"));
+        for _ in 0..args_len {
+          reg_pop!(self);
+        }
         bc.push(Bytecode::apply(func_reg.into(), args_len.into()));
-        self.emit_store(bc, Value::Loc(Location::Slot(func_reg)), data, control, next);
+        self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next);
       }
       Bind { rec, name, expr, info: _ } => {
         let r = self.allocate_named(name.0);
