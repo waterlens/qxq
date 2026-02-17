@@ -8,7 +8,7 @@ use indexmap::{IndexMap, IndexSet};
 use slotmap::SlotMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, Label},
+  bytecode::{Bytecode, BytecodeCtx, Label, Tag},
   diagnostic::Diagnostic,
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, SynTree},
   tokenizer::{Paired, TokenStr},
@@ -83,7 +83,7 @@ impl Display for ConstantPool {
     let mut str_vec: Vec<_> = self.spool.iter().collect();
     str_vec.sort_by_key(|(_, &v)| v);
     for (val, idx) in str_vec {
-      writeln!(f, "@{}: \"{}\"", idx, val)?;
+      writeln!(f, "{}: \"{}\"", idx, val)?;
     }
 
     Ok(())
@@ -165,6 +165,7 @@ enum Value<'a> {
   IntLiteral(i128),
   StrLiteral(&'a str),
   Closure { id: usize },
+  Tuple { start_elem: RegId, len: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -382,6 +383,14 @@ impl<'a> CodeGenCtx<'a> {
     ))
   }
 
+  fn reify_object(&mut self, bc: &mut BytecodeCtx, tag: Tag, start_field: RegId, len: usize) {
+    bc.push(Bytecode::wrap(
+      start_field.into(),
+      tag.into(),
+      len.try_into().unwrap_or_else(|_| self.diagnostic.error("too many elements")),
+    ));
+  }
+
   fn get_value(&mut self, bc: &mut BytecodeCtx, opr: Value) -> RegId {
     use Location::*;
     use Value::*;
@@ -407,6 +416,10 @@ impl<'a> CodeGenCtx<'a> {
         let r = self.allocate_temporary();
         self.reify_closure(bc, r, id);
         self.get_temporary()
+      }
+      Tuple { start_elem, len } => {
+        self.reify_object(bc, Tag::TUPLE, start_elem, len);
+        start_elem
       }
     }
   }
@@ -442,6 +455,12 @@ impl<'a> CodeGenCtx<'a> {
           Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
           Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
           Value::Closure { id } => self.reify_closure(bc, r, id),
+          Value::Tuple { start_elem, len } => {
+            self.reify_object(bc, Tag::TUPLE, start_elem, len);
+            if r != start_elem {
+              bc.push(Bytecode::mov(r.into(), start_elem.into()))
+            }
+          }
         },
         None => unreachable!(
           "all non-register-destination cases should be handled in the outer pattern match"
@@ -794,7 +813,8 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_expr(bc, f, data, control, next);
       }
       Tuple(exprs, _) => {
-        let mut elems_regs = Vec::with_capacity(exprs.len());
+        let len = exprs.len();
+        let mut elems_regs = Vec::with_capacity(len);
         elems_regs.resize_with(exprs.len(), || self.allocate_temporary());
         let tuple_reg = if let Some(r) = elems_regs.first() { *r } else { todo!("unit") };
         for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
@@ -809,11 +829,10 @@ impl<'a> CodeGenCtx<'a> {
           );
           bc.push_label(l);
         }
-        bc.push(Bytecode::nop()); // MAKE TUPLE
-        match control {
-          ControlDest::Uncond(l) => self.emit_jump(bc, l, Some(tuple_reg)),
-          _ => self.diagnostic.error("tuple in conditional expression"),
+        for _ in 1..len {
+          reg_pop!(self);
         }
+        self.emit_store(bc, Value::Tuple { start_elem: tuple_reg, len }, data, control, next);
       }
     }
   }

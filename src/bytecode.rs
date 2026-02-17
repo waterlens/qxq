@@ -5,11 +5,41 @@ use hashbrown::HashMap;
 use crate::codegen::Location;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Tag(u8);
+
+impl Tag {
+  pub const TUPLE: Self = Tag(1);
+}
+
+impl From<u8> for Tag {
+  fn from(x: u8) -> Self {
+    Self(x)
+  }
+}
+
+impl TryFrom<usize> for Tag {
+  type Error = ();
+  fn try_from(value: usize) -> Result<Self, Self::Error> {
+    if value <= 0xff {
+      Ok(Self(value as u8))
+    } else {
+      Err(())
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Op8(u8);
 
 impl From<u8> for Op8 {
   fn from(x: u8) -> Self {
     Self(x)
+  }
+}
+
+impl From<Tag> for Op8 {
+  fn from(x: Tag) -> Self {
+    x.0.into()
   }
 }
 
@@ -313,7 +343,7 @@ pub struct Bytecode(pub Operator, pub Operands);
 
 define_bytecode! {
   Trap   (ABC, OpABC, op)   fn trap(dst: Op8, o1: Op8, o2: Op8)   { dst, o1, o2 } => ("  {:<8} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
-  Nop    (N)                fn nop()                              {}              => ("nop"),
+  Nop    (N)                fn nop()                              {}              => ("  {:<8}", "nop"),
   Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("  {:<8} #{}", "exta", op.o1),
   LoadI  (AB, OpAB, op)     fn loadi(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "loadi", op.dst, op.o1),
   LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("  {:<8} r{}, #{}", "loadui", op.dst, op.o1),
@@ -323,10 +353,11 @@ define_bytecode! {
   Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("  {:<8} r{}, r{}", "move", op.dst, op.o1),
   Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "apply", op.dst, op.o1),
   Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("  {:<8} r{}, fn{}", "call", op.dst, op.o1),
-  Retu   (N)                fn retu()                             {}              => ("retu"),
+  Retu   (N)                fn retu()                             {}              => ("  {:<8}", "retu"),
   Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("  {:<8} r{}", "ret", op.dst),
   Retn   (ABS, OpABS, op)   fn retn(dst: Op8, o1: OpS16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "retn", op.dst, op.o1),
   Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("  {:<8} r{}, fn{}", "clos", op.dst, op.o1),
+  Wrap   (ABC, OpABC, op)   fn wrap(dst: Op8, tag: Op8, n: Op8)   { dst, o1: tag, o2: n } => ("  {:<8} r{}, k{}, #{}", "wrap", op.dst, op.o1, op.o2),
   Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("  {:<8} #{}", "jmp", op.dst),
   Goto   (AS, OpAS, op)     fn goto(dst: OpS24)                   { dst }         => ("  {:<8} #{}", "goto", op.dst),
 
