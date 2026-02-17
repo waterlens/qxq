@@ -13,7 +13,7 @@ let pow = fn (base, exp)
   iter(0, 1)
 end;
 
-let not = fn (b) if b then false else true end;
+let not = fn (b) if b then false else true end end;
 let modulo = fn (a, b) a - (b * (a / b)) end;
 
 let is_even = fn (n) modulo(n, 2) == 0 end;

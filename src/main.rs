@@ -64,12 +64,13 @@ fn run_repl() -> Result<()> {
     let readline = rl.readline("> ");
     match readline {
       Ok(line) => {
-        let _ = rl.add_history_entry(line.as_str());
         if line.trim().is_empty() {
           continue;
         }
         if let Err(e) = process_content(&line) {
           eprintln!("Error: {}", e);
+        } else {
+          rl.add_history_entry(line.as_str())?;
         }
       }
       Err(ReadlineError::Interrupted) => {
@@ -93,10 +94,15 @@ fn run_repl() -> Result<()> {
 fn main() -> Result<()> {
   let args: Vec<String> = std::env::args().collect();
   if args.len() > 1 {
+    let mut success = true;
     for arg in &args[1..] {
       if let Err(e) = process_file(arg) {
         eprintln!("Error processing file {}: {}", arg, e);
+        success = false;
       }
+    }
+    if !success {
+      std::process::exit(1);
     }
   } else {
     run_repl()?;

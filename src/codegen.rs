@@ -158,14 +158,18 @@ impl std::fmt::Display for Location {
   }
 }
 
+// A value category is created mainly for eliminating
+// unnecessary moves. Match over the data destination serves
+// similar purpose. The key criterion for choosing between
+// them is whether there would be a *post-processing* demand:
+// 1. The value needs to be handled specially w.r.t the control destination
+// 2. Potential opportunities of further optimizations by postponing value codegen
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 enum Value<'a> {
   Loc(Location),
   IntLiteral(i128),
   StrLiteral(&'a str),
-  Closure { id: usize },
-  Tuple { start_elem: RegId, len: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -412,15 +416,6 @@ impl<'a> CodeGenCtx<'a> {
         self.reify_string_literal(bc, r, s);
         self.get_temporary()
       }
-      Closure { id } => {
-        let r = self.allocate_temporary();
-        self.reify_closure(bc, r, id);
-        self.get_temporary()
-      }
-      Tuple { start_elem, len } => {
-        self.reify_object(bc, Tag::TUPLE, start_elem, len);
-        start_elem
-      }
     }
   }
 
@@ -451,16 +446,9 @@ impl<'a> CodeGenCtx<'a> {
             let r2 = self.get_temporary();
             bc.push(Bytecode::mov(r.into(), r2.into()));
           }
+          Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
           Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
           Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
-          Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
-          Value::Closure { id } => self.reify_closure(bc, r, id),
-          Value::Tuple { start_elem, len } => {
-            self.reify_object(bc, Tag::TUPLE, start_elem, len);
-            if r != start_elem {
-              bc.push(Bytecode::mov(r.into(), start_elem.into()))
-            }
-          }
         },
         None => unreachable!(
           "all non-register-destination cases should be handled in the outer pattern match"
@@ -655,7 +643,13 @@ impl<'a> CodeGenCtx<'a> {
             };
             self.emit_binary_op_with_slots(bc, op_str.0, r1, r2, data, control, next);
           } else {
-            self.diagnostic.error("expected two arguments for addition");
+            self.diagnostic.error("expected two arguments for binary arithmetic operators");
+          }
+        }
+        "<" | "<=" | ">" | ">=" | "==" | "!=" => {
+          if args.len() == 2 {
+          } else {
+            self.diagnostic.error("expected two arguments for comparision operator")
           }
         }
         _ => self.diagnostic.error(&format!("unknown operator: {}", op_str.0)),
@@ -786,7 +780,20 @@ impl<'a> CodeGenCtx<'a> {
         let id = bc.pop_thunk();
         self.leave_frame();
         self.scope.leave();
-        self.emit_store(bc, Value::Closure { id }, data, control, next)
+        match data {
+          DataDest::Loc(slot @ Location::Slot(r)) => {
+            self.reify_closure(bc, r, id);
+            self.emit_store(bc, Value::Loc(slot), data, control, next)
+          }
+          DataDest::Effect
+          | DataDest::Loc(Location::Temporary)
+          | DataDest::Loc(Location::FreeVar(_))
+          | DataDest::RetValue => {
+            let r = self.allocate_temporary();
+            self.reify_closure(bc, r, id);
+            self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
+          }
+        }
       }
       Block(exprs, _) => match exprs {
         [] => todo!("empty block"),
@@ -832,7 +839,20 @@ impl<'a> CodeGenCtx<'a> {
         for _ in 1..len {
           reg_pop!(self);
         }
-        self.emit_store(bc, Value::Tuple { start_elem: tuple_reg, len }, data, control, next);
+        match data {
+          DataDest::Loc(slot @ Location::Slot(r)) if r == tuple_reg => {
+            self.reify_object(bc, Tag::TUPLE, tuple_reg, len);
+            self.emit_store(bc, Value::Loc(slot), data, control, next)
+          }
+          DataDest::Effect
+          | DataDest::Loc(Location::Slot(_))
+          | DataDest::Loc(Location::Temporary)
+          | DataDest::Loc(Location::FreeVar(_))
+          | DataDest::RetValue => {
+            self.reify_object(bc, Tag::TUPLE, tuple_reg, len);
+            self.emit_store(bc, Value::Loc(Location::Slot(tuple_reg)), data, control, next)
+          }
+        }
       }
     }
   }
