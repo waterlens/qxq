@@ -8,6 +8,7 @@ use crate::codegen::Location;
 pub struct Tag(u8);
 
 impl Tag {
+  pub const UNIT: Self = Tag(0);
   pub const TUPLE: Self = Tag(1);
 }
 
@@ -358,6 +359,7 @@ define_bytecode! {
   Retn   (ABS, OpABS, op)   fn retn(dst: Op8, o1: OpS16)          { dst, o1 }     => ("  {:<8} r{}, #{}", "retn", op.dst, op.o1),
   Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("  {:<8} r{}, fn{}", "clos", op.dst, op.o1),
   Wrap   (ABC, OpABC, op)   fn wrap(dst: Op8, tag: Op8, n: Op8)   { dst, o1: tag, o2: n } => ("  {:<8} r{}, k{}, #{}", "wrap", op.dst, op.o1, op.o2),
+  MkObj  (ABC, OpABC, op)   fn mobj(dst: Op8, tag: Op8, fld: Op8) { dst, o1: tag, o2: fld } => ("  {:<8} r{}, k{}, r{}", "mobj", op.dst, op.o1, op.o2),
   Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("  {:<8} #{}", "jmp", op.dst),
   Goto   (AS, OpAS, op)     fn goto(dst: OpS24)                   { dst }         => ("  {:<8} #{}", "goto", op.dst),
 
@@ -373,12 +375,9 @@ define_bytecode! {
   DivDD  (XYZ, OpXYZ, op)   fn divdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
   ModDD  (XYZ, OpXYZ, op)   fn moddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
 
+  CmpNotF (Cond, OpCond, op) fn cmpnotf(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.not.f", op.dst, op.o1),
   CmpEqDI (Cond, OpCond, op) fn cmpeqdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
   CmpNeDI (Cond, OpCond, op) fn cmpnedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.ne.di", op.dst, op.o1),
-  CmpLtDI (Cond, OpCond, op) fn cmpltdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.lt.di", op.dst, op.o1),
-  CmpLeDI (Cond, OpCond, op) fn cmpledi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.le.di", op.dst, op.o1),
-  CmpGtDI (Cond, OpCond, op) fn cmpgtdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.gt.di", op.dst, op.o1),
-  CmpGeDI (Cond, OpCond, op) fn cmpgedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.ge.di", op.dst, op.o1),
 
   CmpEqDC (Cond, OpCond, op) fn cmpeqdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.eq.dc", op.dst, op.o1),
   CmpNeDC (Cond, OpCond, op) fn cmpnedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.ne.dc", op.dst, op.o1),
@@ -386,6 +385,14 @@ define_bytecode! {
   CmpLeDC (Cond, OpCond, op) fn cmpledc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.le.dc", op.dst, op.o1),
   CmpGtDC (Cond, OpCond, op) fn cmpgtdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.gt.dc", op.dst, op.o1),
   CmpGeDC (Cond, OpCond, op) fn cmpgedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.ge.dc", op.dst, op.o1),
+
+  CmpEqDD (Cond, OpCond, op) fn cmpeqdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.eq.dd", op.dst, op.o1),
+  CmpNeDD (Cond, OpCond, op) fn cmpnedd(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.ne.dd", op.dst, op.o1),
+  CmpLtDD (Cond, OpCond, op) fn cmpltdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.lt.dd", op.dst, op.o1),
+  CmpLeDD (Cond, OpCond, op) fn cmpledd(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.le.dd", op.dst, op.o1),
+  // These are necessary: a < b is not equivalent to !(a >= b) under IEEE754
+  CmpGtDD (Cond, OpCond, op) fn cmpgtdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.gt.dd", op.dst, op.o1),
+  CmpGeDD (Cond, OpCond, op) fn cmpgedd(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, @{}", "cmp.ge.dd", op.dst, op.o1),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

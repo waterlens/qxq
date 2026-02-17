@@ -111,6 +111,12 @@ impl From<RegId> for crate::bytecode::Op8 {
   }
 }
 
+impl From<RegId> for crate::bytecode::Op16 {
+  fn from(id: RegId) -> Self {
+    (id.0 as u16).into()
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FreeVarId(u16);
 
@@ -158,16 +164,21 @@ impl std::fmt::Display for Location {
   }
 }
 
-// A value category is created mainly for eliminating
-// unnecessary moves. Match over the data destination serves
+// A value category (synthesized) is created mainly for eliminating
+// unnecessary moves. Match over the data destination (inherited) serves
 // similar purpose. The key criterion for choosing between
 // them is whether there would be a *post-processing* demand:
 // 1. The value needs to be handled specially w.r.t the control destination
+//   a). Value cannot be used as a control flow condition
+//   b). Value evaluation involves control flow actions that can be fused with others
 // 2. Potential opportunities of further optimizations by postponing value codegen
+//   a). Dealyed reification allows lower register pressure
+//   b). Apply optimizations (e.g., constant folding)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 enum Value<'a> {
   Loc(Location),
+  Unit,
   IntLiteral(i128),
   StrLiteral(&'a str),
 }
@@ -187,7 +198,14 @@ enum ControlDest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Test {
-  EqI(RegId, u16),
+  EqImm(RegId, u16),
+  Equal(RegId, RegId),
+  NotEq(RegId, RegId),
+  Less(RegId, RegId),
+  Greater(RegId, RegId),
+  LessOrEqual(RegId, RegId),
+  GreaterOrEqual(RegId, RegId),
+  NotF(RegId),
 }
 
 struct ValInfo<'a> {
@@ -387,12 +405,16 @@ impl<'a> CodeGenCtx<'a> {
     ))
   }
 
-  fn reify_object(&mut self, bc: &mut BytecodeCtx, tag: Tag, start_field: RegId, len: usize) {
+  fn wrap_object(&mut self, bc: &mut BytecodeCtx, tag: Tag, start_field: RegId, len: usize) {
     bc.push(Bytecode::wrap(
       start_field.into(),
       tag.into(),
       len.try_into().unwrap_or_else(|_| self.diagnostic.error("too many elements")),
     ));
+  }
+
+  fn make_object(&mut self, bc: &mut BytecodeCtx, dst: RegId, tag: Tag, fld: RegId) {
+    bc.push(Bytecode::mobj(dst.into(), tag.into(), fld.into()));
   }
 
   fn get_value(&mut self, bc: &mut BytecodeCtx, opr: Value) -> RegId {
@@ -406,6 +428,11 @@ impl<'a> CodeGenCtx<'a> {
         self.get_temporary()
       }
       Loc(Temporary) => self.get_temporary(),
+      Unit => {
+        let r = self.allocate_temporary();
+        self.make_object(bc, r, Tag::UNIT, 0.into());
+        self.get_temporary()
+      }
       IntLiteral(i) => {
         let r = self.allocate_temporary();
         self.reify_int_literal(bc, r, i);
@@ -447,6 +474,7 @@ impl<'a> CodeGenCtx<'a> {
             bc.push(Bytecode::mov(r.into(), r2.into()));
           }
           Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
+          Value::Unit => self.make_object(bc, r, Tag::UNIT, 0.into()),
           Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
           Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
         },
@@ -484,9 +512,16 @@ impl<'a> CodeGenCtx<'a> {
     next: Control,
   ) {
     use Test::*;
-    let gen1 = |s: &mut Self, bc: &mut BytecodeCtx, l1: Label, c2: Control| {
+    let gen_forward = |s: &mut Self, bc: &mut BytecodeCtx, l1: Label, c2: Control| {
       match test {
-        EqI(r, imm) => bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
+        EqImm(r, imm) => bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
+        Equal(r1, r2) => bc.push(Bytecode::cmpeqdd(r1.into(), r2.into())),
+        NotEq(r1, r2) => bc.push(Bytecode::cmpnedd(r1.into(), r2.into())),
+        Less(r1, r2) => bc.push(Bytecode::cmpltdd(r1.into(), r2.into())),
+        Greater(r1, r2) => bc.push(Bytecode::cmpgtdd(r1.into(), r2.into())),
+        LessOrEqual(r1, r2) => bc.push(Bytecode::cmpledd(r1.into(), r2.into())),
+        GreaterOrEqual(r1, r2) => bc.push(Bytecode::cmpgedd(r1.into(), r2.into())),
+        NotF(r) => bc.push(Bytecode::cmpnotf(r.into(), 0.into())),
       }
       bc.push_relocate(l1);
       bc.push(Bytecode::jmp(0i16.into()));
@@ -494,9 +529,16 @@ impl<'a> CodeGenCtx<'a> {
         s.emit_jump(bc, c2, Some(value));
       }
     };
-    let gen2 = |s: &mut Self, bc: &mut BytecodeCtx, c1: Control, l2: Label| {
+    let gen_reverse = |s: &mut Self, bc: &mut BytecodeCtx, c1: Control, l2: Label| {
       match test {
-        EqI(r, imm) => bc.push(Bytecode::cmpnedi(r.into(), imm.into())),
+        EqImm(r, imm) => bc.push(Bytecode::cmpnedi(r.into(), imm.into())),
+        Equal(r1, r2) => bc.push(Bytecode::cmpnedd(r1.into(), r2.into())),
+        NotEq(r1, r2) => bc.push(Bytecode::cmpeqdd(r1.into(), r2.into())),
+        Less(r1, r2) => bc.push(Bytecode::cmpgedd(r1.into(), r2.into())),
+        Greater(r1, r2) => bc.push(Bytecode::cmpledd(r1.into(), r2.into())),
+        LessOrEqual(r1, r2) => bc.push(Bytecode::cmpgtdd(r1.into(), r2.into())),
+        GreaterOrEqual(r1, r2) => bc.push(Bytecode::cmpltdd(r1.into(), r2.into())),
+        NotF(r) => bc.push(Bytecode::cmpnotf(r.into(), u16::MAX.into())),
       }
       bc.push_relocate(l2);
       bc.push(Bytecode::jmp(0i16.into()));
@@ -505,15 +547,15 @@ impl<'a> CodeGenCtx<'a> {
       }
     };
     match (c1, c2) {
-      (Control::Pos(l1), Control::Return) => gen1(self, bc, l1, c2),
+      (Control::Pos(l1), Control::Return) => gen_forward(self, bc, l1, c2),
       (Control::Pos(l1), Control::Pos(l2)) => {
         if c2 == next {
-          gen1(self, bc, l1, c2)
+          gen_forward(self, bc, l1, c2)
         } else {
-          gen2(self, bc, c1, l2)
+          gen_reverse(self, bc, c1, l2)
         }
       }
-      (Control::Return, Control::Pos(l2)) => gen2(self, bc, c1, l2),
+      (Control::Return, Control::Pos(l2)) => gen_reverse(self, bc, c1, l2),
       _ => unreachable!("return on both branches"),
     }
   }
@@ -536,7 +578,7 @@ impl<'a> CodeGenCtx<'a> {
       }
       (Effect, Branch(l1, l2)) => {
         let r = self.get_value(bc, opr);
-        self.emit_test(bc, r, Test::EqI(r, 1), l1, l2, next);
+        self.emit_test(bc, r, Test::NotF(r), l1, l2, next);
       }
       (Loc(loc), Uncond(c)) => {
         self.set_location(bc, loc, opr);
@@ -547,7 +589,7 @@ impl<'a> CodeGenCtx<'a> {
       (Loc(loc), Branch(l1, l2)) => {
         let r = self.get_value(bc, opr);
         self.set_location(bc, loc, Value::Loc(Location::Slot(r)));
-        self.emit_test(bc, r, Test::EqI(r, 1), l1, l2, next);
+        self.emit_test(bc, r, Test::NotF(r), l1, l2, next);
       }
       (RetValue, Uncond(c)) => {
         if c != Control::Return {
@@ -648,6 +690,8 @@ impl<'a> CodeGenCtx<'a> {
         }
         "<" | "<=" | ">" | ">=" | "==" | "!=" => {
           if args.len() == 2 {
+            // TODO: add a comparision value category
+            todo!()
           } else {
             self.diagnostic.error("expected two arguments for comparision operator")
           }
@@ -796,7 +840,7 @@ impl<'a> CodeGenCtx<'a> {
         }
       }
       Block(exprs, _) => match exprs {
-        [] => todo!("empty block"),
+        [] => self.emit_store(bc, Value::Unit, data, control, next),
         [expr] => self.emit_expr(bc, expr, data, control, next),
         [exprs @ .., last_expr] => {
           for expr in exprs {
@@ -823,36 +867,39 @@ impl<'a> CodeGenCtx<'a> {
         let len = exprs.len();
         let mut elems_regs = Vec::with_capacity(len);
         elems_regs.resize_with(exprs.len(), || self.allocate_temporary());
-        let tuple_reg = if let Some(r) = elems_regs.first() { *r } else { todo!("unit") };
-        for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
-          let l = bc.fresh_label();
-          let c = Control::Pos(l);
-          self.emit_expr(
-            bc,
-            elem,
-            DataDest::Loc(Location::Slot(r)),
-            ControlDest::Uncond(c),
-            Control::Pos(l),
-          );
-          bc.push_label(l);
-        }
-        for _ in 1..len {
-          reg_pop!(self);
-        }
-        match data {
-          DataDest::Loc(slot @ Location::Slot(r)) if r == tuple_reg => {
-            self.reify_object(bc, Tag::TUPLE, tuple_reg, len);
-            self.emit_store(bc, Value::Loc(slot), data, control, next)
+        if let Some(&tuple_reg) = elems_regs.first() {
+          for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
+            let l = bc.fresh_label();
+            let c = Control::Pos(l);
+            self.emit_expr(
+              bc,
+              elem,
+              DataDest::Loc(Location::Slot(r)),
+              ControlDest::Uncond(c),
+              Control::Pos(l),
+            );
+            bc.push_label(l);
           }
-          DataDest::Effect
-          | DataDest::Loc(Location::Slot(_))
-          | DataDest::Loc(Location::Temporary)
-          | DataDest::Loc(Location::FreeVar(_))
-          | DataDest::RetValue => {
-            self.reify_object(bc, Tag::TUPLE, tuple_reg, len);
-            self.emit_store(bc, Value::Loc(Location::Slot(tuple_reg)), data, control, next)
+          for _ in 1..len {
+            reg_pop!(self);
           }
-        }
+          match data {
+            DataDest::Loc(slot @ Location::Slot(r)) if r == tuple_reg => {
+              self.wrap_object(bc, Tag::TUPLE, tuple_reg, len);
+              self.emit_store(bc, Value::Loc(slot), data, control, next)
+            }
+            DataDest::Effect
+            | DataDest::Loc(Location::Slot(_))
+            | DataDest::Loc(Location::Temporary)
+            | DataDest::Loc(Location::FreeVar(_))
+            | DataDest::RetValue => {
+              self.wrap_object(bc, Tag::TUPLE, tuple_reg, len);
+              self.emit_store(bc, Value::Loc(Location::Slot(tuple_reg)), data, control, next)
+            }
+          }
+        } else {
+          self.emit_store(bc, Value::Unit, data, control, next)
+        };
       }
     }
   }
