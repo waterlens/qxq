@@ -199,6 +199,7 @@ enum ControlDest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Test {
+  #[allow(unused)]
   EqImm(RegId, u16),
   Equal(RegId, RegId),
   NotEq(RegId, RegId),
@@ -436,7 +437,7 @@ impl<'a> CodeGenCtx<'a> {
     fuse_br.position = bc.pc();
     bc.push(Bytecode::setcond(r.into(), if fuse_br.enabled { i16::MAX.into() } else { 0.into() }));
     // if fuse_br enabled, the actual conditional instruction is emitted by the other procedure
-    if fuse_br.enabled {
+    if !fuse_br.enabled {
       self.emit_test(bc, test, false);
     }
   }
@@ -500,6 +501,7 @@ impl<'a> CodeGenCtx<'a> {
   // - if `opr` is a value, then `set_location` must return a reg
   // - if `set_location` returns a reg, then it must be safe to
   //   immediately apply `get_value` with `opr` after this procedure
+  // - if `loc` is temporary, it always returns a reg
   fn set_location(
     &mut self,
     bc: &mut BytecodeCtx,
@@ -561,7 +563,7 @@ impl<'a> CodeGenCtx<'a> {
 
   fn emit_test(&mut self, bc: &mut BytecodeCtx, test: Test, negate_cond: bool) {
     use Test::*;
-    if negate_cond {
+    if !negate_cond {
       match test {
         EqImm(r, imm) => bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
         Equal(r1, r2) => bc.push(Bytecode::cmpeqdd(r1.into(), r2.into())),
@@ -631,6 +633,7 @@ impl<'a> CodeGenCtx<'a> {
     c2: Control,
     next: Control,
   ) {
+    // TODO: reverse setcond if necessary
     match (c1, c2) {
       (Control::Pos(l1), Control::Return) => self.emit_forward_test(bc, value, test, l1, c2, next),
       (Control::Pos(l1), Control::Pos(l2)) => {
@@ -771,6 +774,50 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
+  fn eval_any_loc_arguments(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    args: &[Option<Value<'a>>],
+  ) -> Box<[RegId]> {
+    let n_none = args.iter().filter(|a| a.is_none()).count();
+    let mut res_regs = vec![RegId::new(0); args.len()];
+    let mut n_some = 0;
+
+    for (i, arg) in args.iter().enumerate() {
+      if let Some(v) = arg {
+        let r = self.allocate_temporary();
+        self.set_location(bc, Location::Slot(r), *v, &mut Fusion::disabled());
+        res_regs[i] = r;
+        n_some += 1;
+      }
+    }
+
+    let current_frame: &Frame<'_> = frame_top!(self);
+    let current_regs = &current_frame.regs;
+    let current_len = current_regs.len();
+    let mut none_found = 0;
+    for (i, arg) in args.iter().enumerate() {
+      if arg.is_none() {
+        let stack_idx = current_len - n_some - n_none + none_found;
+        res_regs[i] = current_regs[stack_idx].index;
+        none_found += 1;
+      }
+    }
+
+    res_regs.into_boxed_slice()
+  }
+
+  // NOTE: after calling this, emitting a multi-instructions sequence
+  // with destination overlapping with this region is strongly not
+  // recommended, unless guaranteeing that the argument overwritten
+  // mustn't be used after. Fused instrutions sequence is an exception,
+  // as they are executed in one cycle (e.g. fused conditional set).
+  fn clean_any_loc_arguments(&mut self, len: usize) {
+    for _ in 0..len {
+      self.get_temporary();
+    }
+  }
+
   fn emit_op(
     &mut self,
     bc: &mut BytecodeCtx,
@@ -803,14 +850,9 @@ impl<'a> CodeGenCtx<'a> {
               Control::Pos(l2),
             );
             bc.push_label(l2);
-            let r2 = match mv2 {
-              Some(v) => self.get_value(bc, v, &mut Fusion::disabled()),
-              None => self.get_temporary(),
-            };
-            let r1 = match mv1 {
-              Some(v) => self.get_value(bc, v, &mut Fusion::disabled()),
-              None => self.get_temporary(),
-            };
+            let args = self.eval_any_loc_arguments(bc, &[mv1, mv2]);
+            let (r1, r2) = (args[0], args[1]);
+            self.clean_any_loc_arguments(args.len());
             self.emit_binary_op_with_slots(bc, op_str.0, r1, r2, data, control, next);
           } else {
             self.diagnostic.error("expected two arguments for binary arithmetic operators");
@@ -836,14 +878,8 @@ impl<'a> CodeGenCtx<'a> {
               Control::Pos(l2),
             );
             bc.push_label(l2);
-            let r2 = match mv2 {
-              Some(v) => self.get_value(bc, v, &mut Fusion::disabled()),
-              None => self.get_temporary(),
-            };
-            let r1 = match mv1 {
-              Some(v) => self.get_value(bc, v, &mut Fusion::disabled()),
-              None => self.get_temporary(),
-            };
+            let args = self.eval_any_loc_arguments(bc, &[mv1, mv2]);
+            let (r1, r2) = (args[0], args[1]);
             let test = match op_str.0 {
               "<" => Test::Less(r1, r2),
               ">" => Test::Greater(r1, r2),
@@ -853,6 +889,7 @@ impl<'a> CodeGenCtx<'a> {
               "!=" => Test::NotEq(r1, r2),
               _ => unreachable!(),
             };
+            self.clean_any_loc_arguments(args.len());
             self.emit_store(bc, Value::Test(test), data, control, next);
           } else {
             self.diagnostic.error("expected two arguments for comparision operator")
