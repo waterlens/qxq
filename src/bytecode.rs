@@ -375,6 +375,8 @@ define_bytecode! {
   DivDD  (XYZ, OpXYZ, op)   fn divdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
   ModDD  (XYZ, OpXYZ, op)   fn moddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("  {:<8} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
 
+  SetCond (ABS, OpABS, op)  fn setcond(dst: Op8, o1: OpS16)       { dst, o1 }     => ("  {:<8} r{}", if op.o1.0 >= 0 { "setc" } else { "setcj"}, op.dst),
+
   CmpNotF (Cond, OpCond, op) fn cmpnotf(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.not.f", op.dst, op.o1),
   CmpEqDI (Cond, OpCond, op) fn cmpeqdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
   CmpNeDI (Cond, OpCond, op) fn cmpnedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("  {:<8} r{}, #{}", "cmp.ne.di", op.dst, op.o1),

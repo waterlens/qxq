@@ -181,6 +181,7 @@ enum Value<'a> {
   Unit,
   IntLiteral(i128),
   StrLiteral(&'a str),
+  Test(Test),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -298,6 +299,32 @@ pub struct CodeGenCtx<'a> {
   information: SlotMap<InfoKey, Info<'a>>,
 }
 
+// require this to negate second if neces
+pub struct Fusion {
+  enabled: bool,
+  position: u32,
+}
+
+impl Fusion {
+  fn new(enabled: bool) -> Self {
+    Self { enabled, position: 0 }
+  }
+
+  fn enabled() -> Self {
+    Self::new(true)
+  }
+
+  fn disabled() -> Self {
+    Self::new(false)
+  }
+}
+
+impl Default for Fusion {
+  fn default() -> Self {
+    Self::disabled()
+  }
+}
+
 macro_rules! frame_top {
   ($self:ident) => {
     &mut $self.stack_frame.frames.last_mut().unwrap()
@@ -405,6 +432,15 @@ impl<'a> CodeGenCtx<'a> {
     ))
   }
 
+  fn reify_test(&mut self, bc: &mut BytecodeCtx, r: RegId, test: Test, fuse_br: &mut Fusion) {
+    fuse_br.position = bc.pc();
+    bc.push(Bytecode::setcond(r.into(), if fuse_br.enabled { i16::MAX.into() } else { 0.into() }));
+    // if fuse_br enabled, the actual conditional instruction is emitted by the other procedure
+    if fuse_br.enabled {
+      self.emit_test(bc, test, false);
+    }
+  }
+
   fn wrap_object(&mut self, bc: &mut BytecodeCtx, tag: Tag, start_field: RegId, len: usize) {
     bc.push(Bytecode::wrap(
       start_field.into(),
@@ -417,7 +453,7 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::mobj(dst.into(), tag.into(), fld.into()));
   }
 
-  fn get_value(&mut self, bc: &mut BytecodeCtx, opr: Value) -> RegId {
+  fn get_value(&mut self, bc: &mut BytecodeCtx, opr: Value, fuse_br: &mut Fusion) -> RegId {
     use Location::*;
     use Value::*;
     match opr {
@@ -443,6 +479,11 @@ impl<'a> CodeGenCtx<'a> {
         self.reify_string_literal(bc, r, s);
         self.get_temporary()
       }
+      Test(test) => {
+        let r = self.allocate_temporary();
+        self.reify_test(bc, r, test, fuse_br);
+        self.get_temporary()
+      }
     }
   }
 
@@ -455,29 +496,44 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
-  fn set_location(&mut self, bc: &mut BytecodeCtx, loc: Location, opr: Value) {
+  // invariant:
+  // - if `opr` is a value, then `set_location` must return a reg
+  // - if `set_location` returns a reg, then it must be safe to
+  //   immediately apply `get_value` with `opr` after this procedure
+  fn set_location(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    loc: Location,
+    opr: Value,
+    fuse_br: &mut Fusion,
+  ) -> Option<RegId> {
     use Location::*;
 
     match (loc, opr) {
-      (Temporary, Value::Loc(Temporary)) => (),
-      (Slot(r), Value::Loc(Slot(r2))) if r == r2 => (),
-      (FreeVar(i), Value::Loc(FreeVar(j))) if i == j => {}
+      (Temporary, Value::Loc(Temporary)) => Some(self.peek_temporary()),
+      (Slot(r), Value::Loc(Slot(r2))) if r == r2 => Some(r),
+      (FreeVar(i), Value::Loc(FreeVar(j))) if i == j => None,
       (FreeVar(i), _) => {
-        let r = self.get_value(bc, opr);
+        let r = self.get_value(bc, opr, &mut Fusion::disabled());
         bc.push(Bytecode::setf(i.into(), r.into()));
+        Some(r)
       }
       (_, _) => match self.is_register_destination(loc) {
-        Some(r) => match opr {
-          Value::Loc(Slot(r2)) => bc.push(Bytecode::mov(r.into(), r2.into())),
-          Value::Loc(Temporary) => {
-            let r2 = self.get_temporary();
-            bc.push(Bytecode::mov(r.into(), r2.into()));
+        Some(r) => {
+          match opr {
+            Value::Loc(Slot(r2)) => bc.push(Bytecode::mov(r.into(), r2.into())),
+            Value::Loc(Temporary) => {
+              let r2 = self.get_temporary();
+              bc.push(Bytecode::mov(r.into(), r2.into()));
+            }
+            Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
+            Value::Unit => self.make_object(bc, r, Tag::UNIT, 0.into()),
+            Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
+            Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
+            Value::Test(t) => self.reify_test(bc, r, t, fuse_br),
           }
-          Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
-          Value::Unit => self.make_object(bc, r, Tag::UNIT, 0.into()),
-          Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
-          Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
-        },
+          Some(r)
+        }
         None => unreachable!(
           "all non-register-destination cases should be handled in the outer pattern match"
         ),
@@ -485,6 +541,7 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
+  // emit a control: either be a jump or returning a value
   fn emit_jump(&mut self, bc: &mut BytecodeCtx, l: Control, v: Option<RegId>) {
     use Control::*;
     match l {
@@ -502,17 +559,9 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
-  fn emit_test(
-    &mut self,
-    bc: &mut BytecodeCtx,
-    value: RegId,
-    test: Test,
-    c1: Control,
-    c2: Control,
-    next: Control,
-  ) {
+  fn emit_test(&mut self, bc: &mut BytecodeCtx, test: Test, negate_cond: bool) {
     use Test::*;
-    let gen_forward = |s: &mut Self, bc: &mut BytecodeCtx, l1: Label, c2: Control| {
+    if negate_cond {
       match test {
         EqImm(r, imm) => bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
         Equal(r1, r2) => bc.push(Bytecode::cmpeqdd(r1.into(), r2.into())),
@@ -523,13 +572,7 @@ impl<'a> CodeGenCtx<'a> {
         GreaterOrEqual(r1, r2) => bc.push(Bytecode::cmpgedd(r1.into(), r2.into())),
         NotF(r) => bc.push(Bytecode::cmpnotf(r.into(), 0.into())),
       }
-      bc.push_relocate(l1);
-      bc.push(Bytecode::jmp(0i16.into()));
-      if c2 != next {
-        s.emit_jump(bc, c2, Some(value));
-      }
-    };
-    let gen_reverse = |s: &mut Self, bc: &mut BytecodeCtx, c1: Control, l2: Label| {
+    } else {
       match test {
         EqImm(r, imm) => bc.push(Bytecode::cmpnedi(r.into(), imm.into())),
         Equal(r1, r2) => bc.push(Bytecode::cmpnedd(r1.into(), r2.into())),
@@ -540,23 +583,111 @@ impl<'a> CodeGenCtx<'a> {
         GreaterOrEqual(r1, r2) => bc.push(Bytecode::cmpltdd(r1.into(), r2.into())),
         NotF(r) => bc.push(Bytecode::cmpnotf(r.into(), u16::MAX.into())),
       }
-      bc.push_relocate(l2);
-      bc.push(Bytecode::jmp(0i16.into()));
-      if c1 != next {
-        s.emit_jump(bc, c1, Some(value));
-      }
-    };
+    }
+  }
+
+  fn emit_forward_test(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    value: Option<RegId>,
+    test: Test,
+    l1: Label,
+    c2: Control,
+    next: Control,
+  ) {
+    self.emit_test(bc, test, false);
+    bc.push_relocate(l1);
+    bc.push(Bytecode::jmp(0i16.into()));
+    if c2 != next {
+      self.emit_jump(bc, c2, value);
+    }
+  }
+
+  fn emit_backward_test(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    value: Option<RegId>,
+    test: Test,
+    c1: Control,
+    l2: Label,
+    next: Control,
+  ) {
+    self.emit_test(bc, test, false);
+    bc.push_relocate(l2);
+    bc.push(Bytecode::jmp(0i16.into()));
+    if c1 != next {
+      self.emit_jump(bc, c1, value);
+    }
+  }
+
+  // invariant: value must be some if either control is a return
+  fn emit_branch(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    value: Option<RegId>,
+    test: Test,
+    fuse_br: Fusion,
+    c1: Control,
+    c2: Control,
+    next: Control,
+  ) {
     match (c1, c2) {
-      (Control::Pos(l1), Control::Return) => gen_forward(self, bc, l1, c2),
+      (Control::Pos(l1), Control::Return) => self.emit_forward_test(bc, value, test, l1, c2, next),
       (Control::Pos(l1), Control::Pos(l2)) => {
         if c2 == next {
-          gen_forward(self, bc, l1, c2)
+          self.emit_forward_test(bc, value, test, l1, c2, next)
         } else {
-          gen_reverse(self, bc, c1, l2)
+          self.emit_backward_test(bc, value, test, c1, l2, next)
         }
       }
-      (Control::Return, Control::Pos(l2)) => gen_reverse(self, bc, c1, l2),
+      (Control::Return, Control::Pos(l2)) => self.emit_backward_test(bc, value, test, c1, l2, next),
       _ => unreachable!("return on both branches"),
+    }
+  }
+
+  fn emit_value_with_branch(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    opr: Value,
+    dest: Option<Location>,
+    c1: Control,
+    c2: Control,
+    next: Control,
+  ) {
+    use Value::*;
+    match opr {
+      Test(test) => {
+        if let Some(loc) = dest {
+          // not for Effect
+          let mut fu = Fusion::enabled();
+          let r = self.set_location(bc, loc, opr, &mut fu);
+          self.emit_branch(bc, Some(r.expect("set_location: invariant")), test, fu, c1, c2, next);
+        } else if matches!((c1, c2), (Control::Return, _) | (_, Control::Return)) {
+          let mut fu = Fusion::enabled();
+          let r = self.get_value(bc, opr, &mut fu);
+          self.emit_branch(bc, Some(r), test, fu, c1, c2, next);
+        } else {
+          self.emit_branch(bc, None, test, Fusion::disabled(), c1, c2, next);
+        }
+      }
+      Loc(_) | Unit | IntLiteral(_) | StrLiteral(_) => {
+        let mut disable_fu = Fusion::disabled();
+        if let Some(loc) = dest {
+          // not for Effect
+          let r = match self.set_location(bc, loc, opr, &mut disable_fu) {
+            Some(r) => r,
+            None => {
+              // this doesn't procedure duplicate code because of `set_location`'s invariant
+              self.get_value(bc, opr, &mut disable_fu)
+            }
+          };
+          self.emit_branch(bc, None, crate::codegen::Test::NotF(r), disable_fu, c1, c2, next);
+        } else {
+          let r = self.get_value(bc, opr, &mut disable_fu);
+          // pass r anyway to avoid the check of return
+          self.emit_branch(bc, Some(r), crate::codegen::Test::NotF(r), disable_fu, c1, c2, next);
+        };
+      }
     }
   }
 
@@ -576,26 +707,23 @@ impl<'a> CodeGenCtx<'a> {
           self.emit_jump(bc, c, None);
         }
       }
-      (Effect, Branch(l1, l2)) => {
-        let r = self.get_value(bc, opr);
-        self.emit_test(bc, r, Test::NotF(r), l1, l2, next);
+      (Effect, Branch(c1, c2)) => {
+        self.emit_value_with_branch(bc, opr, None, c1, c2, next);
       }
       (Loc(loc), Uncond(c)) => {
-        self.set_location(bc, loc, opr);
+        self.set_location(bc, loc, opr, &mut Fusion::disabled());
         if c != next {
           self.emit_jump(bc, c, None);
         }
       }
-      (Loc(loc), Branch(l1, l2)) => {
-        let r = self.get_value(bc, opr);
-        self.set_location(bc, loc, Value::Loc(Location::Slot(r)));
-        self.emit_test(bc, r, Test::NotF(r), l1, l2, next);
+      (Loc(loc), Branch(c1, c2)) => {
+        self.emit_value_with_branch(bc, opr, Some(loc), c1, c2, next);
       }
       (RetValue, Uncond(c)) => {
         if c != Control::Return {
           self.diagnostic.error("data destination: return value; control destination: not return");
         }
-        let r = self.get_value(bc, opr);
+        let r = self.get_value(bc, opr, &mut Fusion::disabled());
         self.emit_jump(bc, c, Some(r));
       }
       (RetValue, Branch(_l1, _l2)) => {
@@ -676,11 +804,11 @@ impl<'a> CodeGenCtx<'a> {
             );
             bc.push_label(l2);
             let r2 = match mv2 {
-              Some(v) => self.get_value(bc, v),
+              Some(v) => self.get_value(bc, v, &mut Fusion::disabled()),
               None => self.get_temporary(),
             };
             let r1 = match mv1 {
-              Some(v) => self.get_value(bc, v),
+              Some(v) => self.get_value(bc, v, &mut Fusion::disabled()),
               None => self.get_temporary(),
             };
             self.emit_binary_op_with_slots(bc, op_str.0, r1, r2, data, control, next);
@@ -690,8 +818,42 @@ impl<'a> CodeGenCtx<'a> {
         }
         "<" | "<=" | ">" | ">=" | "==" | "!=" => {
           if args.len() == 2 {
-            // TODO: add a comparision value category
-            todo!()
+            let l1 = bc.fresh_label();
+            let mv1 = self.emit_expr_maybe_value(
+              bc,
+              args[0],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l1)),
+              Control::Pos(l1),
+            );
+            bc.push_label(l1);
+            let l2 = bc.fresh_label();
+            let mv2 = self.emit_expr_maybe_value(
+              bc,
+              args[1],
+              DataDest::Loc(Location::Temporary),
+              ControlDest::Uncond(Control::Pos(l2)),
+              Control::Pos(l2),
+            );
+            bc.push_label(l2);
+            let r2 = match mv2 {
+              Some(v) => self.get_value(bc, v, &mut Fusion::disabled()),
+              None => self.get_temporary(),
+            };
+            let r1 = match mv1 {
+              Some(v) => self.get_value(bc, v, &mut Fusion::disabled()),
+              None => self.get_temporary(),
+            };
+            let test = match op_str.0 {
+              "<" => Test::Less(r1, r2),
+              ">" => Test::Greater(r1, r2),
+              "<=" => Test::LessOrEqual(r1, r2),
+              ">=" => Test::GreaterOrEqual(r1, r2),
+              "==" => Test::Equal(r1, r2),
+              "!=" => Test::NotEq(r1, r2),
+              _ => unreachable!(),
+            };
+            self.emit_store(bc, Value::Test(test), data, control, next);
           } else {
             self.diagnostic.error("expected two arguments for comparision operator")
           }
