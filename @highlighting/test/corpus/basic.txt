@@ -1,0 +1,38 @@
+==================
+Arithmetic
+==================
+1 + 2 * 3
+---
+(source_file
+  (binary_expression
+    (binary_expression
+      (number)
+      (operator)
+      (number))
+    (operator)
+    (number)))
+
+==================
+Let binding
+==================
+let x = 10
+---
+(source_file
+  (let_binding
+    name: (identifier)
+    value: (number)))
+
+==================
+Functions
+==================
+fn (x, y) x + y end
+---
+(source_file
+  (function_definition
+    parameters: (parameters
+      (identifier)
+      (identifier))
+    body: (binary_expression
+      (identifier)
+      (operator)
+      (identifier))))

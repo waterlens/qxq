@@ -1,0 +1,31 @@
+# Justfile for qxq tree-sitter highlighting
+
+# Generate the parser from grammar.js
+generate:
+    tree-sitter generate
+
+# Compile the parser to a shared object
+build: generate
+    tree-sitter build
+
+# Run tree-sitter tests (requires grammar generation first)
+test: generate
+    tree-sitter test
+
+# Install to Neovim (binary + queries + config)
+install: build
+    python3 manage_nvim.py install
+
+# Uninstall from Neovim
+uninstall:
+    python3 manage_nvim.py uninstall
+
+# Remove compiled binaries
+clean:
+    rm -f parser.dylib parser.so qxq.so
+    rm -rf build/
+
+# Remove all generated files (including src/)
+dist-clean: clean
+    rm -rf src/
+    rm -f binding.gyp

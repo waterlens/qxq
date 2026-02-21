@@ -1,0 +1,12 @@
+# Compiled binaries
+*.so
+*.dylib
+*.dll
+build/
+
+# Node dependencies
+node_modules/
+
+# Tree-sitter generated files
+src/
+binding.gyp
