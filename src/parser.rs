@@ -79,8 +79,6 @@ impl Affinity {
   }
 }
 
-pub const BUILTIN_CTORS: phf::Map<&'static str, usize> = phf::phf_map!["true" => 0, "false" => 0];
-
 pub type ExprRef<'a, I> = &'a Expr<'a, I>;
 pub type ExprsRef<'a, I> = &'a [ExprRef<'a, I>];
 
@@ -108,7 +106,7 @@ impl<I> ToSexp for Expr<'_, I> {
     match self {
       BoolLiteral(b, _) => pool.atom(if *b { "true" } else { "false" }),
       IntLiteral(n, _) => pool.atom(n.to_string()),
-      StrLiteral(s, _) => pool.atom(s),
+      StrLiteral(s, _) => pool.atom(format!("\"{}\"", s.escape_default())),
       Ident(s, _) => pool.atom(s.as_ref()),
       Op(s, _) => pool.atom(s.as_ref()),
       OpApply { op, pair: _, args, info: _ } => pool
@@ -185,7 +183,7 @@ impl<'a> ToSexp for InfoExpr<'a> {
         true
       }
       StrLiteral(s, _) => {
-        parts.push(pool.atom(s));
+        parts.push(pool.atom(format!("\"{}\"", s.escape_default())));
         true
       }
       Ident(s, _) => {

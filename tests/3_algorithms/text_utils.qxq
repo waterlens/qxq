@@ -21,7 +21,7 @@ repeat("ha", 3)
 
 (* EXPECT:
    --- Syntax Tree ---
-   (block (let greeting hello) (let name world) (let greet (fn (n) (+ (+ (+ greeting , ) n) !))) (greet name) (let repeat (fn (s n) (block (let-rec iter (fn (i acc) (if (>= i n) acc (iter (+ i 1) (+ acc s))))) (iter 0 )))) (repeat ha 3))
+   (block (let greeting "hello") (let name "world") (let greet (fn (n) (+ (+ (+ greeting ", ") n) "!"))) (greet name) (let repeat (fn (s n) (block (let-rec iter (fn (i acc) (if (>= i n) acc (iter (+ i 1) (+ acc s))))) (iter 0 "")))) (repeat "ha" 3))
    --- Constant Pool ---
    --- Integer Constants ---
    @0: 1

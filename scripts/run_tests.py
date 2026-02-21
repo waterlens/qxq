@@ -14,14 +14,23 @@ from rich.progress import Progress
 
 console = Console()
 
+
 def main():
     parser = argparse.ArgumentParser(description="Run QxQ tests.")
     parser.add_argument("--release", action="store_true", help="Use release binary")
-    parser.add_argument("--test", action="store_true", help="Run only traditional tests")
-    parser.add_argument("--test-expect", action="store_true", help="Run only expect-tests")
-    parser.add_argument("--update-expect", action="store_true", help="Update EXPECT: blocks")
-    parser.add_argument("--skip-multiple-expect", action="store_true", help="Pass to qxq during update")
-    
+    parser.add_argument(
+        "--test", action="store_true", help="Run only traditional tests"
+    )
+    parser.add_argument(
+        "--test-expect", action="store_true", help="Run only expect-tests"
+    )
+    parser.add_argument(
+        "--update-expect", action="store_true", help="Update EXPECT: blocks"
+    )
+    parser.add_argument(
+        "--skip-multiple-expect", action="store_true", help="Pass to qxq during update"
+    )
+
     args = parser.parse_args()
 
     mode = "release" if args.release else "debug"
@@ -30,8 +39,14 @@ def main():
     binary_path = project_root / "target" / mode / "qxq"
 
     if not binary_path.exists():
-        console.print(f"[yellow]Binary not found at {binary_path}. Building...[/yellow]")
-        subprocess.run(["cargo", "build"] + (["--release"] if args.release else []), cwd=project_root, check=True)
+        console.print(
+            f"[yellow]Binary not found at {binary_path}. Building...[/yellow]"
+        )
+        subprocess.run(
+            ["cargo", "build"] + (["--release"] if args.release else []),
+            cwd=project_root,
+            check=True,
+        )
 
     test_files = sorted(list(tests_dir.rglob("*.qxq")))
     results = []
@@ -72,25 +87,39 @@ def main():
                 # Always run in traditional mode unless explicitly told to skip elsewhere
 
             if skip:
-                results.append({"category": category, "file": str(rel_path), "success": True, "skipped": True, "mode": "SKIPPED"})
+                results.append(
+                    {
+                        "category": category,
+                        "file": str(rel_path),
+                        "success": True,
+                        "skipped": True,
+                        "mode": "SKIPPED",
+                    }
+                )
             else:
-                process = subprocess.run([str(binary_path)] + cmd_args, capture_output=True, text=True)
+                process = subprocess.run(
+                    [str(binary_path)] + cmd_args, capture_output=True, text=True
+                )
                 success = process.returncode == 0
                 is_skipped = process.returncode == 2
 
-                results.append({
-                    "category": category,
-                    "file": str(rel_path),
-                    "success": success or is_skipped,
-                    "skipped": is_skipped,
-                    "mode": run_mode,
-                    "error": process.stderr if not (success or is_skipped) else None,
-                    "stdout": process.stdout
-                })
-            
+                results.append(
+                    {
+                        "category": category,
+                        "file": str(rel_path),
+                        "success": success or is_skipped,
+                        "skipped": is_skipped,
+                        "mode": run_mode,
+                        "error": process.stderr
+                        if not (success or is_skipped)
+                        else None,
+                        "stdout": process.stdout,
+                    }
+                )
+
             progress.update(task, advance=1)
 
-    table = Table(title="QxQ Execution Results")
+    table = Table(title="QxQ Testsuite Execution Results")
     table.add_column("Category", style="cyan")
     table.add_column("Test Case", style="magenta")
     table.add_column("Mode", style="blue")
@@ -102,14 +131,17 @@ def main():
             status = "[yellow]SKIP[/yellow]"
         else:
             status = "[green]PASS[/green]" if res["success"] else "[red]FAIL[/red]"
-            if res["success"]: passed += 1
+            if res["success"]:
+                passed += 1
         table.add_row(res["category"], res["file"], res["mode"], status)
 
     console.print(table)
 
     if any(r["skipped"] for r in results):
-        console.print(f"\n[yellow]Total skipped: {sum(1 for r in results if r['skipped'])}[/yellow]")
-    
+        console.print(
+            f"\n[yellow]Total skipped: {sum(1 for r in results if r['skipped'])}[/yellow]"
+        )
+
     for res in results:
         if res.get("stdout") and "Skipping update" in res["stdout"]:
             console.print(f"[yellow]{res['stdout'].strip()}[/yellow]")
@@ -118,10 +150,15 @@ def main():
     if failures:
         console.print("\n[red]Failures:[/red]")
         for fail in failures:
-            console.print(f"[bold red]File: {fail['file']}[/bold red]\n{fail['error']}\n{'-'*20}")
+            console.print(
+                f"[bold red]File: {fail['file']}[/bold red]\n{fail['error']}\n{'-' * 20}"
+            )
         sys.exit(1)
 
-    console.print(f"\n[bold]Summary: {passed}/{sum(1 for r in results if not r['skipped'])} passed[/bold]")
+    console.print(
+        f"\n[bold]Summary: {passed}/{sum(1 for r in results if not r['skipped'])} passed[/bold]"
+    )
+
 
 if __name__ == "__main__":
     main()

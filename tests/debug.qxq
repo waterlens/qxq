@@ -1,27 +1,26 @@
 (* RUN: {qxq|cargo run --} %s *)
-1 + 2 * (3 - 4) / 5
+if 1 < 2 then 3 else 4 end;
+9 / 10
 (* EXPECT:
    --- Syntax Tree ---
-   (+ 1 (/ (* 2 (- 3 4)) 5))
+   (block (if (< 1 2) 3 4) (/ 9 10))
    --- Constant Pool ---
    --- Integer Constants ---
-   @0: 3
-   @1: 4
-   @2: 2
-   @3: 5
-   @4: 1
+   @0: 1
+   @1: 2
+   @2: 9
+   @3: 10
    --- String Constants ---
    
    --- Thunk ---
    thunk::__top_thunk__ captured::[]
    loadc        r0, @0
    loadc        r1, @1
-   sub.dd       r0, r0, r1
-   loadc        r1, @2
-   mul.dd       r0, r1, r0
+   cmp.lt.dd    r0, r1
+   jmp          #1
+   jmp          #0
+   loadc        r0, @2
    loadc        r1, @3
    div.dd       r0, r0, r1
-   loadc        r1, @4
-   add.dd       r0, r1, r0
    retn         r0, #0
 *)

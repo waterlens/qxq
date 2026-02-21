@@ -6,9 +6,9 @@ description = "A playground for interpreters and JIT compilers"
 license = "MIT"
 
 [dependencies]
-anyhow = "1.0.100"
+anyhow = "1.0.102"
 boxing = "0.1.2"
-bumpalo = "3.19.1"
+bumpalo = "3.20.2"
 by_address = "1.2.1"
 hashbrown = "0.16"
 hashconsing = "1.6.0"
