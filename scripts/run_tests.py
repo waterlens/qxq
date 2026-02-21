@@ -76,13 +76,15 @@ def main():
             else:
                 process = subprocess.run([str(binary_path)] + cmd_args, capture_output=True, text=True)
                 success = process.returncode == 0
+                is_skipped = process.returncode == 2
+
                 results.append({
                     "category": category,
                     "file": str(rel_path),
-                    "success": success,
-                    "skipped": False,
+                    "success": success or is_skipped,
+                    "skipped": is_skipped,
                     "mode": run_mode,
-                    "error": process.stderr if not success else None,
+                    "error": process.stderr if not (success or is_skipped) else None,
                     "stdout": process.stdout
                 })
             
@@ -109,7 +111,7 @@ def main():
         console.print(f"\n[yellow]Total skipped: {sum(1 for r in results if r['skipped'])}[/yellow]")
     
     for res in results:
-        if not res["skipped"] and res.get("stdout") and "Skipping update" in res["stdout"]:
+        if res.get("stdout") and "Skipping update" in res["stdout"]:
             console.print(f"[yellow]{res['stdout'].strip()}[/yellow]")
 
     failures = [r for r in results if not r["success"] and not r["skipped"]]

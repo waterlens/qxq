@@ -5,3 +5,5 @@
    --- Syntax Tree ---
    100
 *)
+(* EXPECT: *)
+

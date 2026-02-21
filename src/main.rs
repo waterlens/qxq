@@ -98,20 +98,23 @@ fn main() -> Result<()> {
       if args.len() < 3 {
         anyhow::bail!("Usage: qxq --check-expect <filename>");
       }
-      return check::run_check(&args[2]);
+      return expect::run_check(&args[2]);
     }
     if args[1] == "--test-expect" {
       if args.len() < 3 {
         anyhow::bail!("Usage: qxq --test-expect <filename>");
       }
-      return check::run_test_file(&args[2]);
+      return expect::run_test_file(&args[2]);
     }
     if args[1] == "--update-expect" {
       if args.len() < 3 {
         anyhow::bail!("Usage: qxq --update-expect <filename> [--skip-multiple-expect]");
       }
       let skip_multi = args.iter().any(|a| a == "--skip-multiple-expect");
-      return check::update_expectations(&args[2], skip_multi);
+      match expect::update_expectations(&args[2], skip_multi)? {
+        expect::UpdateStatus::Updated => return Ok(()),
+        expect::UpdateStatus::Skipped => std::process::exit(2),
+      }
     }
     let mut success = true;
     for arg in &args[1..] {

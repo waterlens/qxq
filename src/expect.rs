@@ -70,14 +70,19 @@ fn handle_negative_test(res: Result<()>, err_pat: Option<String>) -> Result<()> 
   }
 }
 
-pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<()> {
+pub enum UpdateStatus {
+  Updated,
+  Skipped,
+}
+
+pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<UpdateStatus> {
   let content = std::fs::read_to_string(file_path)?;
   let (exps, run_cmd, _) = extract_metadata(&content)?;
 
   if exps.len() > 1 {
     if skip_multi {
       println!("Skipping update for {} (multiple EXPECT: blocks)", file_path);
-      return Ok(());
+      return Ok(UpdateStatus::Skipped);
     }
     return Err(anyhow!("Cannot automatically update file with multiple EXPECT: blocks"));
   }
@@ -107,10 +112,10 @@ pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<()> {
     new_chars.extend_from_slice(&chars[exp.end..]);
     std::fs::write(file_path, new_chars.into_iter().collect::<String>())?;
     println!("Updated EXPECT block in {}", file_path);
+    Ok(UpdateStatus::Updated)
   } else {
-    return Err(anyhow!("No EXPECT: block found to update in {}", file_path));
+    Err(anyhow!("No EXPECT: block found to update in {}", file_path))
   }
-  Ok(())
 }
 
 fn verify_output<R: BufRead>(mut input: R, expectations: &[Expectation]) -> Result<()> {

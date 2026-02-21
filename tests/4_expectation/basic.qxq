@@ -4,3 +4,5 @@
    --- Syntax Tree ---
    (+ 1 1)
 *)
+(* EXPECT: *)
+
