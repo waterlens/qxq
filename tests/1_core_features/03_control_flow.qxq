@@ -1,3 +1,4 @@
+(* RUN: {qxq|cargo run --} %s *)
 if 1 > 0 then
   "greater"
 else
@@ -5,3 +6,28 @@ else
 end;
 
 if true then 1 else 0 end
+
+(* EXPECT:
+   --- Syntax Tree ---
+   (block (if (> 1 0) greater not greater) (if true 1 0))
+   --- Constant Pool ---
+   --- Integer Constants ---
+   @0: 1
+   @1: 0
+   --- String Constants ---
+   
+   --- Thunk ---
+   thunk::__top_thunk__ captured::[]
+   loadc        r0, @0
+   loadc        r1, @1
+   cmp.gt.dd    r0, r1
+   jmp          #1
+   jmp          #0
+   mobj         r0, k3, r0
+   cmp.not.f    r0, #0
+   jmp          #2
+   loadc        r0, @0
+   retn         r0, #0
+   loadc        r0, @1
+   retn         r0, #0
+*)

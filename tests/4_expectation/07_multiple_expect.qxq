@@ -1,0 +1,9 @@
+(* RUN: {qxq|cargo run --} %s *)
+1 + 1;
+2 + 2
+(* EXPECT:
+   loadc        r0, @0
+*)
+(* EXPECT:
+   loadc        r1, @1
+*)

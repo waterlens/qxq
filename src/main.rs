@@ -94,6 +94,25 @@ fn run_repl() -> Result<()> {
 fn main() -> Result<()> {
   let args: Vec<String> = std::env::args().collect();
   if args.len() > 1 {
+    if args[1] == "--check-expect" {
+      if args.len() < 3 {
+        anyhow::bail!("Usage: qxq --check-expect <filename>");
+      }
+      return check::run_check(&args[2]);
+    }
+    if args[1] == "--test-expect" {
+      if args.len() < 3 {
+        anyhow::bail!("Usage: qxq --test-expect <filename>");
+      }
+      return check::run_test_file(&args[2]);
+    }
+    if args[1] == "--update-expect" {
+      if args.len() < 3 {
+        anyhow::bail!("Usage: qxq --update-expect <filename> [--skip-multiple-expect]");
+      }
+      let skip_multi = args.iter().any(|a| a == "--skip-multiple-expect");
+      return check::update_expectations(&args[2], skip_multi);
+    }
     let mut success = true;
     for arg in &args[1..] {
       if let Err(e) = process_file(arg) {

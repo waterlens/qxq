@@ -1,3 +1,4 @@
+(* RUN: {qxq|cargo run --} %s *)
 let greeting = "hello";
 let name = "world";
 
@@ -17,3 +18,68 @@ let repeat = fn (s, n)
 end;
 
 repeat("ha", 3)
+
+(* EXPECT:
+   --- Syntax Tree ---
+   (block (let greeting hello) (let name world) (let greet (fn (n) (+ (+ (+ greeting , ) n) !))) (greet name) (let repeat (fn (s n) (block (let-rec iter (fn (i acc) (if (>= i n) acc (iter (+ i 1) (+ acc s))))) (iter 0 )))) (repeat ha 3))
+   --- Constant Pool ---
+   --- Integer Constants ---
+   @0: 1
+   @1: 0
+   @2: 3
+   --- String Constants ---
+   @0: "hello"
+   @1: "world"
+   @2: ", "
+   @3: "!"
+   @4: ""
+   @5: "ha"
+   
+   --- Thunk ---
+   thunk::fn captured::[r0 as ^0]
+   loadf        r1, ^0
+   loadc        r2, @2
+   add.dd       r1, r1, r2
+   add.dd       r1, r1, r0
+   loadc        r2, @3
+   add.dd       r1, r1, r2
+   retn         r1, #0
+   
+   --- Thunk ---
+   thunk::fn captured::[r2 as ^0 ,r1 as ^1 ,r0 as ^2]
+   loadf        r2, ^1
+   cmp.ge.dd    r0, r2
+   jmp          #1
+   retn         r1, #0
+   loadf        r2, ^0
+   loadc        r5, @0
+   add.dd       r3, r0, r5
+   loadf        r5, ^2
+   add.dd       r4, r1, r5
+   apply        r2, #2
+   retn         r2, #0
+   
+   --- Thunk ---
+   thunk::fn captured::[]
+   clos         r2, fn1
+   move         r3, r2
+   loadc        r4, @1
+   loadc        r5, @4
+   apply        r3, #2
+   retn         r3, #0
+   
+   --- Thunk ---
+   thunk::__top_thunk__ captured::[]
+   loadc        r0, @0
+   loadc        r1, @1
+   clos         r2, fn0
+   move         r3, r2
+   move         r4, r1
+   apply        r3, #1
+   clos         r4, fn2
+   move         r5, r4
+   loadc        r6, @5
+   loadc        r7, @2
+   apply        r5, #2
+   retn         r5, #0
+*)

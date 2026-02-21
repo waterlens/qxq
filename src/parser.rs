@@ -868,6 +868,9 @@ impl<'a> Parser<'a> {
 
   pub fn parse(mut self) -> Result<SynTree<'a, InfoKey>> {
     let root = self.parse_exprs()?;
+    while self.peek_newline() {
+      self.skip_token();
+    }
     self.expect_reach_eof()?;
     let information = self.information;
     Ok(SynTree { root: root.inner, information })

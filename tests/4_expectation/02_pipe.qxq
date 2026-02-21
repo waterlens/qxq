@@ -1,0 +1,5 @@
+(* RUN: {qxq|cargo run --} %s | grep "Syntax Tree" *)
+1 + 2
+(* EXPECT:
+   --- Syntax Tree ---
+*)

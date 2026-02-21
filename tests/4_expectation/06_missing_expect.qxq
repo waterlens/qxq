@@ -1,0 +1,5 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   No EXPECT: patterns found
+*)
+1 + 1
+(* No EXPECT here *)

@@ -1,3 +1,4 @@
+(* RUN: {qxq|cargo run --} %s *)
 let factorial = fn (n)
   let rec iter = fn (i, acc)
     if i > n then
@@ -19,3 +20,66 @@ end;
 
 factorial(5);
 fib(10)
+
+(* EXPECT:
+   --- Syntax Tree ---
+   (block (let factorial (fn (n) (block (let-rec iter (fn (i acc) (if (> i n) acc (iter (+ i 1) (* acc i))))) (iter 1 1)))) (let-rec fib (fn (n) (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))) (factorial 5) (fib 10))
+   --- Constant Pool ---
+   --- Integer Constants ---
+   @0: 1
+   @1: 2
+   @2: 5
+   @3: 10
+   --- String Constants ---
+   
+   --- Thunk ---
+   thunk::fn captured::[r1 as ^0 ,r0 as ^1]
+   loadf        r2, ^1
+   cmp.gt.dd    r0, r2
+   jmp          #1
+   retn         r1, #0
+   loadf        r2, ^0
+   loadc        r5, @0
+   add.dd       r3, r0, r5
+   mul.dd       r4, r1, r0
+   apply        r2, #2
+   retn         r2, #0
+   
+   --- Thunk ---
+   thunk::fn captured::[]
+   clos         r1, fn0
+   move         r2, r1
+   loadc        r3, @0
+   loadc        r4, @0
+   apply        r2, #2
+   retn         r2, #0
+   
+   --- Thunk ---
+   thunk::fn captured::[r1 as ^0]
+   loadc        r1, @0
+   cmp.le.dd    r0, r1
+   jmp          #1
+   retn         r0, #0
+   loadf        r1, ^0
+   loadc        r3, @0
+   sub.dd       r2, r0, r3
+   apply        r1, #1
+   loadf        r2, ^0
+   loadc        r4, @1
+   sub.dd       r3, r0, r4
+   apply        r2, #1
+   add.dd       r1, r1, r2
+   retn         r1, #0
+   
+   --- Thunk ---
+   thunk::__top_thunk__ captured::[]
+   clos         r0, fn1
+   clos         r1, fn2
+   move         r2, r0
+   loadc        r3, @2
+   apply        r2, #1
+   move         r3, r1
+   loadc        r4, @3
+   apply        r3, #1
+   retn         r3, #0
+*)

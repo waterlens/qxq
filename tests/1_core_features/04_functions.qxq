@@ -1,3 +1,4 @@
+(* RUN: {qxq|cargo run --} %s *)
 fn () 1 end;
 
 fn (x) x end;
@@ -6,3 +7,44 @@ fn (x, y) x + y end;
 
 let add = fn (a, b) a + b end;
 add(1, 2)
+
+(* EXPECT:
+   --- Syntax Tree ---
+   (block (fn () 1) (fn (x) x) (fn (x y) (+ x y)) (let add (fn (a b) (+ a b))) (add 1 2))
+   --- Constant Pool ---
+   --- Integer Constants ---
+   @0: 1
+   @1: 2
+   --- String Constants ---
+   
+   --- Thunk ---
+   thunk::fn captured::[]
+   loadc        r0, @0
+   retn         r0, #0
+   
+   --- Thunk ---
+   thunk::fn captured::[]
+   retn         r0, #0
+   
+   --- Thunk ---
+   thunk::fn captured::[]
+   add.dd       r2, r0, r1
+   retn         r2, #0
+   
+   --- Thunk ---
+   thunk::fn captured::[]
+   add.dd       r2, r0, r1
+   retn         r2, #0
+   
+   --- Thunk ---
+   thunk::__top_thunk__ captured::[]
+   clos         r0, fn0
+   clos         r1, fn1
+   clos         r2, fn2
+   clos         r3, fn3
+   move         r4, r3
+   loadc        r5, @0
+   loadc        r6, @1
+   apply        r4, #2
+   retn         r4, #0
+*)

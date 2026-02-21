@@ -1,0 +1,6 @@
+(* RUN: {qxq|cargo run --} %s *)
+1 + 1
+(* EXPECT:
+   --- Syntax Tree ---
+   (+ 1 1)
+*)

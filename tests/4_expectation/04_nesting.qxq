@@ -1,0 +1,7 @@
+(* RUN: {qxq|cargo run --} %s *)
+(* This is a (* nested *) comment that should be ignored *)
+100
+(* EXPECT:
+   --- Syntax Tree ---
+   100
+*)

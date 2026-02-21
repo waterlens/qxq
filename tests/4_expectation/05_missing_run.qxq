@@ -1,0 +1,7 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   No RUN: block found
+*)
+1 + 1
+(* EXPECT:
+   --- Syntax Tree ---
+*)

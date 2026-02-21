@@ -14,14 +14,14 @@ from rich.progress import Progress
 
 console = Console()
 
-
 def main():
     parser = argparse.ArgumentParser(description="Run QxQ tests.")
-    parser.add_argument(
-        "--release",
-        action="store_true",
-        help="Run tests using the release binary (default is debug)",
-    )
+    parser.add_argument("--release", action="store_true", help="Use release binary")
+    parser.add_argument("--test", action="store_true", help="Run only traditional tests")
+    parser.add_argument("--test-expect", action="store_true", help="Run only expect-tests")
+    parser.add_argument("--update-expect", action="store_true", help="Update EXPECT: blocks")
+    parser.add_argument("--skip-multiple-expect", action="store_true", help="Pass to qxq during update")
+    
     args = parser.parse_args()
 
     mode = "release" if args.release else "debug"
@@ -30,94 +30,100 @@ def main():
     binary_path = project_root / "target" / mode / "qxq"
 
     if not binary_path.exists():
-        console.print(
-            f"[yellow]Binary not found at {binary_path.relative_to(project_root)}. Building project in {mode} mode...[/yellow]"
-        )
-        build_cmd = ["cargo", "build"]
-        if args.release:
-            build_cmd.append("--release")
-        subprocess.run(build_cmd, cwd=project_root, check=True)
+        console.print(f"[yellow]Binary not found at {binary_path}. Building...[/yellow]")
+        subprocess.run(["cargo", "build"] + (["--release"] if args.release else []), cwd=project_root, check=True)
 
     test_files = sorted(list(tests_dir.rglob("*.qxq")))
-
-    if not test_files:
-        console.print("[red]No test files found in tests/ directory.[/red]")
-        sys.exit(1)
-
-    # Group tests by their parent directory name (category)
-    categories = {}
-    for test_file in test_files:
-        category = test_file.parent.name
-        if category == "tests":
-            category = "uncategorized"
-        if category not in categories:
-            categories[category] = []
-        categories[category].append(test_file)
-
     results = []
 
+    # Default to traditional test if no flags provided
+    is_traditional_only = args.test or (not args.test_expect and not args.update_expect)
+
     with Progress() as progress:
-        task = progress.add_task("[cyan]Running tests...", total=len(test_files))
+        task = progress.add_task("[cyan]Processing tests...", total=len(test_files))
 
-        for category, files in categories.items():
-            for file in files:
-                rel_path = file.relative_to(tests_dir)
-                try:
-                    process = subprocess.run(
-                        [str(binary_path), str(file)],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                    success = process.returncode == 0
-                    results.append(
-                        {
-                            "category": category,
-                            "file": str(rel_path),
-                            "success": success,
-                            "error": process.stderr if not success else None,
-                        }
-                    )
-                except Exception as e:
-                    results.append(
-                        {
-                            "category": category,
-                            "file": str(rel_path),
-                            "success": False,
-                            "error": str(e),
-                        }
-                    )
-                progress.update(task, advance=1)
+        for file in test_files:
+            rel_path = file.relative_to(tests_dir)
+            category = file.parent.name if file.parent != tests_dir else "uncategorized"
+            content = file.read_text()
+            has_run = "(* RUN:" in content or "(* RUN-EXPECT-ERROR:" in content
 
-    # Display results
-    table = Table(title="QxQ Test Results")
+            skip = False
+            run_mode = "TRADITIONAL"
+            cmd_args = [str(file)]
+
+            if args.update_expect:
+                if not has_run:
+                    skip = True
+                else:
+                    run_mode = "UPDATE"
+                    cmd_args = ["--update-expect", str(file)]
+                    if args.skip_multiple_expect:
+                        cmd_args.append("--skip-multiple-expect")
+            elif args.test_expect:
+                if not has_run:
+                    skip = True
+                else:
+                    run_mode = "EXPECT"
+                    cmd_args = ["--test-expect", str(file)]
+            else:
+                # Traditional test mode (--test)
+                run_mode = "TRADITIONAL"
+                # If we're strictly in traditional mode, we might want to skip files WITH RUN: blocks 
+                # if you consider them separate. But typically traditional runs everything.
+                # However, following the "test means traditional" rule:
+                if has_run and is_traditional_only and args.test:
+                    skip = True
+
+            if skip:
+                results.append({"category": category, "file": str(rel_path), "success": True, "skipped": True, "mode": "SKIPPED"})
+            else:
+                process = subprocess.run([str(binary_path)] + cmd_args, capture_output=True, text=True)
+                success = process.returncode == 0
+                results.append({
+                    "category": category,
+                    "file": str(rel_path),
+                    "success": success,
+                    "skipped": False,
+                    "mode": run_mode,
+                    "error": process.stderr if not success else None,
+                    "stdout": process.stdout
+                })
+            
+            progress.update(task, advance=1)
+
+    table = Table(title="QxQ Execution Results")
     table.add_column("Category", style="cyan")
     table.add_column("Test Case", style="magenta")
+    table.add_column("Mode", style="blue")
     table.add_column("Result", justify="center")
 
-    passed_count = 0
+    passed = 0
     for res in results:
-        status = "[green]PASS[/green]" if res["success"] else "[red]FAIL[/red]"
-        if res["success"]:
-            passed_count += 1
-        table.add_row(res["category"], res["file"], status)
+        if res["skipped"]:
+            status = "[yellow]SKIP[/yellow]"
+        else:
+            status = "[green]PASS[/green]" if res["success"] else "[red]FAIL[/red]"
+            if res["success"]: passed += 1
+        table.add_row(res["category"], res["file"], res["mode"], status)
 
     console.print(table)
 
-    # Show failures
-    failures = [r for r in results if not r["success"]]
+    if any(r["skipped"] for r in results):
+        console.print(f"\n[yellow]Total skipped: {sum(1 for r in results if r['skipped'])}[/yellow]")
+    
+    for res in results:
+        if not res["skipped"] and res.get("stdout") and "Skipping update" in res["stdout"]:
+            console.print(f"[yellow]{res['stdout'].strip()}[/yellow]")
+
+    failures = [r for r in results if not r["success"] and not r["skipped"]]
     if failures:
         console.print("\n[red]Failures:[/red]")
         for fail in failures:
-            console.print(f"[bold red]File: {fail['file']}[/bold red]")
-            console.print(fail["error"])
-            console.print("-" * 20)
-
-    console.print(f"\n[bold]Summary: {passed_count}/{len(results)} passed[/bold]")
-
-    if failures:
+            console.print(f"[bold red]File: {fail['file']}[/bold red]\n{fail['error']}\n{'-'*20}")
         sys.exit(1)
 
+    console.print(f"\n[bold]Summary: {passed}/{sum(1 for r in results if not r['skipped'])} passed[/bold]")
 
 if __name__ == "__main__":
     main()
