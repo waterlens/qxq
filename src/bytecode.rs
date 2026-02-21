@@ -23,11 +23,7 @@ impl From<u8> for Tag {
 impl TryFrom<usize> for Tag {
   type Error = ();
   fn try_from(value: usize) -> Result<Self, Self::Error> {
-    if value <= 0xff {
-      Ok(Self(value as u8))
-    } else {
-      Err(())
-    }
+    if value <= 0xff { Ok(Self(value as u8)) } else { Err(()) }
   }
 }
 
@@ -49,11 +45,7 @@ impl From<Tag> for Op8 {
 impl TryFrom<usize> for Op8 {
   type Error = ();
   fn try_from(value: usize) -> Result<Self, Self::Error> {
-    if value <= 0xff {
-      Ok(Self(value as u8))
-    } else {
-      Err(())
-    }
+    if value <= 0xff { Ok(Self(value as u8)) } else { Err(()) }
   }
 }
 
@@ -81,11 +73,7 @@ impl Display for Op16 {
 impl TryFrom<usize> for Op16 {
   type Error = ();
   fn try_from(value: usize) -> Result<Self, Self::Error> {
-    if value <= u16::MAX as usize {
-      Ok(Self(value as u16))
-    } else {
-      Err(())
-    }
+    if value <= u16::MAX as usize { Ok(Self(value as u16)) } else { Err(()) }
   }
 }
 
@@ -121,11 +109,7 @@ pub struct Op24(u32);
 impl TryFrom<usize> for Op24 {
   type Error = ();
   fn try_from(value: usize) -> Result<Self, Self::Error> {
-    if value <= 0x00ffffff {
-      Ok(Self(value as u32))
-    } else {
-      Err(())
-    }
+    if value <= 0x00ffffff { Ok(Self(value as u32)) } else { Err(()) }
   }
 }
 
@@ -154,11 +138,7 @@ impl From<i16> for OpS24 {
 impl TryFrom<isize> for OpS24 {
   type Error = ();
   fn try_from(value: isize) -> Result<Self, Self::Error> {
-    if (!0x00ffffff..=0x00ffffff_isize).contains(&value) {
-      Ok(Self(value as i32))
-    } else {
-      Err(())
-    }
+    if (!0x00ffffff..=0x00ffffff_isize).contains(&value) { Ok(Self(value as i32)) } else { Err(()) }
   }
 }
 

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bumpalo::Bump;
 use qxq::*;
-use rustyline::{config::Configurer, error::ReadlineError, DefaultEditor};
+use rustyline::{DefaultEditor, config::Configurer, error::ReadlineError};
 use std::{fs, path::Path};
 
 fn process_content(content: &str) -> Result<()> {

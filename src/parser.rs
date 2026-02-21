@@ -236,17 +236,13 @@ impl<'a> ToSexp for InfoExpr<'a> {
     };
 
     let info_key = self.expr.get_info();
-    if let Some(info) = self.map.get(*info_key) {
-      if !info.freevars.is_empty() {
-        parts.push(info.to_sexp(pool));
-      }
+    if let Some(info) = self.map.get(*info_key)
+      && !info.freevars.is_empty()
+    {
+      parts.push(info.to_sexp(pool));
     }
 
-    if is_atom && parts.len() == 1 {
-      parts.pop().unwrap()
-    } else {
-      pool.list(&parts)
-    }
+    if is_atom && parts.len() == 1 { parts.pop().unwrap() } else { pool.list(&parts) }
   }
 }
 
@@ -353,12 +349,11 @@ impl<'a> Parser<'a> {
   }
 
   fn declare_local(&mut self, name: TokenStr<'a>) {
-    if let Some(ctx) = self.func_stack.last_mut() {
-      if let Some(scope) = ctx.scopes.last_mut() {
-        if scope.insert(name) {
-          *ctx.local_counts.entry(name).or_insert(0) += 1;
-        }
-      }
+    if let Some(ctx) = self.func_stack.last_mut()
+      && let Some(scope) = ctx.scopes.last_mut()
+      && scope.insert(name)
+    {
+      *ctx.local_counts.entry(name).or_insert(0) += 1;
     }
   }
 

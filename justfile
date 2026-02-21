@@ -29,3 +29,6 @@ update-expect *args:
 # Run a single expect test file directly
 expect file:
     @cargo run -- --test-expect {{file}}
+
+test-all: test (test "--release") test-expect (test-expect "--release")
+

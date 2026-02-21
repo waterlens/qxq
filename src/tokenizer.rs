@@ -246,10 +246,10 @@ pub struct Tokenizer<'a> {
   line: u32,
 }
 
-use once_cell::sync::Lazy;
 use Paired::*;
 use TokenErr::*;
 use TokenTag::*;
+use once_cell::sync::Lazy;
 
 static KEYWORDS: Lazy<RapidSmallMap<16, &'static [char], Keyword>> = Lazy::new(|| {
   let mut map: RapidSmallMap<16, &'static [char], Keyword> = RapidSmallMap::new();
@@ -551,11 +551,7 @@ where
 
   pub fn next_with_err(&'b mut self) -> Result<Token<'a>> {
     let tok = self.next_token();
-    if let TokenTag::Error(err) = tok.tag {
-      Result::Err(anyhow::anyhow!(err))
-    } else {
-      Ok(tok)
-    }
+    if let TokenTag::Error(err) = tok.tag { Result::Err(anyhow::anyhow!(err)) } else { Ok(tok) }
   }
 
   pub fn next_token(&'b mut self) -> Token<'a> {

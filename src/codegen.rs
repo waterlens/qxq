@@ -44,11 +44,7 @@ impl From<u16> for ConstantId {
 impl TryFrom<usize> for ConstantId {
   type Error = ();
   fn try_from(value: usize) -> Result<Self, Self::Error> {
-    if value < u16::MAX as usize {
-      Ok(ConstantId::new(value as u16))
-    } else {
-      Err(())
-    }
+    if value < u16::MAX as usize { Ok(ConstantId::new(value as u16)) } else { Err(()) }
   }
 }
 
@@ -74,14 +70,14 @@ impl Display for ConstantPool {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     writeln!(f, "--- Integer Constants ---")?;
     let mut int_vec: Vec<_> = self.ipool.iter().collect();
-    int_vec.sort_by_key(|(_, &v)| v);
+    int_vec.sort_by_key(|(_, v)| *v);
     for (val, idx) in int_vec {
       writeln!(f, "{}: {}", idx, val)?;
     }
 
     writeln!(f, "--- String Constants ---")?;
     let mut str_vec: Vec<_> = self.spool.iter().collect();
-    str_vec.sort_by_key(|(_, &v)| v);
+    str_vec.sort_by_key(|(_, v)| *v);
     for (val, idx) in str_vec {
       writeln!(f, "{}: \"{}\"", idx, val)?;
     }

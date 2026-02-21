@@ -1,7 +1,8 @@
 [package]
 name = "qxq"
-version = "0.1.0"
-edition = "2021"
+version = "0.1.1"
+edition = "2024"
+repository = "https://github.com/waterlens/qxq"
 description = "A playground for interpreters and JIT compilers"
 license = "MIT"
 
