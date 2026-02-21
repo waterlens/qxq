@@ -468,6 +468,22 @@ impl ThunkCtx {
     self.code[pc as usize] = code;
   }
 
+  pub fn fetch(&mut self, pc: u32) -> Bytecode {
+    self.code[pc as usize]
+  }
+
+  pub fn reverse_setcond(&mut self, pc: u32) -> bool {
+    let new_opc = match self.fetch(pc) {
+      Bytecode(Operator::SetCond, Operands::ABS(OpABS { dst, o1 })) => {
+        assert_ne!(o1.0, 0); // 0 implies only conditional set and no branch
+        Bytecode::setcond(dst, (-o1.0).into())
+      }
+      _ => return false,
+    };
+    self.edit(pc, new_opc);
+    true
+  }
+
   pub fn relocate_all(mut self) -> Thunk {
     let mut edit_list = vec![];
     for (pc, label) in self.relocate.iter() {
@@ -567,6 +583,14 @@ impl BytecodeCtx {
 
   pub fn edit(&mut self, pc: u32, code: Bytecode) {
     self.current.edit(pc, code)
+  }
+
+  pub fn fetch(&mut self, pc: u32) -> Bytecode {
+    self.current.fetch(pc)
+  }
+
+  pub fn reverse_setcond(&mut self, pc: u32) -> bool {
+    self.current.reverse_setcond(pc)
   }
 
   pub fn finalize(self) -> Vec<Thunk> {

@@ -622,6 +622,13 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
+  fn reverse_setcond(&mut self, bc: &mut BytecodeCtx, fuse_br: Fusion) {
+    if fuse_br.enabled {
+      let pc = fuse_br.position;
+      assert!(bc.reverse_setcond(pc), "not a setcond")
+    }
+  }
+
   // invariant: value must be some if either control is a return
   fn emit_branch(
     &mut self,
@@ -633,17 +640,20 @@ impl<'a> CodeGenCtx<'a> {
     c2: Control,
     next: Control,
   ) {
-    // TODO: reverse setcond if necessary
     match (c1, c2) {
       (Control::Pos(l1), Control::Return) => self.emit_forward_test(bc, value, test, l1, c2, next),
       (Control::Pos(l1), Control::Pos(l2)) => {
         if c2 == next {
-          self.emit_forward_test(bc, value, test, l1, c2, next)
+          self.emit_forward_test(bc, value, test, l1, c2, next);
         } else {
-          self.emit_backward_test(bc, value, test, c1, l2, next)
+          self.emit_backward_test(bc, value, test, c1, l2, next);
+          self.reverse_setcond(bc, fuse_br);
         }
       }
-      (Control::Return, Control::Pos(l2)) => self.emit_backward_test(bc, value, test, c1, l2, next),
+      (Control::Return, Control::Pos(l2)) => {
+        self.emit_backward_test(bc, value, test, c1, l2, next);
+        self.reverse_setcond(bc, fuse_br);
+      }
       _ => unreachable!("return on both branches"),
     }
   }
@@ -772,6 +782,50 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next);
       }
     }
+  }
+
+  fn eval_any_loc_args(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    args: ExprsRef<'a, InfoKey>,
+  ) -> Box<[RegId]> {
+    let len = args.len();
+    let mut res_regs = vec![RegId::new(0); len];
+    let mut unevaluated_args = vec![];
+    let mut evaluated_args = vec![];
+
+    for (i, arg) in args.iter().enumerate() {
+      let l = bc.fresh_label();
+      let v = self.emit_expr_maybe_value(
+        bc,
+        arg,
+        DataDest::Loc(Location::Temporary),
+        ControlDest::Uncond(Control::Pos(l)),
+        Control::Pos(l),
+      );
+      bc.push_label(l);
+      if let Some(v) = v {
+        unevaluated_args.push((i, v));
+      } else {
+        evaluated_args.push(i);
+      }
+    }
+
+    for (nth, v) in unevaluated_args {
+      let r = self.allocate_temporary();
+      self.set_location(bc, Location::Slot(r), v, &mut Fusion::disabled());
+      res_regs[nth] = r;
+    }
+
+    let current_frame: &Frame<'_> = frame_top!(self);
+    let current_regs = &current_frame.regs;
+    let current_len = current_regs.len();
+    for (none_found, nth) in evaluated_args.into_iter().enumerate() {
+      let stack_idx = current_len - len + none_found;
+      res_regs[nth] = current_regs[stack_idx].index;
+    }
+
+    res_regs.into_boxed_slice()
   }
 
   fn eval_any_loc_arguments(
