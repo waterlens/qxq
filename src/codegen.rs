@@ -1168,7 +1168,7 @@ impl<'a> CodeGenCtx<'a> {
             | DataDest::Loc(Location::FreeVar(_))
             | DataDest::RetValue => {
               self.wrap_object(bc, Tag::TUPLE, tuple_reg, len);
-              self.emit_store(bc, Value::Loc(Location::Slot(tuple_reg)), data, control, next)
+              self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
             }
           }
         } else {

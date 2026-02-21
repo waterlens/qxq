@@ -45,29 +45,29 @@
    loadc        r1, @0
    loadc        r2, @1
    wrap         r0, k1, #3
-   loadc        r1, @2
-   loadc        r2, @0
-   setc         r1
-   cmp.lt.dd    r1, r2
-   loadc        r1, @2
-   loadc        r2, @0
-   setc         r1
-   cmp.gt.dd    r1, r2
-   loadc        r1, @2
-   loadc        r2, @0
-   setc         r1
-   cmp.le.dd    r1, r2
-   loadc        r1, @2
-   loadc        r2, @0
-   setc         r1
-   cmp.ge.dd    r1, r2
-   loadc        r1, @2
-   loadc        r2, @0
-   setc         r1
-   cmp.eq.dd    r1, r2
-   loadc        r1, @2
-   loadc        r2, @0
-   setc         r1
-   cmp.ne.dd    r1, r2
-   retn         r1, #0
+   loadc        r0, @2
+   loadc        r1, @0
+   setc         r0
+   cmp.lt.dd    r0, r1
+   loadc        r0, @2
+   loadc        r1, @0
+   setc         r0
+   cmp.gt.dd    r0, r1
+   loadc        r0, @2
+   loadc        r1, @0
+   setc         r0
+   cmp.le.dd    r0, r1
+   loadc        r0, @2
+   loadc        r1, @0
+   setc         r0
+   cmp.ge.dd    r0, r1
+   loadc        r0, @2
+   loadc        r1, @0
+   setc         r0
+   cmp.eq.dd    r0, r1
+   loadc        r0, @2
+   loadc        r1, @0
+   setc         r0
+   cmp.ne.dd    r0, r1
+   retn         r0, #0
 *)
