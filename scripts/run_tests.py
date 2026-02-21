@@ -69,11 +69,7 @@ def main():
             else:
                 # Traditional test mode (--test)
                 run_mode = "TRADITIONAL"
-                # If we're strictly in traditional mode, we might want to skip files WITH RUN: blocks 
-                # if you consider them separate. But typically traditional runs everything.
-                # However, following the "test means traditional" rule:
-                if has_run and is_traditional_only and args.test:
-                    skip = True
+                # Always run in traditional mode unless explicitly told to skip elsewhere
 
             if skip:
                 results.append({"category": category, "file": str(rel_path), "success": True, "skipped": True, "mode": "SKIPPED"})

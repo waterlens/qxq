@@ -11,7 +11,7 @@ pub struct Expectation {
 /// The "FileCheck" mode: reads from stdin and matches against a file.
 pub fn run_check(file_path: &str) -> Result<()> {
   let content = std::fs::read_to_string(file_path)?;
-  let (exps, _, err_pat) = extract_metadata(&content);
+  let (exps, _, err_pat) = extract_metadata(&content)?;
 
   let res = if exps.is_empty() {
     Err(anyhow!("No EXPECT: patterns found in {}", file_path))
@@ -25,7 +25,7 @@ pub fn run_check(file_path: &str) -> Result<()> {
 /// The "Driver" mode: reads RUN:, executes it, and verifies output.
 pub fn run_test_file(file_path: &str) -> Result<()> {
   let content = std::fs::read_to_string(file_path)?;
-  let (exps, run_cmd, err_pat) = extract_metadata(&content);
+  let (exps, run_cmd, err_pat) = extract_metadata(&content)?;
 
   let res = run_test_file_core(file_path, &exps, run_cmd.as_deref(), err_pat.is_some());
   handle_negative_test(res, err_pat)
@@ -72,7 +72,7 @@ fn handle_negative_test(res: Result<()>, err_pat: Option<String>) -> Result<()> 
 
 pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<()> {
   let content = std::fs::read_to_string(file_path)?;
-  let (exps, run_cmd, _) = extract_metadata(&content);
+  let (exps, run_cmd, _) = extract_metadata(&content)?;
 
   if exps.len() > 1 {
     if skip_multi {
@@ -254,7 +254,7 @@ impl Scanner {
   }
 }
 
-fn extract_metadata(content: &str) -> (Vec<Expectation>, Option<String>, Option<String>) {
+fn extract_metadata(content: &str) -> Result<(Vec<Expectation>, Option<String>, Option<String>)> {
   let mut expectations = Vec::new();
   let mut run_cmd = None;
   let mut expected_error = None;
@@ -303,6 +303,9 @@ fn extract_metadata(content: &str) -> (Vec<Expectation>, Option<String>, Option<
             let is_run = is_err || try_match(&mut s, "RUN:");
 
             if is_run {
+              if run_cmd.is_some() {
+                return Err(anyhow!("Multiple RUN: or RUN-EXPECT-ERROR: blocks found"));
+              }
               while s.ch().is_whitespace() {
                 s.advance();
               }
@@ -364,7 +367,7 @@ fn extract_metadata(content: &str) -> (Vec<Expectation>, Option<String>, Option<
       _ => s.advance(),
     }
   }
-  (expectations, run_cmd, expected_error)
+  Ok((expectations, run_cmd, expected_error))
 }
 
 fn try_match(s: &mut Scanner, prefix: &str) -> bool {
