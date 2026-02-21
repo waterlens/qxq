@@ -86,6 +86,7 @@ pub type ExprsRef<'a, I> = &'a [ExprRef<'a, I>];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr<'a, I> {
+  BoolLiteral(bool, I),
   IntLiteral(i128, I),
   StrLiteral(&'a str, I),
   Ident(TokenStr<'a>, I),
@@ -105,6 +106,7 @@ impl<I> ToSexp for Expr<'_, I> {
   fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
     use Expr::*;
     match self {
+      BoolLiteral(b, _) => pool.atom(if *b { "true" } else { "false" }),
       IntLiteral(n, _) => pool.atom(n.to_string()),
       StrLiteral(s, _) => pool.atom(s),
       Ident(s, _) => pool.atom(s.as_ref()),
@@ -148,7 +150,8 @@ impl<I> Expr<'_, I> {
   pub fn get_info(&self) -> &I {
     use Expr::*;
     match self {
-      IntLiteral(_, i)
+      BoolLiteral(_, i)
+      | IntLiteral(_, i)
       | StrLiteral(_, i)
       | Ident(_, i)
       | Op(_, i)
@@ -173,6 +176,10 @@ impl<'a> ToSexp for InfoExpr<'a> {
     use Expr::*;
     let mut parts = Vec::new();
     let is_atom = match &self.expr {
+      BoolLiteral(b, _) => {
+        parts.push(pool.atom(if *b { "true" } else { "false" }));
+        true
+      }
       IntLiteral(n, _) => {
         parts.push(pool.atom(n.to_string()));
         true
@@ -539,8 +546,14 @@ impl<'a> Parser<'a> {
       StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s, self.new_empty_info())),
       Identifer => {
         let name = TokenStr::from_span(arena, lhs_token.inner.span);
-        self.use_var(name);
-        arena.alloc(ExprCon::Ident(name, self.new_empty_info()))
+        match name.0 {
+          "true" => arena.alloc(ExprCon::BoolLiteral(true, self.new_empty_info())),
+          "false" => arena.alloc(ExprCon::BoolLiteral(false, self.new_empty_info())),
+          _ => {
+            self.use_var(name);
+            arena.alloc(ExprCon::Ident(name, self.new_empty_info()))
+          }
+        }
       }
       PairedOpen(po) => {
         let inner_token = self.peek_token()?;

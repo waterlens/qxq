@@ -179,6 +179,7 @@ impl std::fmt::Display for Location {
 enum Value<'a> {
   Loc(Location),
   Unit,
+  BoolLiteral(bool),
   IntLiteral(i128),
   StrLiteral(&'a str),
   Test(Test),
@@ -470,6 +471,11 @@ impl<'a> CodeGenCtx<'a> {
         self.make_object(bc, r, Tag::UNIT, 0.into());
         self.get_temporary()
       }
+      BoolLiteral(b) => {
+        let r = self.allocate_temporary();
+        self.make_object(bc, r, if b { Tag::TRUE } else { Tag::FALSE }, 0.into());
+        self.get_temporary()
+      }
       IntLiteral(i) => {
         let r = self.allocate_temporary();
         self.reify_int_literal(bc, r, i);
@@ -530,6 +536,9 @@ impl<'a> CodeGenCtx<'a> {
             }
             Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
             Value::Unit => self.make_object(bc, r, Tag::UNIT, 0.into()),
+            Value::BoolLiteral(b) => {
+              self.make_object(bc, r, if b { Tag::TRUE } else { Tag::FALSE }, 0.into())
+            }
             Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
             Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
             Value::Test(t) => self.reify_test(bc, r, t, fuse_br),
@@ -683,7 +692,7 @@ impl<'a> CodeGenCtx<'a> {
           self.emit_branch(bc, None, test, Fusion::disabled(), c1, c2, next);
         }
       }
-      Loc(_) | Unit | IntLiteral(_) | StrLiteral(_) => {
+      Loc(_) | Unit | BoolLiteral(_) | IntLiteral(_) | StrLiteral(_) => {
         let mut disable_fu = Fusion::disabled();
         if let Some(loc) = dest {
           // not for Effect
@@ -784,16 +793,51 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
+  fn emit_unary_op_with_slots(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    op: &'a str,
+    opr1: RegId,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) {
+    let make_bc = |op_str: &str, dst: RegId, o1: RegId| -> Bytecode {
+      let dst = dst.into();
+      let o1 = o1.into();
+      match op_str {
+        "-" => Bytecode::negd(dst, o1),
+        _ => unreachable!("unknown unary operator: {}", op_str),
+      }
+    };
+
+    match data {
+      DataDest::Loc(Location::Slot(r)) => {
+        bc.push(make_bc(op, r, opr1));
+        self.emit_store(bc, Value::Loc(Location::Slot(r)), data, control, next);
+      }
+      DataDest::Effect
+      | DataDest::Loc(Location::Temporary)
+      | DataDest::Loc(Location::FreeVar(_))
+      | DataDest::RetValue => {
+        let r = self.allocate_temporary();
+        bc.push(make_bc(op, r, opr1));
+        self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next);
+      }
+    }
+  }
+
   fn eval_any_loc_args(
     &mut self,
     bc: &mut BytecodeCtx,
     args: ExprsRef<'a, InfoKey>,
-  ) -> Box<[RegId]> {
+  ) -> (Box<[RegId]>, usize) {
     let len = args.len();
     let mut res_regs = vec![RegId::new(0); len];
-    let mut unevaluated_args = vec![];
-    let mut evaluated_args = vec![];
+    let mut to_reify = vec![];
+    let mut complex_indices = vec![];
 
+    // Phase 1: Probe and emit complex expressions.
     for (i, arg) in args.iter().enumerate() {
       let l = bc.fresh_label();
       let v = self.emit_expr_maybe_value(
@@ -804,61 +848,44 @@ impl<'a> CodeGenCtx<'a> {
         Control::Pos(l),
       );
       bc.push_label(l);
-      if let Some(v) = v {
-        unevaluated_args.push((i, v));
-      } else {
-        evaluated_args.push(i);
+
+      match v {
+        Some(Value::Loc(Location::Slot(r))) => {
+          // Already in a register, no move needed.
+          res_regs[i] = r;
+        }
+        Some(v_other) => {
+          // Literals or free variables that need to be loaded.
+          to_reify.push((i, v_other));
+        }
+        None => {
+          // Complex expressions that resulted in a temporary on the stack.
+          complex_indices.push(i);
+        }
       }
     }
 
-    for (nth, v) in unevaluated_args {
+    let n_reified = to_reify.len();
+    let n_complex = complex_indices.len();
+
+    // Phase 2: Allocate and load simple values.
+    // These will sit on top of any complex expression results on the stack.
+    for (arg_idx, v) in to_reify {
       let r = self.allocate_temporary();
       self.set_location(bc, Location::Slot(r), v, &mut Fusion::disabled());
-      res_regs[nth] = r;
+      res_regs[arg_idx] = r;
     }
 
-    let current_frame: &Frame<'_> = frame_top!(self);
-    let current_regs = &current_frame.regs;
+    // Phase 3: Map complex expression results to their stack registers.
+    // They are located below the n_reified new temporaries.
+    let current_regs = &self.stack_frame.frames.last().unwrap().regs;
     let current_len = current_regs.len();
-    for (none_found, nth) in evaluated_args.into_iter().enumerate() {
-      let stack_idx = current_len - len + none_found;
-      res_regs[nth] = current_regs[stack_idx].index;
+    for (nth, arg_idx) in complex_indices.into_iter().enumerate() {
+      let stack_idx = current_len - n_reified - n_complex + nth;
+      res_regs[arg_idx] = current_regs[stack_idx].index;
     }
 
-    res_regs.into_boxed_slice()
-  }
-
-  fn eval_any_loc_arguments(
-    &mut self,
-    bc: &mut BytecodeCtx,
-    args: &[Option<Value<'a>>],
-  ) -> Box<[RegId]> {
-    let n_none = args.iter().filter(|a| a.is_none()).count();
-    let mut res_regs = vec![RegId::new(0); args.len()];
-    let mut n_some = 0;
-
-    for (i, arg) in args.iter().enumerate() {
-      if let Some(v) = arg {
-        let r = self.allocate_temporary();
-        self.set_location(bc, Location::Slot(r), *v, &mut Fusion::disabled());
-        res_regs[i] = r;
-        n_some += 1;
-      }
-    }
-
-    let current_frame: &Frame<'_> = frame_top!(self);
-    let current_regs = &current_frame.regs;
-    let current_len = current_regs.len();
-    let mut none_found = 0;
-    for (i, arg) in args.iter().enumerate() {
-      if arg.is_none() {
-        let stack_idx = current_len - n_some - n_none + none_found;
-        res_regs[i] = current_regs[stack_idx].index;
-        none_found += 1;
-      }
-    }
-
-    res_regs.into_boxed_slice()
+    (res_regs.into_boxed_slice(), n_reified + n_complex)
   }
 
   // NOTE: after calling this, emitting a multi-instructions sequence
@@ -866,8 +893,8 @@ impl<'a> CodeGenCtx<'a> {
   // recommended, unless guaranteeing that the argument overwritten
   // mustn't be used after. Fused instrutions sequence is an exception,
   // as they are executed in one cycle (e.g. fused conditional set).
-  fn clean_any_loc_arguments(&mut self, len: usize) {
-    for _ in 0..len {
+  fn clean_any_loc_args(&mut self, n_to_pop: usize) {
+    for _ in 0..n_to_pop {
       self.get_temporary();
     }
   }
@@ -886,54 +913,23 @@ impl<'a> CodeGenCtx<'a> {
       match op_str.0 {
         "+" | "-" | "*" | "/" => {
           if args.len() == 2 {
-            let l1 = bc.fresh_label();
-            let mv1 = self.emit_expr_maybe_value(
-              bc,
-              args[0],
-              DataDest::Loc(Location::Temporary),
-              ControlDest::Uncond(Control::Pos(l1)),
-              Control::Pos(l1),
-            );
-            bc.push_label(l1);
-            let l2 = bc.fresh_label();
-            let mv2 = self.emit_expr_maybe_value(
-              bc,
-              args[1],
-              DataDest::Loc(Location::Temporary),
-              ControlDest::Uncond(Control::Pos(l2)),
-              Control::Pos(l2),
-            );
-            bc.push_label(l2);
-            let args = self.eval_any_loc_arguments(bc, &[mv1, mv2]);
-            let (r1, r2) = (args[0], args[1]);
-            self.clean_any_loc_arguments(args.len());
+            let (regs, n_temps) = self.eval_any_loc_args(bc, args);
+            let (r1, r2) = (regs[0], regs[1]);
+            self.clean_any_loc_args(n_temps);
             self.emit_binary_op_with_slots(bc, op_str.0, r1, r2, data, control, next);
+          } else if op_str.0 == "-" && args.len() == 1 {
+            let (regs, n_temps) = self.eval_any_loc_args(bc, args);
+            let r1 = regs[0];
+            self.clean_any_loc_args(n_temps);
+            self.emit_unary_op_with_slots(bc, op_str.0, r1, data, control, next);
           } else {
             self.diagnostic.error("expected two arguments for binary arithmetic operators");
           }
         }
         "<" | "<=" | ">" | ">=" | "==" | "!=" => {
           if args.len() == 2 {
-            let l1 = bc.fresh_label();
-            let mv1 = self.emit_expr_maybe_value(
-              bc,
-              args[0],
-              DataDest::Loc(Location::Temporary),
-              ControlDest::Uncond(Control::Pos(l1)),
-              Control::Pos(l1),
-            );
-            bc.push_label(l1);
-            let l2 = bc.fresh_label();
-            let mv2 = self.emit_expr_maybe_value(
-              bc,
-              args[1],
-              DataDest::Loc(Location::Temporary),
-              ControlDest::Uncond(Control::Pos(l2)),
-              Control::Pos(l2),
-            );
-            bc.push_label(l2);
-            let args = self.eval_any_loc_arguments(bc, &[mv1, mv2]);
-            let (r1, r2) = (args[0], args[1]);
+            let (regs, n_temps) = self.eval_any_loc_args(bc, args);
+            let (r1, r2) = (regs[0], regs[1]);
             let test = match op_str.0 {
               "<" => Test::Less(r1, r2),
               ">" => Test::Greater(r1, r2),
@@ -943,10 +939,10 @@ impl<'a> CodeGenCtx<'a> {
               "!=" => Test::NotEq(r1, r2),
               _ => unreachable!(),
             };
-            self.clean_any_loc_arguments(args.len());
+            self.clean_any_loc_args(n_temps);
             self.emit_store(bc, Value::Test(test), data, control, next);
           } else {
-            self.diagnostic.error("expected two arguments for comparision operator")
+            self.diagnostic.error("expected two arguments for comparison operator")
           }
         }
         _ => self.diagnostic.error(&format!("unknown operator: {}", op_str.0)),
@@ -966,6 +962,7 @@ impl<'a> CodeGenCtx<'a> {
   ) -> Option<Value<'a>> {
     use Expr::*;
     match expr {
+      BoolLiteral(b, _) => Some(Value::BoolLiteral(*b)),
       IntLiteral(i, _) => Some(Value::IntLiteral(*i)),
       StrLiteral(s, _) => Some(Value::StrLiteral(s)),
       Ident(token_str, _) => {
@@ -991,6 +988,9 @@ impl<'a> CodeGenCtx<'a> {
   ) {
     use Expr::*;
     match expr {
+      BoolLiteral(b, _) => {
+        self.emit_store(bc, Value::BoolLiteral(*b), data, control, next);
+      }
       IntLiteral(i, _) => {
         self.emit_store(bc, Value::IntLiteral(*i), data, control, next);
       }
