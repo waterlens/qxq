@@ -76,10 +76,10 @@ repeat("ha", 3)
    move         r3, r2
    move         r4, r1
    apply        r3, #1
-   clos         r4, fn2
-   move         r5, r4
-   loadc        r6, @5
-   loadc        r7, @2
-   apply        r5, #2
-   retn         r5, #0
+   clos         r3, fn2
+   move         r4, r3
+   loadc        r5, @5
+   loadc        r6, @2
+   apply        r4, #2
+   retn         r4, #0
 *)

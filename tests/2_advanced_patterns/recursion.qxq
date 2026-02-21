@@ -78,8 +78,8 @@ fib(10)
    move         r2, r0
    loadc        r3, @2
    apply        r2, #1
-   move         r3, r1
-   loadc        r4, @3
-   apply        r3, #1
-   retn         r3, #0
+   move         r2, r1
+   loadc        r3, @3
+   apply        r2, #1
+   retn         r2, #0
 *)

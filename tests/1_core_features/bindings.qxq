@@ -24,7 +24,7 @@ factorial(5)
    --- String Constants ---
    
    --- Thunk ---
-   thunk::fn captured::[r3 as ^0]
+   thunk::fn captured::[r2 as ^0]
    loadc        r1, @1
    cmp.lt.dd    r0, r1
    jmp          #2
@@ -42,9 +42,9 @@ factorial(5)
    loadc        r0, @0
    loadc        r1, @1
    add.dd       r2, r0, r1
-   clos         r3, fn0
-   move         r4, r3
-   loadc        r5, @2
-   apply        r4, #1
-   retn         r4, #0
+   clos         r2, fn0
+   move         r3, r2
+   loadc        r4, @2
+   apply        r3, #1
+   retn         r3, #0
 *)

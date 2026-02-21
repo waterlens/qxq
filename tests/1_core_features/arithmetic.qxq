@@ -33,31 +33,41 @@
    loadc        r2, @4
    div.dd       r1, r1, r2
    sub.dd       r0, r0, r1
+   loadc        r0, @2
+   loadc        r1, @0
+   add.dd       r0, r0, r1
+   loadc        r1, @1
+   mul.dd       r0, r0, r1
+   loadc        r0, @2
+   loadc        r1, @0
+   sub.dd       r0, r0, r1
+   loadc        r0, @2
+   loadc        r1, @0
+   loadc        r2, @1
+   wrap         r0, k1, #3
    loadc        r1, @2
    loadc        r2, @0
-   add.dd       r1, r1, r2
-   loadc        r2, @1
-   mul.dd       r1, r1, r2
-   loadc        r2, @2
-   loadc        r3, @0
-   sub.dd       r2, r2, r3
-   loadc        r3, @2
-   loadc        r4, @0
-   loadc        r5, @1
-   wrap         r3, k1, #3
-   loadc        r4, @2
-   loadc        r5, @0
-   loadc        r4, @2
-   loadc        r5, @0
-   loadc        r4, @2
-   loadc        r5, @0
-   loadc        r4, @2
-   loadc        r5, @0
-   loadc        r4, @2
-   loadc        r5, @0
-   loadc        r4, @2
-   loadc        r5, @0
-   setc         r4
-   cmp.ne.dd    r4, r5
-   retn         r4, #0
+   setc         r1
+   cmp.lt.dd    r1, r2
+   loadc        r1, @2
+   loadc        r2, @0
+   setc         r1
+   cmp.gt.dd    r1, r2
+   loadc        r1, @2
+   loadc        r2, @0
+   setc         r1
+   cmp.le.dd    r1, r2
+   loadc        r1, @2
+   loadc        r2, @0
+   setc         r1
+   cmp.ge.dd    r1, r2
+   loadc        r1, @2
+   loadc        r2, @0
+   setc         r1
+   cmp.eq.dd    r1, r2
+   loadc        r1, @2
+   loadc        r2, @0
+   setc         r1
+   cmp.ne.dd    r1, r2
+   retn         r1, #0
 *)

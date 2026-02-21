@@ -455,6 +455,23 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::mobj(dst.into(), tag.into(), fld.into()));
   }
 
+  fn get_value_may_have_effect(&mut self, bc: &mut BytecodeCtx, opr: Value) {
+    use Location::*;
+    use Value::*;
+    match opr {
+      Loc(Temporary) => {
+        self.get_temporary();
+      }
+      Loc(_) => (),
+      Unit | BoolLiteral(_) | IntLiteral(_) | StrLiteral(_) => (),
+      Test(test) => {
+        let r = self.allocate_temporary();
+        self.reify_test(bc, r, test, &mut Fusion::disabled());
+        self.get_temporary();
+      }
+    }
+  }
+
   fn get_value(&mut self, bc: &mut BytecodeCtx, opr: Value, fuse_br: &mut Fusion) -> RegId {
     use Location::*;
     use Value::*;
@@ -725,6 +742,7 @@ impl<'a> CodeGenCtx<'a> {
     use DataDest::*;
     match (data, control) {
       (Effect, Uncond(c)) => {
+        self.get_value_may_have_effect(bc, opr);
         if c != next {
           self.emit_jump(bc, c, None);
         }
