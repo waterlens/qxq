@@ -11,11 +11,7 @@ impl Serializer {
 
   pub fn serialize(&self) -> Vec<u8> {
     let mut data = Vec::new();
-    // Header
-    data.extend_from_slice(b"QXQ\x07"); // Magic
-    data.push(0x01); // Version
-    data.push(0x00); // Flags
-    data.extend_from_slice(&[0, 0]); // Placeholder for Checksum
+    let mut thunk_table = Vec::new();
 
     // Thunk Table
     for thunk in &self.image.thunks {
@@ -60,17 +56,23 @@ impl Serializer {
       }
 
       // Write size and thunk data
-      Self::encode_uleb128(thunk_data.len() as u64, &mut data);
-      data.extend_from_slice(&thunk_data);
+      Self::encode_uleb128(thunk_data.len() as u64, &mut thunk_table);
+      thunk_table.extend_from_slice(&thunk_data);
     }
 
     // End of thunk table
-    Self::encode_uleb128(0, &mut data);
+    Self::encode_uleb128(0, &mut thunk_table);
 
-    // Calculate Checksum
-    let checksum = Self::crc16(&data[8..]);
-    data[6..8].copy_from_slice(&checksum.to_le_bytes());
+    // Calculate Checksum of the thunk table
+    let checksum = Self::crc16(&thunk_table);
 
+    // Header (8 bytes)
+    data.extend_from_slice(b"QXQ\x07"); // Magic (4)
+    data.push(0x01); // Version (1)
+    data.push(0x00); // Flags (1)
+    data.extend_from_slice(&checksum.to_le_bytes()); // Checksum (2)
+
+    data.extend_from_slice(&thunk_table);
     data
   }
 

@@ -1,4 +1,5 @@
-use anyhow::{Result, anyhow};
+use crate::diagnostic::Result;
+use anyhow::anyhow;
 use std::io::{self, BufRead};
 use std::process::Command;
 
@@ -14,7 +15,7 @@ pub fn run_check(file_path: &str) -> Result<()> {
   let (exps, _, err_pat) = extract_metadata(&content)?;
 
   let res = if exps.is_empty() {
-    Err(anyhow!("No EXPECT: patterns found in {}", file_path))
+    Err(anyhow!("no EXPECT: patterns found in {}", file_path))
   } else {
     verify_output(io::stdin().lock(), &exps)
   };
@@ -37,9 +38,9 @@ fn run_test_file_core(
   run_cmd: Option<&str>,
   is_neg: bool,
 ) -> Result<()> {
-  let cmd_raw = run_cmd.ok_or_else(|| anyhow!("No RUN: block found in {}", file_path))?;
+  let cmd_raw = run_cmd.ok_or_else(|| anyhow!("no RUN: block found in {}", file_path))?;
   if exps.is_empty() && !is_neg {
-    return Err(anyhow!("No EXPECT: patterns found in {}", file_path));
+    return Err(anyhow!("no EXPECT: patterns found in {}", file_path));
   }
 
   let cmd = resolve_run_line(cmd_raw, file_path)?;
@@ -52,18 +53,18 @@ fn run_test_file_core(
   }
 
   verify_output(io::Cursor::new(out.stdout), exps)
-    .map_err(|e| anyhow!("Test failed for {}: {}", file_path, e))
+    .map_err(|e| anyhow!("test failed for {}: {}", file_path, e))
 }
 
 fn handle_negative_test(res: Result<()>, err_pat: Option<String>) -> Result<()> {
   match (res, err_pat) {
-    (Ok(_), Some(pat)) => Err(anyhow!("Expected error matching '{}', but test passed", pat)),
+    (Ok(_), Some(pat)) => Err(anyhow!("expected error matching '{}', but test passed", pat)),
     (Err(e), Some(pat)) => {
       let msg = e.to_string();
       if msg.contains(&pat) {
         Ok(())
       } else {
-        Err(anyhow!("Expected error matching '{}', but got '{}'", pat, msg))
+        Err(anyhow!("expected error matching '{}', but got '{}'", pat, msg))
       }
     }
     (r, None) => r,
@@ -84,10 +85,10 @@ pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<UpdateSt
       println!("Skipping update for {} (multiple EXPECT: blocks)", file_path);
       return Ok(UpdateStatus::Skipped);
     }
-    return Err(anyhow!("Cannot automatically update file with multiple EXPECT: blocks"));
+    return Err(anyhow!("cannot automatically update file with multiple EXPECT: blocks"));
   }
 
-  let cmd_raw = run_cmd.ok_or_else(|| anyhow!("No RUN: block found in {}", file_path))?;
+  let cmd_raw = run_cmd.ok_or_else(|| anyhow!("no RUN: block found in {}", file_path))?;
   let cmd = resolve_run_line(&cmd_raw, file_path)?;
   let out = execute_shell(&cmd)?;
   if !out.status.success() {
@@ -114,7 +115,7 @@ pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<UpdateSt
     println!("Updated EXPECT block in {}", file_path);
     Ok(UpdateStatus::Updated)
   } else {
-    Err(anyhow!("No EXPECT: block found to update in {}", file_path))
+    Err(anyhow!("no EXPECT: block found to update in {}", file_path))
   }
 }
 
@@ -309,7 +310,7 @@ fn extract_metadata(content: &str) -> Result<(Vec<Expectation>, Option<String>, 
 
             if is_run {
               if run_cmd.is_some() {
-                return Err(anyhow!("Multiple RUN: or RUN-EXPECT-ERROR: blocks found"));
+                return Err(anyhow!("multiple RUN: or RUN-EXPECT-ERROR: blocks found"));
               }
               while s.ch().is_whitespace() {
                 s.advance();

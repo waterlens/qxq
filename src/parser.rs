@@ -8,7 +8,7 @@ use slotmap::SlotMap;
 use crate::sexp::{Sexp, SexpPool, ToSexp};
 use crate::tokenizer::{Keyword, Paired, Token, TokenStr, TokenTag, Tokenizer};
 
-use anyhow::Result;
+use crate::diagnostic::Result;
 
 pub struct TokenIndex(u32);
 

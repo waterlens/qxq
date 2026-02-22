@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::diagnostic::Result;
 use small_map::RapidSmallMap;
 
 use std::{

@@ -5,7 +5,7 @@ use indexmap::{IndexMap, IndexSet};
 use slotmap::SlotMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, Label, Location, Tag, RegId, FreeVarId},
+  bytecode::{Bytecode, BytecodeCtx, FreeVarId, Label, Location, RegId, Tag},
   diagnostic::Diagnostic,
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, SynTree},
   tokenizer::{Paired, TokenStr},
@@ -183,13 +183,11 @@ macro_rules! free_reg {
 }
 
 macro_rules! reg_push {
-  ($self:ident, $value:expr) => {
-    {
-      let frame = frame_top!($self);
-      frame.regs.push($value);
-      frame.max_regs = frame.max_regs.max(frame.regs.len());
-    }
-  };
+  ($self:ident, $value:expr) => {{
+    let frame = frame_top!($self);
+    frame.regs.push($value);
+    frame.max_regs = frame.max_regs.max(frame.regs.len());
+  }};
 }
 
 macro_rules! reg_top {
@@ -205,8 +203,7 @@ macro_rules! reg_pop {
 }
 
 impl<'a> CodeGenCtx<'a> {
-  pub fn new(_arena: &'a Bump, tree: SynTree<'a, InfoKey>) -> Self {
-    let diagnostic = Rc::new(Diagnostic::new());
+  pub fn new(_arena: &'a Bump, tree: SynTree<'a, InfoKey>, diagnostic: Rc<Diagnostic>) -> Self {
     let stack_frame = Stack::new();
     let scope = Scope::new(Rc::clone(&diagnostic));
     let information = tree.information;
@@ -1049,7 +1046,8 @@ mod tests {
     let arena = Bump::new();
     let mut parser = Parser::new(&arena, source);
     let tree = parser.parse().unwrap();
-    let mut ctx = CodeGenCtx::new(&arena, tree);
+    let diag = Rc::new(Diagnostic::new());
+    let mut ctx = CodeGenCtx::new(&arena, tree, diag);
     let mut bc = BytecodeCtx::new();
     ctx.emit_tree(&mut bc);
     let image = bc.finalize();

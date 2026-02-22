@@ -38,19 +38,21 @@ After the header there is the bytecode region of a thunk.
 | --------------- | --------------- | --------------- | --------------- | --------------- |
 | Bytecode Instructions | | (4 * ninstrs) | | |
 
-The captured variables region follows the bytecode region.
-For each captured variable, the hi-byte can be either 0 for capturing variable in caller's slot, or 1 for capturing caller's captured variables.
-The lo-byte corresponds to the index of frame slots (registers) or the index of captured variables.
+The captured variables region follows the bytecode region. For each captured
+variable, the hi-byte can be either 0 for capturing variable in caller's slot,
+or 1 for capturing caller's captured variables. The lo-byte corresponds to the
+index of frame slots (registers) or the index of captured variables.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |
 | Captured Variables | | (2 * ncaptured) | | |
 
-After the captured variables region, there is a constant region which stores the string constant,
-number constant, or other kinds of constant in future.
-Each constant starts with a type tag encoded by ULEB128 that is identical to the tag used in the
-compiler. Then the raw data dump of the constant is right after the type tag. For string, it contains
-a length together with a UTF-8 encoded string.
+After the captured variables region, there is a constant region which stores
+the string constant, number constant, or other kinds of constant in future.
+Each constant starts with a type tag encoded by ULEB128 that is identical to
+the tag used in the compiler. Then the raw data dump of the constant is right
+after the type tag. For string, it contains a length together with a UTF-8
+encoded string.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |
