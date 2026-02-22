@@ -18,17 +18,17 @@ impl Diagnostic {
 
   /// For internal compiler errors that should never happen.
   pub fn error(&self, message: &str) -> ! {
-    panic!("error: {message}");
+    panic!("Error: {message}");
   }
 
   /// For non-fatal reporting.
   pub fn report(&self, message: &str) {
-    eprintln!("error: {message}");
+    eprintln!("Error: {message}");
   }
 
   /// Unified entry point for printing anyhow errors.
   pub fn report_anyhow(&self, err: &anyhow::Error) {
-    eprintln!("error: {err}");
+    eprintln!("Error: {err:?}");
   }
 
   /// Replaces anyhow::bail!
