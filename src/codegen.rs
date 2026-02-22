@@ -32,7 +32,7 @@ enum Value<'a> {
   Loc(Location),
   Unit,
   BoolLiteral(bool),
-  IntLiteral(i128),
+  IntLiteral(i64),
   StrLiteral(&'a str),
   Test(Test),
 }
@@ -255,7 +255,7 @@ impl<'a> CodeGenCtx<'a> {
     r
   }
 
-  fn reify_int_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, i: i128) {
+  fn reify_int_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, i: i64) {
     let idx = bc.add_int(i);
     bc.push(Bytecode::loadc(r.into(), idx.0.into()));
   }

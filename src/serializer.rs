@@ -45,7 +45,7 @@ impl Serializer {
         match constant {
           Constant::Int(i) => {
             Self::encode_uleb128(Tag::INT.into(), &mut thunk_data);
-            thunk_data.extend_from_slice(&i.to_le_bytes());
+            Self::encode_uleb128(u64::from_le_bytes(i.to_le_bytes()), &mut thunk_data);
           }
           Constant::Str(s) => {
             Self::encode_uleb128(Tag::STR.into(), &mut thunk_data);

@@ -41,7 +41,7 @@ impl From<Tag> for u8 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constant {
-  Int(i128),
+  Int(i64),
   Str(String),
 }
 
@@ -55,7 +55,7 @@ impl Display for ConstantId {
 }
 
 pub struct ConstantPool {
-  pub ipool: IndexMap<i128, ConstantId>,
+  pub ipool: IndexMap<i64, ConstantId>,
   pub spool: IndexMap<String, ConstantId>,
 }
 
@@ -64,7 +64,7 @@ impl ConstantPool {
     Self { ipool: IndexMap::new(), spool: IndexMap::new() }
   }
 
-  pub fn add_int(&mut self, n: i128) -> ConstantId {
+  pub fn add_int(&mut self, n: i64) -> ConstantId {
     let next_id = self.ipool.len() + self.spool.len();
     *self.ipool.entry(n).or_insert_with(|| ConstantId(next_id as u16))
   }
@@ -857,7 +857,7 @@ impl BytecodeCtx {
     self.current.nregs = nregs;
   }
 
-  pub fn add_int(&mut self, n: i128) -> ConstantId {
+  pub fn add_int(&mut self, n: i64) -> ConstantId {
     self.current.constants.add_int(n)
   }
 

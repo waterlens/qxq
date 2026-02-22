@@ -85,7 +85,7 @@ pub type ExprsRef<'a, I> = &'a [ExprRef<'a, I>];
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr<'a, I> {
   BoolLiteral(bool, I),
-  IntLiteral(i128, I),
+  IntLiteral(i64, I),
   StrLiteral(&'a str, I),
   Ident(TokenStr<'a>, I),
   Op(TokenStr<'a>, I),
@@ -535,7 +535,7 @@ impl<'a> Parser<'a> {
     let lhs_token = self.next_token()?;
     let mut lhs_op = None;
     let mut lhs: ExprRef<'_, InfoKey> = match lhs_token.inner.tag {
-      IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n, self.new_empty_info())),
+      IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n.try_into()?, self.new_empty_info())),
       StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s, self.new_empty_info())),
       Identifer => {
         let name = TokenStr::from_span(arena, lhs_token.inner.span);
@@ -705,9 +705,9 @@ impl<'a> Parser<'a> {
             self.new_empty_info(),
           ))
         }
-        _ => return Err(anyhow::anyhow!("unexpected keyword {}", lhs_token.inner)),
+        _ => anyhow::bail!("unexpected keyword {}", lhs_token.inner),
       },
-      _ => return Err(anyhow::anyhow!("unexpected token {}", lhs_token.inner)),
+      _ => anyhow::bail!("unexpected token {}", lhs_token.inner),
     };
 
     loop {
@@ -722,7 +722,7 @@ impl<'a> Parser<'a> {
         PairedClose(_) => break,
         Eof | Newline => break,
         Kw(_) => break,
-        _ => return Result::Err(anyhow::anyhow!("unexpected trailing token {}", op_token.inner)),
+        _ => anyhow::bail!("unexpected trailing token {}", op_token.inner),
       };
 
       if let Some((laff, _)) = Affinity::get_postfix(op_str) {
