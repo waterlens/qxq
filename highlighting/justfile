@@ -1,5 +1,8 @@
 # Justfile for qxq tree-sitter highlighting
 
+default:
+    @just --list
+
 # Generate the parser from grammar.js
 generate:
     tree-sitter generate
@@ -14,11 +17,11 @@ test: generate
 
 # Install to Neovim (binary + queries + config)
 install: build
-    python3 manage_nvim.py install
+    uv run manage_nvim.py install
 
 # Uninstall from Neovim
 uninstall:
-    python3 manage_nvim.py uninstall
+    uv run manage_nvim.py uninstall
 
 # Remove compiled binaries
 clean:
@@ -29,3 +32,4 @@ clean:
 dist-clean: clean
     rm -rf src/
     rm -f binding.gyp
+

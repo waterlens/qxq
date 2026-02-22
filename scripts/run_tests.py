@@ -51,9 +51,6 @@ def main():
     test_files = sorted(list(tests_dir.rglob("*.qxq")))
     results = []
 
-    # Default to traditional test if no flags provided
-    is_traditional_only = args.test or (not args.test_expect and not args.update_expect)
-
     with Progress() as progress:
         task = progress.add_task("[cyan]Processing tests...", total=len(test_files))
 

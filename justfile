@@ -18,7 +18,7 @@ repl:
 test *args:
     @uv run scripts/run_tests.py --test {{args}}
 
-# Run only expectation tests (* RUN: based)
+# Run only expectation tests ((* RUN: *) based)
 test-expect *args:
     @uv run scripts/run_tests.py --test-expect {{args}}
 
@@ -30,5 +30,14 @@ update-expect *args:
 expect file:
     @cargo run -- --test-expect {{file}}
 
+# Run all tests
 test-all: test (test "--release") test-expect (test-expect "--release")
+
+# Install tree-sitter highlighter
+highlight-install:
+    @just -f highlighting/justfile install
+
+# Uninstall tree-sitter highlighter
+highlight-uninstall:
+    @just -f highlighting/justfile uninstall
 
