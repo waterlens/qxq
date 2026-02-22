@@ -25,16 +25,11 @@ is_even(pow(2, 10))
 (* EXPECT:
    --- Syntax Tree ---
    (block (let abs (fn (n) (if (< n 0) (- n) n))) (let pow (fn (base exp) (block (let-rec iter (fn (i acc) (if (>= i exp) acc (iter (+ i 1) (* acc base))))) (iter 0 1)))) (let not (fn (b) (if b false true))) (let modulo (fn (a b) (- a (* b (/ a b))))) (let is_even (fn (n) (== (modulo n 2) 0))) (let is_odd (fn (n) (not (is_even n)))) (is_even (pow 2 10)))
-   --- Constant Pool ---
-   --- Integer Constants ---
-   @0: 0
-   @1: 1
-   @2: 2
-   @3: 10
-   --- String Constants ---
-   
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::1 regs::2 captured::[]
+   constants::[
+     @0: 0
+   ]
    loadc        r1, @0
    cmp.lt.dd    r0, r1
    jmp          #2
@@ -43,13 +38,16 @@ is_even(pow(2, 10))
    retn         r0, #0
    
    --- Thunk ---
-   thunk::fn captured::[r0 as ^0 ,r1 as ^1 ,r2 as ^2]
+   thunk::fn params::2 regs::6 captured::[r0 as ^0, r1 as ^1, r2 as ^2]
+   constants::[
+     @0: 1
+   ]
    loadf        r2, ^1
    cmp.ge.dd    r0, r2
    jmp          #1
    retn         r1, #0
    loadf        r2, ^2
-   loadc        r5, @1
+   loadc        r5, @0
    add.dd       r3, r0, r5
    loadf        r5, ^0
    mul.dd       r4, r1, r5
@@ -57,7 +55,11 @@ is_even(pow(2, 10))
    retn         r2, #0
    
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::2 regs::6 captured::[]
+   constants::[
+     @0: 0
+     @1: 1
+   ]
    clos         r2, fn1
    move         r3, r2
    loadc        r4, @0
@@ -66,7 +68,7 @@ is_even(pow(2, 10))
    retn         r3, #0
    
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::1 regs::2 captured::[]
    cmp.not.f    r0, #0
    jmp          #2
    mobj         r1, k2, r0
@@ -75,25 +77,29 @@ is_even(pow(2, 10))
    retn         r1, #0
    
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::2 regs::3 captured::[]
    div.dd       r2, r0, r1
    mul.dd       r2, r1, r2
    sub.dd       r2, r0, r2
    retn         r2, #0
    
    --- Thunk ---
-   thunk::fn captured::[r3 as ^0]
+   thunk::fn params::1 regs::4 captured::[r3 as ^0]
+   constants::[
+     @0: 2
+     @1: 0
+   ]
    loadf        r1, ^0
    move         r2, r0
-   loadc        r3, @2
+   loadc        r3, @0
    apply        r1, #2
-   loadc        r2, @0
+   loadc        r2, @1
    setc         r1
    cmp.eq.dd    r1, r2
    retn         r1, #0
    
    --- Thunk ---
-   thunk::fn captured::[r4 as ^0 ,r2 as ^1]
+   thunk::fn params::1 regs::5 captured::[r4 as ^0, r2 as ^1]
    loadf        r1, ^1
    loadf        r3, ^0
    move         r4, r0
@@ -103,7 +109,11 @@ is_even(pow(2, 10))
    retn         r1, #0
    
    --- Thunk ---
-   thunk::__top_thunk__ captured::[]
+   thunk::__top_thunk__ params::0 regs::11 captured::[]
+   constants::[
+     @0: 2
+     @1: 10
+   ]
    clos         r0, fn0
    clos         r1, fn2
    clos         r2, fn3
@@ -112,8 +122,8 @@ is_even(pow(2, 10))
    clos         r5, fn6
    move         r6, r4
    move         r8, r1
-   loadc        r9, @2
-   loadc        r10, @3
+   loadc        r9, @0
+   loadc        r10, @1
    apply        r8, #2
    move         r7, r8
    apply        r6, #1

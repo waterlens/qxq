@@ -1,137 +1,22 @@
-use std::{
-  fmt::{self, Display},
-  rc::Rc,
-};
+use std::rc::Rc;
 
 use bumpalo::Bump;
 use indexmap::{IndexMap, IndexSet};
 use slotmap::SlotMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, Label, Tag},
+  bytecode::{Bytecode, BytecodeCtx, Label, Location, Tag, RegId, FreeVarId},
   diagnostic::Diagnostic,
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, SynTree},
   tokenizer::{Paired, TokenStr},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ConstantId(u16);
-
-pub struct ConstantPool {
+pub struct CodeGenCtx<'a> {
   diagnostic: Rc<Diagnostic>,
-  ipool: IndexMap<i128, ConstantId>,
-  spool: IndexMap<String, ConstantId>,
-}
-
-impl ConstantId {
-  pub fn new(id: u16) -> Self {
-    Self(id)
-  }
-}
-
-impl Display for ConstantId {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "@{}", self.0)
-  }
-}
-
-impl From<u16> for ConstantId {
-  fn from(id: u16) -> Self {
-    ConstantId::new(id)
-  }
-}
-
-impl TryFrom<usize> for ConstantId {
-  type Error = ();
-  fn try_from(value: usize) -> Result<Self, Self::Error> {
-    if value < u16::MAX as usize { Ok(ConstantId::new(value as u16)) } else { Err(()) }
-  }
-}
-
-impl ConstantPool {
-  pub fn new(diagnostic: Rc<Diagnostic>) -> Self {
-    Self { diagnostic, ipool: IndexMap::new(), spool: IndexMap::new() }
-  }
-
-  pub fn add_int(&mut self, n: i128) -> ConstantId {
-    let id = self.ipool.len();
-    let id = id.try_into().unwrap_or_else(|_| self.diagnostic.error("constant id overflow"));
-    *self.ipool.entry(n).or_insert(id)
-  }
-
-  pub fn add_str(&mut self, s: &str) -> ConstantId {
-    let id = self.spool.len();
-    let id = id.try_into().unwrap_or_else(|_| self.diagnostic.error("constant id overflow"));
-    *self.spool.entry(s.to_string()).or_insert(id)
-  }
-}
-
-impl Display for ConstantPool {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    writeln!(f, "--- Integer Constants ---")?;
-    let mut int_vec: Vec<_> = self.ipool.iter().collect();
-    int_vec.sort_by_key(|(_, v)| *v);
-    for (val, idx) in int_vec {
-      writeln!(f, "{}: {}", idx, val)?;
-    }
-
-    writeln!(f, "--- String Constants ---")?;
-    let mut str_vec: Vec<_> = self.spool.iter().collect();
-    str_vec.sort_by_key(|(_, v)| *v);
-    for (val, idx) in str_vec {
-      writeln!(f, "{}: \"{}\"", idx, val)?;
-    }
-
-    Ok(())
-  }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RegId(u8);
-
-impl RegId {
-  pub fn new(id: u8) -> Self {
-    Self(id)
-  }
-}
-
-impl From<u8> for RegId {
-  fn from(id: u8) -> Self {
-    RegId::new(id)
-  }
-}
-
-impl From<RegId> for crate::bytecode::Op8 {
-  fn from(id: RegId) -> Self {
-    id.0.into()
-  }
-}
-
-impl From<RegId> for crate::bytecode::Op16 {
-  fn from(id: RegId) -> Self {
-    (id.0 as u16).into()
-  }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FreeVarId(u16);
-
-impl FreeVarId {
-  pub fn new(id: u16) -> Self {
-    Self(id)
-  }
-}
-
-impl From<u16> for FreeVarId {
-  fn from(id: u16) -> Self {
-    FreeVarId::new(id)
-  }
-}
-
-impl From<FreeVarId> for crate::bytecode::Op16 {
-  fn from(id: FreeVarId) -> Self {
-    id.0.into()
-  }
+  stack_frame: Stack<'a>,
+  scope: Scope<'a>,
+  tree: ExprRef<'a, InfoKey>,
+  information: SlotMap<InfoKey, Info<'a>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -141,35 +26,6 @@ enum Control {
   End,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum Location {
-  Temporary,
-  Slot(RegId),
-  FreeVar(FreeVarId),
-}
-
-impl std::fmt::Display for Location {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    use Location::*;
-    match self {
-      Temporary => write!(f, "?t"),
-      Slot(r) => write!(f, "r{}", r.0),
-      FreeVar(fv) => write!(f, "^{}", fv.0),
-    }
-  }
-}
-
-// A value category (synthesized) is created mainly for eliminating
-// unnecessary moves. Match over the data destination (inherited) serves
-// similar purpose. The key criterion for choosing between
-// them is whether there would be a *post-processing* demand:
-// 1. The value needs to be handled specially w.r.t the control destination
-//   a). Value cannot be used as a control flow condition
-//   b). Value evaluation involves control flow actions that can be fused with others
-// 2. Potential opportunities of further optimizations by postponing value codegen
-//   a). Dealyed reification allows lower register pressure
-//   b). Apply optimizations (e.g., constant folding)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 enum Value<'a> {
@@ -214,6 +70,7 @@ struct ValInfo<'a> {
 
 struct Frame<'a> {
   regs: Vec<ValInfo<'a>>,
+  max_regs: usize,
 }
 
 struct Stack<'a> {
@@ -222,7 +79,7 @@ struct Stack<'a> {
 
 impl<'a> Frame<'a> {
   fn new() -> Self {
-    Self { regs: vec![] }
+    Self { regs: vec![], max_regs: 0 }
   }
 }
 
@@ -251,7 +108,7 @@ impl<'a> Scope<'a> {
     for (i, name) in freevars.iter().enumerate() {
       let i: u16 =
         i.try_into().unwrap_or_else(|_| self.diagnostic.error("free variable id overflow"));
-      self.symbols.entry(*name).or_insert(vec![]).push(Location::FreeVar(i.into()));
+      self.symbols.entry(*name).or_insert(vec![]).push(Location::FreeVar(FreeVarId(i)));
     }
     let freevars = IndexSet::from_iter(freevars.iter().cloned());
     self.bound.push(freevars);
@@ -288,16 +145,6 @@ impl<'a> Scope<'a> {
   }
 }
 
-pub struct CodeGenCtx<'a> {
-  diagnostic: Rc<Diagnostic>,
-  stack_frame: Stack<'a>,
-  scope: Scope<'a>,
-  pub constant_pool: ConstantPool,
-  tree: ExprRef<'a, InfoKey>,
-  information: SlotMap<InfoKey, Info<'a>>,
-}
-
-// require this to negate second if neces
 pub struct Fusion {
   enabled: bool,
   position: u32,
@@ -325,7 +172,7 @@ impl Default for Fusion {
 
 macro_rules! frame_top {
   ($self:ident) => {
-    &mut $self.stack_frame.frames.last_mut().unwrap()
+    $self.stack_frame.frames.last_mut().unwrap()
   };
 }
 
@@ -337,7 +184,11 @@ macro_rules! free_reg {
 
 macro_rules! reg_push {
   ($self:ident, $value:expr) => {
-    frame_top!($self).regs.push($value)
+    {
+      let frame = frame_top!($self);
+      frame.regs.push($value);
+      frame.max_regs = frame.max_regs.max(frame.regs.len());
+    }
   };
 }
 
@@ -358,10 +209,9 @@ impl<'a> CodeGenCtx<'a> {
     let diagnostic = Rc::new(Diagnostic::new());
     let stack_frame = Stack::new();
     let scope = Scope::new(Rc::clone(&diagnostic));
-    let constant_pool = ConstantPool::new(Rc::clone(&diagnostic));
     let information = tree.information;
     let tree = tree.root;
-    Self { diagnostic, stack_frame, scope, constant_pool, tree, information }
+    Self { diagnostic, stack_frame, scope, tree, information }
   }
 
   fn allocate_temporary(&mut self) -> RegId {
@@ -409,17 +259,17 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn reify_int_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, i: i128) {
-    let idx = self.constant_pool.add_int(i);
+    let idx = bc.add_int(i);
     bc.push(Bytecode::loadc(r.into(), idx.0.into()));
   }
 
   fn reify_string_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, s: &str) {
-    let idx = self.constant_pool.add_str(s);
+    let idx = bc.add_str(s.to_string());
     bc.push(Bytecode::loadc(r.into(), idx.0.into()));
   }
 
   fn reify_freevar(&mut self, bc: &mut BytecodeCtx, r: RegId, i: FreeVarId) {
-    bc.push(Bytecode::loadf(r.into(), i.0.into()));
+    bc.push(Bytecode::loadf(r.into(), i.into()));
   }
 
   fn reify_closure(&mut self, bc: &mut BytecodeCtx, r: RegId, id: usize) {
@@ -584,7 +434,7 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn emit_test(&mut self, bc: &mut BytecodeCtx, test: Test, negate_cond: bool) {
-    use Test::*;
+    use self::Test::*;
     if !negate_cond {
       match test {
         EqImm(r, imm) => bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
@@ -689,9 +539,10 @@ impl<'a> CodeGenCtx<'a> {
     c2: Control,
     next: Control,
   ) {
+    use self::Test::*;
     use Value::*;
     match opr {
-      Test(test) => {
+      Value::Test(test) => {
         if let Some(loc) = dest {
           // not for Effect
           let mut fu = Fusion::enabled();
@@ -716,11 +567,11 @@ impl<'a> CodeGenCtx<'a> {
               self.get_value(bc, opr, &mut disable_fu)
             }
           };
-          self.emit_branch(bc, None, crate::codegen::Test::NotF(r), disable_fu, c1, c2, next);
+          self.emit_branch(bc, None, NotF(r), disable_fu, c1, c2, next);
         } else {
           let r = self.get_value(bc, opr, &mut disable_fu);
           // pass r anyway to avoid the check of return
-          self.emit_branch(bc, Some(r), crate::codegen::Test::NotF(r), disable_fu, c1, c2, next);
+          self.emit_branch(bc, Some(r), NotF(r), disable_fu, c1, c2, next);
         };
       }
     }
@@ -1083,7 +934,7 @@ impl<'a> CodeGenCtx<'a> {
           let reg = self.allocate_temporary();
           self.update_symbols(param, reg);
         }
-        bc.push_thunk("fn", fvlocs.into_boxed_slice());
+        bc.push_thunk("fn", fvlocs.into_boxed_slice(), params.len() as u8);
         self.emit_expr(
           bc,
           body,
@@ -1091,6 +942,7 @@ impl<'a> CodeGenCtx<'a> {
           ControlDest::Uncond(Control::Return),
           Control::End,
         );
+        bc.set_nregs(frame_top!(self).max_regs as u8);
         let id = bc.pop_thunk();
         self.leave_frame();
         self.scope.leave();
@@ -1184,6 +1036,7 @@ impl<'a> CodeGenCtx<'a> {
       Control::End,
     );
     self.scope.leave();
+    bc.set_nregs(frame_top!(self).max_regs as u8);
   }
 }
 
@@ -1199,8 +1052,8 @@ mod tests {
     let mut ctx = CodeGenCtx::new(&arena, tree);
     let mut bc = BytecodeCtx::new();
     ctx.emit_tree(&mut bc);
-    let thunks = bc.finalize();
-    let output = thunks.into_iter().map(|t| t.to_string()).collect::<Vec<_>>().join("\n");
+    let image = bc.finalize();
+    let output = image.thunks.into_iter().map(|t| t.to_string()).collect::<Vec<_>>().join("\n");
     assert_eq!(output, expected_bytecode_str);
   }
 
@@ -1210,7 +1063,7 @@ mod tests {
       r#"
     let f = 1; (1, f)
     "#,
-      "",
+      "thunk::__top_thunk__ params::0 regs::3 captured::[]\nconstants::[\n  @0: 1\n]\nloadi        r0, #1\nloadi        r1, #1\nmove         r2, r0\nwrap         r1, k1, #2\nretn         r1, #0\n",
     );
   }
 }

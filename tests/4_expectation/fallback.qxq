@@ -1,5 +1,5 @@
-(* RUN: {nonexistent_cmd|cargo run --} %s | grep "Constant Pool" *)
+(* RUN: {nonexistent_cmd|cargo run --} %s | grep "constants::\[" *)
 10
 (* EXPECT:
-   --- Constant Pool ---
+   constants::[
 *)

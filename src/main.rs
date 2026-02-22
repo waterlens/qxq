@@ -13,12 +13,11 @@ fn process_content(content: &str) -> Result<()> {
   let mut codegen = codegen::CodeGenCtx::new(&arena, tree);
   let mut bc = bytecode::BytecodeCtx::new();
   codegen.emit_tree(&mut bc);
-  std::println!("--- Constant Pool ---");
-  std::println!("{}", codegen.constant_pool);
+  let image = bc.finalize();
   std::println!("--- Thunk ---");
   std::print!(
     "{}",
-    bc.finalize().into_iter().map(|t| t.to_string()).collect::<Vec<_>>().join("\n--- Thunk ---\n")
+    image.thunks.iter().map(|t| t.to_string()).collect::<Vec<_>>().join("\n--- Thunk ---\n")
   );
   Ok(())
 }

@@ -24,16 +24,11 @@ fib(10)
 (* EXPECT:
    --- Syntax Tree ---
    (block (let factorial (fn (n) (block (let-rec iter (fn (i acc) (if (> i n) acc (iter (+ i 1) (* acc i))))) (iter 1 1)))) (let-rec fib (fn (n) (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))) (factorial 5) (fib 10))
-   --- Constant Pool ---
-   --- Integer Constants ---
-   @0: 1
-   @1: 2
-   @2: 5
-   @3: 10
-   --- String Constants ---
-   
    --- Thunk ---
-   thunk::fn captured::[r1 as ^0 ,r0 as ^1]
+   thunk::fn params::2 regs::6 captured::[r1 as ^0, r0 as ^1]
+   constants::[
+     @0: 1
+   ]
    loadf        r2, ^1
    cmp.gt.dd    r0, r2
    jmp          #1
@@ -46,7 +41,10 @@ fib(10)
    retn         r2, #0
    
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::1 regs::5 captured::[]
+   constants::[
+     @0: 1
+   ]
    clos         r1, fn0
    move         r2, r1
    loadc        r3, @0
@@ -55,7 +53,11 @@ fib(10)
    retn         r2, #0
    
    --- Thunk ---
-   thunk::fn captured::[r1 as ^0]
+   thunk::fn params::1 regs::5 captured::[r1 as ^0]
+   constants::[
+     @0: 1
+     @1: 2
+   ]
    loadc        r1, @0
    cmp.le.dd    r0, r1
    jmp          #1
@@ -72,14 +74,18 @@ fib(10)
    retn         r1, #0
    
    --- Thunk ---
-   thunk::__top_thunk__ captured::[]
+   thunk::__top_thunk__ params::0 regs::4 captured::[]
+   constants::[
+     @0: 5
+     @1: 10
+   ]
    clos         r0, fn1
    clos         r1, fn2
    move         r2, r0
-   loadc        r3, @2
+   loadc        r3, @0
    apply        r2, #1
    move         r2, r1
-   loadc        r3, @3
+   loadc        r3, @1
    apply        r2, #1
    retn         r2, #0
 *)

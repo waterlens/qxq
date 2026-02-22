@@ -5,3 +5,4 @@ pub mod expect;
 pub mod parser;
 pub mod sexp;
 pub mod tokenizer;
+pub mod serializer;

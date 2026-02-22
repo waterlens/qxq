@@ -1,6 +1,6 @@
 (* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
-   expectation #2 line '2' not found
+   expectation #2 line '999999' not found
 *)
 1 + 1
 (* EXPECT: 1 *)
-(* EXPECT: 2 *)
+(* EXPECT: 999999 *)

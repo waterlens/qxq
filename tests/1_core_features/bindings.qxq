@@ -16,29 +16,31 @@ factorial(5)
 (* EXPECT:
    --- Syntax Tree ---
    (block (let x 1) (let y 2) (+ x y) (let-rec factorial (fn (n) (if (< n 2) 1 (* n (factorial (- n 1)))))) (factorial 5))
-   --- Constant Pool ---
-   --- Integer Constants ---
-   @0: 1
-   @1: 2
-   @2: 5
-   --- String Constants ---
-   
    --- Thunk ---
-   thunk::fn captured::[r2 as ^0]
-   loadc        r1, @1
+   thunk::fn params::1 regs::4 captured::[r2 as ^0]
+   constants::[
+     @0: 2
+     @1: 1
+   ]
+   loadc        r1, @0
    cmp.lt.dd    r0, r1
    jmp          #2
-   loadc        r1, @0
+   loadc        r1, @1
    retn         r1, #0
    loadf        r1, ^0
-   loadc        r3, @0
+   loadc        r3, @1
    sub.dd       r2, r0, r3
    apply        r1, #1
    mul.dd       r1, r0, r1
    retn         r1, #0
    
    --- Thunk ---
-   thunk::__top_thunk__ captured::[]
+   thunk::__top_thunk__ params::0 regs::5 captured::[]
+   constants::[
+     @0: 1
+     @1: 2
+     @2: 5
+   ]
    loadc        r0, @0
    loadc        r1, @1
    add.dd       r2, r0, r1

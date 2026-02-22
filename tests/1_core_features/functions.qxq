@@ -11,33 +11,34 @@ add(1, 2)
 (* EXPECT:
    --- Syntax Tree ---
    (block (fn () 1) (fn (x) x) (fn (x y) (+ x y)) (let add (fn (a b) (+ a b))) (add 1 2))
-   --- Constant Pool ---
-   --- Integer Constants ---
-   @0: 1
-   @1: 2
-   --- String Constants ---
-   
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::0 regs::1 captured::[]
+   constants::[
+     @0: 1
+   ]
    loadc        r0, @0
    retn         r0, #0
    
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::1 regs::1 captured::[]
    retn         r0, #0
    
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::2 regs::3 captured::[]
    add.dd       r2, r0, r1
    retn         r2, #0
    
    --- Thunk ---
-   thunk::fn captured::[]
+   thunk::fn params::2 regs::3 captured::[]
    add.dd       r2, r0, r1
    retn         r2, #0
    
    --- Thunk ---
-   thunk::__top_thunk__ captured::[]
+   thunk::__top_thunk__ params::0 regs::4 captured::[]
+   constants::[
+     @0: 1
+     @1: 2
+   ]
    clos         r0, fn0
    clos         r0, fn1
    clos         r0, fn2
