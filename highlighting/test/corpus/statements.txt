@@ -1,0 +1,122 @@
+==================
+Let Bindings
+==================
+let x = 10;
+let rec f = fn (x) f(x) end;
+let a = let b = 1; b + 1
+---
+(source_file
+  (let_binding
+    name: (identifier)
+    value: (number))
+  (let_binding
+    name: (identifier)
+    value: (function_definition
+      parameters: (parameters
+        (identifier))
+      body: (call_expression
+        (identifier)
+        (identifier))))
+  (let_binding
+    name: (identifier)
+    value: (let_binding
+      name: (identifier)
+      value: (number)))
+  (binary_expression
+    left: (identifier)
+    (operator)
+    right: (number)))
+
+==================
+Function Definitions
+==================
+fn () x end;
+fn (x) x end;
+fn (x, y) x + y end;
+fn (x, y, z)
+  let a = x + y;
+  a * z
+end
+---
+(source_file
+  (function_definition
+    parameters: (parameters)
+    body: (identifier))
+  (function_definition
+    parameters: (parameters
+      (identifier))
+    body: (identifier))
+  (function_definition
+    parameters: (parameters
+      (identifier)
+      (identifier))
+    body: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier)))
+  (function_definition
+    parameters: (parameters
+      (identifier)
+      (identifier)
+      (identifier))
+    body: (let_binding
+      name: (identifier)
+      value: (binary_expression
+        left: (identifier)
+        (operator)
+        right: (identifier)))
+    body: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier))))
+
+==================
+If Expressions
+==================
+if true then 1 else 0 end;
+if c then x + y else x - y end;
+if if c then true else false end then a else b end
+---
+(source_file
+  (if_expression
+    condition: (boolean)
+    consequence: (number)
+    alternative: (number))
+  (if_expression
+    condition: (identifier)
+    consequence: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier))
+    alternative: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier)))
+  (if_expression
+    condition: (if_expression
+      condition: (identifier)
+      consequence: (boolean)
+      alternative: (boolean))
+    consequence: (identifier)
+    alternative: (identifier)))
+
+==================
+Blocks
+==================
+1; 2; 3;
+let x = 1; let y = 2; x + y
+---
+(source_file
+  (number)
+  (number)
+  (number)
+  (let_binding
+    name: (identifier)
+    value: (number))
+  (let_binding
+    name: (identifier)
+    value: (number))
+  (binary_expression
+    left: (identifier)
+    (operator)
+    right: (identifier)))

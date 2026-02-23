@@ -1,0 +1,227 @@
+==================
+Binary Precedence and Associativity
+==================
+1 + 2 * 3;
+1 * 2 + 3;
+f @ g @ h;
+x : y : z;
+a < b == c + d
+---
+(source_file
+  (binary_expression
+    left: (number)
+    (operator)
+    right: (binary_expression
+      left: (number)
+      (operator)
+      right: (number)))
+  (binary_expression
+    left: (binary_expression
+      left: (number)
+      (operator)
+      right: (number))
+    (operator)
+    right: (number))
+  (binary_expression
+    left: (identifier)
+    (operator)
+    right: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier)))
+  (binary_expression
+    left: (identifier)
+    (operator)
+    right: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier)))
+  (binary_expression
+    left: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier))
+    (operator)
+    right: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier))))
+
+==================
+Unary Expressions
+==================
++ 1; - x; ! p; @ x
+---
+(source_file
+  (unary_expression
+    (operator)
+    (number))
+  (unary_expression
+    (operator)
+    (identifier))
+  (unary_expression
+    (operator)
+    (identifier))
+  (unary_expression
+    (operator)
+    (identifier)))
+
+==================
+Unary vs Binary Precedence
+==================
+- 1 + 2;
+1 + - 2;
+- f(x)
+---
+(source_file
+  (binary_expression
+    left: (unary_expression
+      (operator)
+      (number))
+    (operator)
+    right: (number))
+  (binary_expression
+    left: (number)
+    (operator)
+    right: (unary_expression
+      (operator)
+      (number)))
+  (unary_expression
+    (operator)
+    (call_expression
+      (identifier)
+      (identifier))))
+
+==================
+Call Expressions
+==================
+f(x); f[x]; f{x};
+f(x, y); f[x, y]; f{x, y};
+f(x)(y);
+f{x}[y](z)
+---
+(source_file
+  (call_expression
+    (identifier)
+    (identifier))
+  (call_expression
+    (identifier)
+    (identifier))
+  (call_expression
+    (identifier)
+    (identifier))
+  (call_expression
+    (identifier)
+    (identifier)
+    (identifier))
+  (call_expression
+    (identifier)
+    (identifier)
+    (identifier))
+  (call_expression
+    (identifier)
+    (identifier)
+    (identifier))
+  (call_expression
+    (call_expression
+      (identifier)
+      (identifier))
+    (identifier))
+  (call_expression
+    (call_expression
+      (call_expression
+        (identifier)
+        (identifier))
+      (identifier))
+    (identifier)))
+
+==================
+Tuples
+==================
+(1, 2);
+(a, b, c);
+(f(x), g(y))
+---
+(source_file
+  (tuple_expression
+    (number)
+    (number))
+  (tuple_expression
+    (identifier)
+    (identifier)
+    (identifier))
+  (tuple_expression
+    (call_expression
+      (identifier)
+      (identifier))
+    (call_expression
+      (identifier)
+      (identifier))))
+
+==================
+Parenthesized
+==================
+(1);
+((a));
+(1 + 2) * 3
+---
+(source_file
+  (parenthesized_expression
+    (number))
+  (parenthesized_expression
+    (parenthesized_expression
+      (identifier)))
+  (binary_expression
+    left: (parenthesized_expression
+      (binary_expression
+        left: (number)
+        (operator)
+        right: (number)))
+    (operator)
+    right: (number)))
+
+==================
+Operator Identifiers
+==================
+( + ); ( - ); ( * ); ( / );
+`raw op`;
+( `+` )(1, 2)
+---
+(source_file
+  (operator_identifier
+    (operator))
+  (operator_identifier
+    (operator))
+  (operator_identifier
+    (operator))
+  (operator_identifier
+    (operator))
+  (operator_identifier
+    (operator))
+  (call_expression
+    (parenthesized_expression
+      (operator_identifier
+        (operator)))
+    (number)
+    (number)))
+
+==================
+Custom Binary Operators
+==================
+a --> b;
+x <+> y;
+f >>= g
+---
+(source_file
+  (binary_expression
+    left: (identifier)
+    (operator)
+    right: (identifier))
+  (binary_expression
+    left: (identifier)
+    (operator)
+    right: (identifier))
+  (binary_expression
+    left: (identifier)
+    (operator)
+    right: (identifier)))

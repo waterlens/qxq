@@ -1,0 +1,85 @@
+==================
+Numbers
+==================
+0; 123; +456; -789;
+0xDEADBEEF; +0xabc; -0x123;
+0o755; +0o123; -0o456;
+0b1010; +0b1; -0b0
+---
+(source_file
+  (number)
+  (number)
+  (number)
+  (number)
+  (number)
+  (number)
+  (number)
+  (number)
+  (number)
+  (number)
+  (number)
+  (number)
+  (number))
+
+==================
+Strings
+==================
+""; "hello"; "with \"quotes\"";
+"with \n newline"; "with \r return"; "with \t tab";
+"with \\ backslash"
+---
+(source_file
+  (string)
+  (string)
+  (string
+    (escape_sequence)
+    (escape_sequence))
+  (string
+    (escape_sequence))
+  (string
+    (escape_sequence))
+  (string
+    (escape_sequence))
+  (string
+    (escape_sequence)))
+
+==================
+Identifiers
+==================
+a; A; _; a0; _0;
+a!$%; b&*+; c-/:; d<=>; e?@^; f~;
+long_identifier_with_many_symbols_!$%&*+-/:<=>?@^~
+---
+(source_file
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier)
+  (identifier))
+
+==================
+Comments
+==================
+(* simple *)
+(* nested (* comment *) *)
+---
+(source_file
+  (comment)
+  (comment
+    (comment)))
+
+==================
+Booleans
+==================
+true; false
+---
+(source_file
+  (boolean)
+  (boolean))
