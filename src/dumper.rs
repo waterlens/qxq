@@ -1,6 +1,6 @@
 use crate::bytecode::{BytecodeImage, Constant, Location, Tag};
-use crate::uleb8;
 use crate::checksum;
+use crate::uleb8;
 
 pub struct Dumper {
   image: BytecodeImage,

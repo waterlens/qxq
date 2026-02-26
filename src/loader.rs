@@ -1,6 +1,6 @@
 use crate::bytecode::{Bytecode, BytecodeImage, Constant, FreeVarId, Location, RegId, Tag, Thunk};
-use crate::uleb8;
 use crate::checksum;
+use crate::uleb8;
 use std::io::{self, Read};
 
 pub struct Loader<R: Read> {
@@ -79,7 +79,8 @@ impl<R: Read> Loader<R> {
       let mut bc_data = [0u8; 4];
       bc_data.copy_from_slice(&data[cursor..cursor + 4]);
       cursor += 4;
-      code.push(Bytecode::load(bc_data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?);
+      code
+        .push(Bytecode::load(bc_data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?);
     }
 
     let mut fvlocs = Vec::with_capacity(ncaptured as usize);
@@ -92,7 +93,9 @@ impl<R: Read> Loader<R> {
       match kind {
         0 => fvlocs.push(Location::Slot(RegId(val))),
         1 => fvlocs.push(Location::FreeVar(FreeVarId(val as u16))),
-        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid captured variable kind")),
+        _ => {
+          return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid captured variable kind"));
+        }
       }
     }
 
@@ -130,4 +133,3 @@ impl<R: Read> Loader<R> {
     })
   }
 }
-
