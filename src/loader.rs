@@ -1,5 +1,6 @@
 use crate::bytecode::{Bytecode, BytecodeImage, Constant, FreeVarId, Location, RegId, Tag, Thunk};
 use crate::uleb8;
+use crate::checksum;
 use std::io::{self, Read};
 
 pub struct Loader<R: Read> {
@@ -24,19 +25,28 @@ impl<R: Read> Loader<R> {
     }
 
     // header[5] is flags (reserved)
-    let _checksum = u16::from_le_bytes([header[6], header[7]]);
+    let expected_checksum = u16::from_le_bytes([header[6], header[7]]);
+
+    let mut thunk_table_data = Vec::new();
+    self.reader.read_to_end(&mut thunk_table_data)?;
+
+    if checksum::crc16(&thunk_table_data) != expected_checksum {
+      return Err(io::Error::new(io::ErrorKind::InvalidData, "checksum mismatch"));
+    }
 
     let mut thunks = Vec::new();
+    let mut cursor = 0;
     loop {
-      let tsize = uleb8::read_uleb128(&mut self.reader)?;
+      let (tsize, n) = uleb8::decode_uleb128(&thunk_table_data[cursor..]);
+      cursor += n;
       if tsize == 0 {
         break;
       }
 
-      let mut thunk_data = vec![0u8; tsize as usize];
-      self.reader.read_exact(&mut thunk_data)?;
+      let thunk_data = &thunk_table_data[cursor..cursor + tsize as usize];
+      cursor += tsize as usize;
 
-      thunks.push(self.load_thunk(&thunk_data)?);
+      thunks.push(self.load_thunk(thunk_data)?);
     }
 
     Ok(BytecodeImage { thunks })

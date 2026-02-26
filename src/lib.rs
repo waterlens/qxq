@@ -3,6 +3,7 @@ pub mod codegen;
 pub mod diagnostic;
 pub mod expect;
 pub mod parser;
+pub mod checksum;
 pub mod dumper;
 pub mod loader;
 pub mod uleb8;

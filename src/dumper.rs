@@ -1,5 +1,6 @@
 use crate::bytecode::{BytecodeImage, Constant, Location, Tag};
 use crate::uleb8;
+use crate::checksum;
 
 pub struct Dumper {
   image: BytecodeImage,
@@ -65,7 +66,7 @@ impl Dumper {
     uleb8::encode_uleb128(0, &mut thunk_table);
 
     // Calculate Checksum of the thunk table
-    let checksum = Self::crc16(&thunk_table);
+    let checksum = checksum::crc16(&thunk_table);
 
     // Header (8 bytes)
     data.extend_from_slice(b"QXQ\x07"); // Magic (4)
@@ -75,21 +76,6 @@ impl Dumper {
 
     data.extend_from_slice(&thunk_table);
     data
-  }
-
-  fn crc16(data: &[u8]) -> u16 {
-    let mut crc: u16 = 0xFFFF;
-    for &byte in data {
-      crc ^= byte as u16;
-      for _ in 0..8 {
-        if (crc & 0x0001) != 0 {
-          crc = (crc >> 1) ^ 0xA001; // Polynomial 0x8005 reflected
-        } else {
-          crc >>= 1;
-        }
-      }
-    }
-    crc
   }
 }
 
