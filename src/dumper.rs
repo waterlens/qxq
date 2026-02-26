@@ -1,17 +1,20 @@
-use crate::bytecode::{BytecodeImage, Constant, Location, Tag};
+use crate::bytecode::{BinaryRepr, BytecodeImage, Constant, Location, Tag};
 use crate::checksum;
+use crate::diagnostic::{Diagnostic, Result};
 use crate::uleb8;
+use std::rc::Rc;
 
 pub struct Dumper {
   image: BytecodeImage,
+  diag: Rc<Diagnostic>,
 }
 
 impl Dumper {
-  pub fn new(image: BytecodeImage) -> Self {
-    Self { image }
+  pub fn new(image: BytecodeImage, diag: Rc<Diagnostic>) -> Self {
+    Self { image, diag }
   }
 
-  pub fn dump(&self) -> Vec<u8> {
+  pub fn dump(&self) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     let mut thunk_table = Vec::new();
 
@@ -22,9 +25,11 @@ impl Dumper {
       uleb8::encode_uleb128(thunk.constants.len() as u64, &mut thunk_data);
       uleb8::encode_uleb128(thunk.code.len() as u64, &mut thunk_data);
 
+      let mut bc_buf = [0u8; 4];
       // Bytecode
       for bc in thunk.code.iter() {
-        thunk_data.extend_from_slice(&bc.dump());
+        bc.dump(&mut bc_buf);
+        thunk_data.extend_from_slice(&bc_buf);
       }
 
       // Captured variables
@@ -38,7 +43,7 @@ impl Dumper {
             thunk_data.push(1);
             thunk_data.push(fv.0 as u8);
           }
-          Location::Temporary => unreachable!(),
+          Location::Temporary => return self.diag.fail("temporary location in thunk"),
         }
       }
 
@@ -75,7 +80,7 @@ impl Dumper {
     data.extend_from_slice(&checksum.to_le_bytes()); // Checksum (2)
 
     data.extend_from_slice(&thunk_table);
-    data
+    Ok(data)
   }
 }
 
@@ -94,8 +99,8 @@ mod tests {
       nregs: 0,
       constants: Box::new([]),
     };
-    let dumper = Dumper::new(BytecodeImage { thunks: vec![thunk] });
-    let data = dumper.dump();
+    let dumper = Dumper::new(BytecodeImage { thunks: vec![thunk] }, Rc::new(Diagnostic::new()));
+    let data = dumper.dump().unwrap();
     assert_eq!(&data[0..4], b"QXQ\x07");
     assert_eq!(data[4], 0x01); // Version
   }

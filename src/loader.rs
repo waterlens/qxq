@@ -1,37 +1,42 @@
-use crate::bytecode::{Bytecode, BytecodeImage, Constant, FreeVarId, Location, RegId, Tag, Thunk};
+use crate::bytecode::{
+  BinaryRepr, BytecodeImage, Constant, FreeVarId, Location, RegId, Tag, Thunk,
+};
 use crate::checksum;
+use crate::diagnostic::{Diagnostic, Result};
 use crate::uleb8;
-use std::io::{self, Read};
+use std::io::Read;
+use std::rc::Rc;
 
 pub struct Loader<R: Read> {
   reader: R,
+  diag: Rc<Diagnostic>,
 }
 
 impl<R: Read> Loader<R> {
-  pub fn new(reader: R) -> Self {
-    Self { reader }
+  pub fn new(reader: R, diag: Rc<Diagnostic>) -> Self {
+    Self { reader, diag }
   }
 
-  pub fn load(&mut self) -> io::Result<BytecodeImage> {
+  pub fn load(&mut self) -> Result<BytecodeImage> {
     let mut header = [0u8; 8];
-    self.reader.read_exact(&mut header)?;
+    self.diag.enrich(self.reader.read_exact(&mut header), "failed to read header")?;
 
     if &header[0..4] != b"QXQ\x07" {
-      return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid magic number"));
+      return self.diag.fail("invalid magic number");
     }
 
     if header[4] != 0x01 {
-      return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported version"));
+      return self.diag.fail("unsupported version");
     }
 
     // header[5] is flags (reserved)
     let expected_checksum = u16::from_le_bytes([header[6], header[7]]);
 
     let mut thunk_table_data = Vec::new();
-    self.reader.read_to_end(&mut thunk_table_data)?;
+    self.diag.enrich(self.reader.read_to_end(&mut thunk_table_data), "failed to read thunk table")?;
 
     if checksum::crc16(&thunk_table_data) != expected_checksum {
-      return Err(io::Error::new(io::ErrorKind::InvalidData, "checksum mismatch"));
+      return self.diag.fail("checksum mismatch");
     }
 
     let mut thunks = Vec::new();
@@ -52,7 +57,7 @@ impl<R: Read> Loader<R> {
     Ok(BytecodeImage { thunks })
   }
 
-  fn load_thunk(&self, data: &[u8]) -> io::Result<Thunk> {
+  fn load_thunk(&self, data: &[u8]) -> Result<Thunk> {
     let mut cursor = 0;
 
     // Flags (reserved)
@@ -76,11 +81,12 @@ impl<R: Read> Loader<R> {
 
     let mut code = Vec::with_capacity(ninstrs as usize);
     for _ in 0..ninstrs {
-      let mut bc_data = [0u8; 4];
-      bc_data.copy_from_slice(&data[cursor..cursor + 4]);
+      code.push(
+        self
+          .diag
+          .enrich(BinaryRepr::load(&data[cursor..cursor + 4]), "failed to load bytecode")?,
+      );
       cursor += 4;
-      code
-        .push(Bytecode::load(bc_data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?);
     }
 
     let mut fvlocs = Vec::with_capacity(ncaptured as usize);
@@ -93,9 +99,7 @@ impl<R: Read> Loader<R> {
       match kind {
         0 => fvlocs.push(Location::Slot(RegId(val))),
         1 => fvlocs.push(Location::FreeVar(FreeVarId(val as u16))),
-        _ => {
-          return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid captured variable kind"));
-        }
+        _ => return self.diag.fail("invalid captured variable kind"),
       }
     }
 
@@ -114,12 +118,12 @@ impl<R: Read> Loader<R> {
         Tag::STR => {
           let (len, n) = uleb8::decode_uleb128(&data[cursor..]);
           cursor += n;
-          let s = std::str::from_utf8(&data[cursor..cursor + len as usize])
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-8 string"))?;
+          let s = std::str::from_utf8(&data[cursor..cursor + len as usize]);
+          let s = self.diag.enrich(s, "invalid UTF-8 string")?;
           cursor += len as usize;
           constants.push(Constant::Str(s.to_string()));
         }
-        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported constant tag")),
+        _ => return self.diag.fail("unsupported constant tag"),
       }
     }
 

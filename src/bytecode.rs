@@ -1,3 +1,4 @@
+use crate::diagnostic::Result as DResult;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 use std::fmt::{self, Display};
@@ -396,106 +397,91 @@ pub enum Operands {
   CondS(OpCondS),
 }
 
-pub trait Dump {
+pub trait BinaryRepr: Sized {
   fn dump(&self, buf: &mut [u8]);
+  fn load(buf: &[u8]) -> DResult<Self>;
 }
 
-pub trait Load {
-  fn load(buf: &[u8]) -> Self;
-}
-
-impl Dump for OpABC {
+impl BinaryRepr for OpABC {
   fn dump(&self, buf: &mut [u8]) {
     buf[0] = self.dst.into();
     buf[1] = self.o1.into();
     buf[2] = self.o2.into();
   }
-}
 
-impl Load for OpABC {
-  fn load(buf: &[u8]) -> Self {
-    Self { dst: buf[0].into(), o1: buf[1].into(), o2: buf[2].into() }
+  fn load(buf: &[u8]) -> DResult<Self> {
+    Ok(Self { dst: buf[0].into(), o1: buf[1].into(), o2: buf[2].into() })
   }
 }
 
-impl Dump for OpXYZ {
+impl BinaryRepr for OpXYZ {
   fn dump(&self, buf: &mut [u8]) {
     buf[0] = self.dst.into();
     buf[1] = self.o1.into();
     buf[2] = self.o2.into();
   }
-}
 
-impl Load for OpXYZ {
-  fn load(buf: &[u8]) -> Self {
-    Self { dst: buf[0].into(), o1: buf[1].into(), o2: buf[2].into() }
+  fn load(buf: &[u8]) -> DResult<Self> {
+    Ok(Self { dst: buf[0].into(), o1: buf[1].into(), o2: buf[2].into() })
   }
 }
 
-impl Dump for OpAB {
+impl BinaryRepr for OpAB {
   fn dump(&self, buf: &mut [u8]) {
     buf[0] = self.dst.into();
     let o1: u16 = self.o1.into();
     buf[1..3].copy_from_slice(&o1.to_le_bytes());
   }
-}
 
-impl Load for OpAB {
-  fn load(buf: &[u8]) -> Self {
-    Self { dst: buf[0].into(), o1: u16::from_le_bytes([buf[1], buf[2]]).into() }
+  fn load(buf: &[u8]) -> DResult<Self> {
+    Ok(Self { dst: buf[0].into(), o1: u16::from_le_bytes([buf[1], buf[2]]).into() })
   }
 }
 
-impl Dump for OpABS {
+impl BinaryRepr for OpABS {
   fn dump(&self, buf: &mut [u8]) {
     buf[0] = self.dst.into();
     let o1: i16 = self.o1.into();
     buf[1..3].copy_from_slice(&o1.to_le_bytes());
   }
-}
 
-impl Load for OpABS {
-  fn load(buf: &[u8]) -> Self {
-    Self { dst: buf[0].into(), o1: i16::from_le_bytes([buf[1], buf[2]]).into() }
+  fn load(buf: &[u8]) -> DResult<Self> {
+    Ok(Self { dst: buf[0].into(), o1: i16::from_le_bytes([buf[1], buf[2]]).into() })
   }
 }
 
-impl Dump for OpA {
+impl BinaryRepr for OpA {
   fn dump(&self, buf: &mut [u8]) {
     let o1: u32 = self.o1.into();
     buf[0..3].copy_from_slice(&o1.to_le_bytes()[0..3]);
   }
-}
 
-impl Load for OpA {
-  fn load(buf: &[u8]) -> Self {
+  fn load(buf: &[u8]) -> DResult<Self> {
     let mut tmp = [0u8; 4];
     tmp[0..3].copy_from_slice(&buf[0..3]);
-    Self { o1: u32::from_le_bytes(tmp).try_into().unwrap() }
+    Ok(Self { o1: u32::from_le_bytes(tmp).try_into().unwrap() })
   }
 }
 
-impl Dump for OpAS {
+impl BinaryRepr for OpAS {
   fn dump(&self, buf: &mut [u8]) {
     let dst: i32 = self.dst.into();
     buf[0..3].copy_from_slice(&dst.to_le_bytes()[0..3]);
   }
-}
 
-impl Load for OpAS {
-  fn load(buf: &[u8]) -> Self {
+  fn load(buf: &[u8]) -> DResult<Self> {
     let mut tmp = [0u8; 4];
     tmp[0..3].copy_from_slice(&buf[0..3]);
     // Sign extend 24-bit to 32-bit
     if tmp[2] & 0x80 != 0 {
       tmp[3] = 0xff;
     }
-    Self { dst: i32::from_le_bytes(tmp).try_into().unwrap() }
+    Ok(Self { dst: i32::from_le_bytes(tmp).try_into().unwrap() })
   }
 }
 
-impl Dump for Operands {
-  fn dump(&self, buf: &mut [u8]) {
+impl Operands {
+  pub fn dump(&self, buf: &mut [u8]) {
     match self {
       Operands::N => {}
       Operands::ABC(op) => op.dump(buf),
@@ -623,31 +609,23 @@ macro_rules! define_display {
   };
 }
 
-macro_rules! define_dump {
+macro_rules! define_binary_repr {
   ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
-    impl Bytecode {
-      pub fn dump(&self) -> [u8; 4] {
-        let mut res = [0u8; 4];
-        res[0] = self.0.opcode();
-        self.1.dump(&mut res[1..]);
-        res
+    impl BinaryRepr for Bytecode {
+      fn dump(&self, buf: &mut [u8]) {
+        buf[0] = self.0.opcode();
+        self.1.dump(&mut buf[1..]);
       }
-    }
-  };
-}
 
-macro_rules! define_load {
-  ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
-    impl Bytecode {
-      pub fn load(data: [u8; 4]) -> Result<Self, String> {
-        let opcode = data[0];
+      fn load(buf: &[u8]) -> DResult<Self> {
+        let opcode = buf[0];
         match opcode {
           $(
             $opcode => {
-              Ok(Self(Operator::$variant, define_load!(@load_inner &data[1..], $op_info)))
+              Ok(Self(Operator::$variant, define_binary_repr!(@load_inner &buf[1..], $op_info)))
             }
           )*
-          _ => Err(format!("unknown opcode: {}", opcode)),
+          _ => Err(anyhow::anyhow!("unknown opcode: {}", opcode)),
         }
       }
     }
@@ -658,7 +636,7 @@ macro_rules! define_load {
   };
 
   (@load_inner $buf:expr, ($op_enum:ident, $op_struct:ident, $op_var:ident)) => {
-    Operands::$op_enum($op_struct::load($buf))
+    Operands::$op_enum($op_struct::load($buf)?)
   };
 }
 
@@ -667,8 +645,7 @@ macro_rules! define_bytecode {
     define_operators!($($all)*);
     define_constructors!($($all)*);
     define_display!($($all)*);
-    define_dump!($($all)*);
-    define_load!($($all)*);
+    define_binary_repr!($($all)*);
   }
 }
 

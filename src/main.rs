@@ -145,13 +145,13 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
     for file_path in cli.input_files {
       if cli.load {
         let image = if file_path == "-" {
-          let mut loader = loader::Loader::new(io::stdin().lock());
-          diag.enrich(loader.load(), "failed to load bytecode from stdin")?
+          let mut loader = loader::Loader::new(io::stdin().lock(), Rc::clone(&diag));
+          loader.load()?
         } else {
           let file =
             diag.enrich(fs::File::open(&file_path), format!("failed to open {}", file_path))?;
-          let mut loader = loader::Loader::new(file);
-          diag.enrich(loader.load(), format!("failed to load bytecode from {}", file_path))?
+          let mut loader = loader::Loader::new(file, Rc::clone(&diag));
+          loader.load()?
         };
         print_thunks(&image);
         continue;
@@ -172,8 +172,8 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
       let image = bc.finalize();
 
       if let Some(ref dump_path) = cli.dump {
-        let dumper = dumper::Dumper::new(image);
-        let data = dumper.dump();
+        let dumper = dumper::Dumper::new(image, Rc::clone(&diag));
+        let data = dumper.dump()?;
         if dump_path == "-" {
           if io::stdout().is_terminal() {
             return diag
@@ -181,7 +181,7 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           }
           io::stdout().write_all(&data)?;
         } else {
-          fs::write(dump_path, data)?;
+          diag.enrich(fs::write(dump_path, &data), format!("failed to write {}", dump_path))?;
         }
       } else {
         print_thunks(&image);
