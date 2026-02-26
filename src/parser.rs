@@ -1,14 +1,12 @@
-use std::fmt::Debug;
-
+use crate::diagnostic::{Diagnostic, Result};
+use crate::sexp::{Sexp, SexpPool, ToSexp};
+use crate::tokenizer::{Keyword, Paired, Token, TokenStr, TokenTag, Tokenizer};
 use bumpalo::Bump;
 use hashbrown::HashMap;
 use indexmap::IndexSet;
 use slotmap::SlotMap;
-
-use crate::sexp::{Sexp, SexpPool, ToSexp};
-use crate::tokenizer::{Keyword, Paired, Token, TokenStr, TokenTag, Tokenizer};
-
-use crate::diagnostic::Result;
+use std::fmt::Debug;
+use std::rc::Rc;
 
 pub struct TokenIndex(u32);
 
@@ -281,6 +279,7 @@ pub struct Parser<'a> {
   token: Option<&'a Token<'a>>,
   information: SlotMap<InfoKey, Info<'a>>,
   func_stack: Vec<FunctionCtx<'a>>,
+  diag: Rc<Diagnostic>,
 }
 
 pub struct PeekResult<'a, T> {
@@ -298,11 +297,11 @@ struct FunctionCtx<'a> {
 }
 
 impl<'a> Parser<'a> {
-  pub fn new(arena: &'a Bump, src: &'a str) -> Self {
-    let tokenizer: Tokenizer<'a> = Tokenizer::new(arena, src);
+  pub fn new(arena: &'a Bump, src: &'a str, diag: Rc<Diagnostic>) -> Self {
+    let tokenizer: Tokenizer<'a> = Tokenizer::new(arena, src, Rc::clone(&diag));
     let information: SlotMap<InfoKey, Info<'a>> = SlotMap::new();
     let mut parser =
-      Self { arena, tokenizer, token: None, information, func_stack: Vec::with_capacity(4) };
+      Self { arena, tokenizer, token: None, information, func_stack: Vec::with_capacity(4), diag };
     parser.enter_function();
     parser
   }
@@ -404,7 +403,7 @@ impl<'a> Parser<'a> {
   fn expect_reach_eof(&mut self) -> Result<()> {
     match self.peek_token()? {
       x if x.inner.tag == TokenTag::Eof => Ok(()),
-      x => Err(anyhow::anyhow!("expect eof but got {}", x.inner)),
+      x => self.diag.fail(format!("expect eof but got {}", x.inner)),
     }
   }
 
@@ -414,7 +413,7 @@ impl<'a> Parser<'a> {
     }
     let tok = self.next_token()?;
     if tok.inner.tag != TokenTag::PairedOpen(po) {
-      return Err(anyhow::anyhow!("expected paired open {}", po));
+      return self.diag.fail(format!("expected paired open {}", po));
     }
     Ok(tok)
   }
@@ -427,7 +426,7 @@ impl<'a> Parser<'a> {
     }
     let tok = self.next_token()?;
     if tok.inner.tag != TokenTag::PairedClose(po) {
-      return Err(anyhow::anyhow!("expected paired close {}", po));
+      return self.diag.fail(format!("expected paired close {}", po));
     }
     Ok(tok)
   }
@@ -476,7 +475,7 @@ impl<'a> Parser<'a> {
     }
     let tok = self.next_token()?;
     if !matches!(tok.inner.tag, TokenTag::Identifer) {
-      return Err(anyhow::anyhow!("expected identifier, but got {}", tok.inner));
+      return self.diag.fail(format!("expected identifier, but got {}", tok.inner));
     }
     Ok(tok)
   }
@@ -496,7 +495,7 @@ impl<'a> Parser<'a> {
     }
     let tok = self.next_token()?;
     if tok.inner.tag != TokenTag::Kw(kw) {
-      return Err(anyhow::anyhow!("expected keyword {}, but got {}", kw, tok.inner));
+      return self.diag.fail(format!("expected keyword {}, but got {}", kw, tok.inner));
     }
     Ok(tok)
   }
@@ -509,7 +508,7 @@ impl<'a> Parser<'a> {
     }
     let tok = self.next_token()?;
     if !matches!(tok.inner.tag, TokenTag::Op(op2) | TokenTag::RawOp(op2) if op == op2) {
-      return Err(anyhow::anyhow!("expected operator {}", op));
+      return self.diag.fail(format!("expected operator {}", op));
     }
     Ok(tok)
   }
@@ -593,7 +592,7 @@ impl<'a> Parser<'a> {
       }
       Op(op) => {
         let (_laff, raff) =
-          Affinity::get_prefix(op).ok_or_else(|| anyhow::anyhow!("prefix operator expected"))?;
+          Affinity::get_prefix(op).ok_or_else(|| self.diag.error("prefix operator expected"))?;
         let rhs_expr = self.parse_expr_with_affinity(raff)?;
 
         arena.alloc(ExprCon::OpApply {
@@ -705,9 +704,9 @@ impl<'a> Parser<'a> {
             self.new_empty_info(),
           ))
         }
-        _ => anyhow::bail!("unexpected keyword {}", lhs_token.inner),
+        _ => return self.diag.fail(format!("unexpected keyword {}", lhs_token.inner)),
       },
-      _ => anyhow::bail!("unexpected token {}", lhs_token.inner),
+      _ => return self.diag.fail(format!("unexpected token {}", lhs_token.inner)),
     };
 
     loop {
@@ -722,7 +721,7 @@ impl<'a> Parser<'a> {
         PairedClose(_) => break,
         Eof | Newline => break,
         Kw(_) => break,
-        _ => anyhow::bail!("unexpected trailing token {}", op_token.inner),
+        _ => return self.diag.fail(format!("unexpected trailing token {}", op_token.inner)),
       };
 
       if let Some((laff, _)) = Affinity::get_postfix(op_str) {

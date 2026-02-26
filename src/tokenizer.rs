@@ -1,10 +1,10 @@
-use crate::diagnostic::Result;
+use crate::diagnostic::{Diagnostic, Result};
 use small_map::RapidSmallMap;
+use std::rc::Rc;
 
-use std::{
-  fmt::Display,
-  hash::{Hash, Hasher},
-};
+use std::fmt;
+use std::fmt::Display;
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Loc {
@@ -88,7 +88,7 @@ impl<'a> TokenSpan<'a> {
 }
 
 impl Display for TokenSpan<'_> {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self.0.iter().collect::<String>())
   }
 }
@@ -244,6 +244,7 @@ pub struct Tokenizer<'a> {
   index: usize,
   colstart: usize,
   line: u32,
+  diag: Rc<Diagnostic>,
 }
 
 use Paired::*;
@@ -270,7 +271,7 @@ impl<'a, 'b> Tokenizer<'a>
 where
   'a: 'b,
 {
-  pub fn new<I>(arena: &'a Bump, input: I) -> Self
+  pub fn new<I>(arena: &'a Bump, input: I, diag: Rc<Diagnostic>) -> Self
   where
     I: AsRef<str>,
   {
@@ -282,7 +283,7 @@ where
       }
       buffer.into_boxed_slice()
     });
-    Tokenizer { arena, buffer, index: 0, colstart: 0, line: 1 }
+    Tokenizer { arena, buffer, index: 0, colstart: 0, line: 1, diag }
   }
 
   fn move_to_newline_begin(&mut self) {
@@ -551,7 +552,7 @@ where
 
   pub fn next_with_err(&'b mut self) -> Result<Token<'a>> {
     let tok = self.next_token();
-    if let TokenTag::Error(err) = tok.tag { Result::Err(anyhow::anyhow!(err)) } else { Ok(tok) }
+    if let TokenTag::Error(err) = tok.tag { self.diag.fail(err.to_string()) } else { Ok(tok) }
   }
 
   pub fn next_token(&'b mut self) -> Token<'a> {
@@ -639,7 +640,8 @@ mod tests {
 
   fn test_tokenize(input: &str, expected: &[TestToken]) {
     let arena = Bump::new();
-    let mut tokenizer = Tokenizer::new(&arena, input);
+    let diag = Rc::new(Diagnostic::new());
+    let mut tokenizer = Tokenizer::new(&arena, input, diag);
     for expected_token in expected {
       let token = tokenizer.next_token();
       assert_eq!(token.tag, expected_token.tag);

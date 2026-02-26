@@ -95,7 +95,7 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           continue;
         }
         let arena = Bump::new();
-        let parser = parser::Parser::new(&arena, &line);
+        let parser = parser::Parser::new(&arena, &line, Rc::clone(&diag));
         match parser.parse() {
           Ok(tree) => {
             let mut codegen = codegen::CodeGenCtx::new(&arena, tree, Rc::clone(&diag));
@@ -106,7 +106,7 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
             print_thunks(&image);
             rl.add_history_entry(line.as_str())?;
           }
-          Err(e) => diag.report_anyhow(&e),
+          Err(e) => diag.report_err(&e),
         }
       }
       Err(ReadlineError::Interrupted) => {
@@ -115,7 +115,7 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
       }
       Err(ReadlineError::Eof) => break,
       Err(err) => {
-        diag.report_anyhow(&err.into());
+        diag.report_err(&err.into());
         break;
       }
     }
@@ -149,7 +149,7 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           loader.load()?
         } else {
           let file =
-            diag.enrich(fs::File::open(&file_path), format!("failed to open {}", file_path))?;
+            diag.context(fs::File::open(&file_path), format!("failed to open {}", file_path))?;
           let mut loader = loader::Loader::new(file, Rc::clone(&diag));
           loader.load()?
         };
@@ -157,10 +157,10 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
         continue;
       }
       let content =
-        diag.enrich(fs::read_to_string(&file_path), format!("failed to read {}", file_path))?;
+        diag.context(fs::read_to_string(&file_path), format!("failed to read {}", file_path))?;
       let arena = Bump::new();
-      let parser = parser::Parser::new(&arena, &content);
-      let tree = diag.enrich(parser.parse(), format!("failed to parse {}", file_path))?;
+      let parser = parser::Parser::new(&arena, &content, Rc::clone(&diag));
+      let tree = diag.context(parser.parse(), format!("failed to parse {}", file_path))?;
 
       if cli.dump.is_none() && !cli.no_tree {
         print_tree(&tree);
@@ -181,7 +181,7 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           }
           io::stdout().write_all(&data)?;
         } else {
-          diag.enrich(fs::write(dump_path, &data), format!("failed to write {}", dump_path))?;
+          diag.context(fs::write(dump_path, &data), format!("failed to write {}", dump_path))?;
         }
       } else {
         print_thunks(&image);
@@ -200,7 +200,7 @@ fn main() {
   let diag = Rc::new(diagnostic::Diagnostic::new());
 
   if let Err(e) = run(cli, Rc::clone(&diag)) {
-    diag.report_anyhow(&e);
+    diag.report_err(&e);
     std::process::exit(1);
   }
 }

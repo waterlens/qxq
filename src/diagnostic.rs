@@ -16,28 +16,39 @@ impl Diagnostic {
     Self {}
   }
 
-  /// For internal compiler errors that should never happen.
-  pub fn error(&self, message: &str) -> ! {
-    panic!("Error: {message}");
+  /// For internal compiler errors that should never happen (Compiler Bug).
+  pub fn ice(&self, message: &str) -> ! {
+    panic!("Internal Compiler Error: {message}");
   }
 
-  /// For non-fatal reporting.
+  /// For fatal user errors that stop compilation immediately.
+  pub fn fatal(&self, message: &str) -> ! {
+    panic!("Fatal Error: {message}");
+  }
+
+  /// For non-fatal reporting (just printing).
   pub fn report(&self, message: &str) {
     eprintln!("Error: {message}");
   }
 
   /// Unified entry point for printing anyhow errors.
-  pub fn report_anyhow(&self, err: &anyhow::Error) {
+  pub fn report_err(&self, err: &anyhow::Error) {
     eprintln!("Error: {err:?}");
   }
 
-  /// Replaces anyhow::bail!
+  /// Returns Err(anyhow!(...)), replacing anyhow::bail!
   pub fn fail<T>(&self, message: impl Into<String>) -> Result<T> {
     Err(anyhow!(message.into()))
   }
 
-  /// Replaces .with_context()
-  pub fn enrich<T, E: Into<anyhow::Error>>(
+  /// Returns a raw anyhow::Error for use in closures (like ok_or_else).
+  /// Replaces anyhow::anyhow!
+  pub fn error(&self, message: impl Into<String>) -> anyhow::Error {
+    anyhow!(message.into())
+  }
+
+  /// Adds context to a result, replacing .with_context()
+  pub fn context<T, E: Into<anyhow::Error>>(
     &self,
     result: std::result::Result<T, E>,
     message: impl Into<String>,

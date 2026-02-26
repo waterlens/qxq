@@ -19,7 +19,7 @@ impl<R: Read> Loader<R> {
 
   pub fn load(&mut self) -> Result<BytecodeImage> {
     let mut header = [0u8; 8];
-    self.diag.enrich(self.reader.read_exact(&mut header), "failed to read header")?;
+    self.diag.context(self.reader.read_exact(&mut header), "failed to read header")?;
 
     if &header[0..4] != b"QXQ\x07" {
       return self.diag.fail("invalid magic number");
@@ -33,7 +33,9 @@ impl<R: Read> Loader<R> {
     let expected_checksum = u16::from_le_bytes([header[6], header[7]]);
 
     let mut thunk_table_data = Vec::new();
-    self.diag.enrich(self.reader.read_to_end(&mut thunk_table_data), "failed to read thunk table")?;
+    self
+      .diag
+      .context(self.reader.read_to_end(&mut thunk_table_data), "failed to read thunk table")?;
 
     if checksum::crc16(&thunk_table_data) != expected_checksum {
       return self.diag.fail("checksum mismatch");
@@ -82,9 +84,7 @@ impl<R: Read> Loader<R> {
     let mut code = Vec::with_capacity(ninstrs as usize);
     for _ in 0..ninstrs {
       code.push(
-        self
-          .diag
-          .enrich(BinaryRepr::load(&data[cursor..cursor + 4]), "failed to load bytecode")?,
+        self.diag.context(BinaryRepr::load(&data[cursor..cursor + 4]), "failed to load bytecode")?,
       );
       cursor += 4;
     }
@@ -119,7 +119,7 @@ impl<R: Read> Loader<R> {
           let (len, n) = uleb8::decode_uleb128(&data[cursor..]);
           cursor += n;
           let s = std::str::from_utf8(&data[cursor..cursor + len as usize]);
-          let s = self.diag.enrich(s, "invalid UTF-8 string")?;
+          let s = self.diag.context(s, "invalid UTF-8 string")?;
           cursor += len as usize;
           constants.push(Constant::Str(s.to_string()));
         }

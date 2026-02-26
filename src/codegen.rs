@@ -107,7 +107,7 @@ impl<'a> Scope<'a> {
   fn enter_function(&mut self, freevars: &[TokenStr<'a>]) {
     for (i, name) in freevars.iter().enumerate() {
       let i: u16 =
-        i.try_into().unwrap_or_else(|_| self.diagnostic.error("free variable id overflow"));
+        i.try_into().unwrap_or_else(|_| self.diagnostic.fatal("free variable id overflow"));
       self.symbols.entry(*name).or_insert(vec![]).push(Location::FreeVar(FreeVarId(i)));
     }
     let freevars = IndexSet::from_iter(freevars.iter().cloned());
@@ -214,7 +214,7 @@ impl<'a> CodeGenCtx<'a> {
   fn allocate_temporary(&mut self) -> RegId {
     let next_reg = free_reg!(self);
     if next_reg >= u8::MAX as usize {
-      self.diagnostic.error("register id overflow");
+      self.diagnostic.fatal("register id overflow");
     }
     reg_push!(self, ValInfo { name: None, index: (next_reg as u8).into() });
     (next_reg as u8).into()
@@ -235,7 +235,7 @@ impl<'a> CodeGenCtx<'a> {
   fn allocate_named(&mut self, name: &'a str) -> RegId {
     let next_reg = free_reg!(self);
     if next_reg >= u8::MAX as usize {
-      self.diagnostic.error("register id overflow");
+      self.diagnostic.fatal("register id overflow");
     }
     reg_push!(self, ValInfo { name: Some(name), index: (next_reg as u8).into() });
     (next_reg as u8).into()
@@ -244,7 +244,7 @@ impl<'a> CodeGenCtx<'a> {
   fn peek_temporary(&self) -> RegId {
     let val_info = reg_top!(self);
     if val_info.name.is_some() {
-      self.diagnostic.error("no temporary variable on the stack");
+      self.diagnostic.ice("no temporary variable on the stack");
     }
     val_info.index
   }
@@ -273,7 +273,7 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::clos(
       r.into(),
       id.try_into()
-        .unwrap_or_else(|_| self.diagnostic.error("exceeding maximium number of functions")),
+        .unwrap_or_else(|_| self.diagnostic.fatal("exceeding maximium number of functions")),
     ))
   }
 
@@ -290,7 +290,7 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::wrap(
       start_field.into(),
       tag.into(),
-      len.try_into().unwrap_or_else(|_| self.diagnostic.error("too many elements")),
+      len.try_into().unwrap_or_else(|_| self.diagnostic.fatal("too many elements")),
     ));
   }
 
@@ -422,7 +422,7 @@ impl<'a> CodeGenCtx<'a> {
       }
       Return => {
         let Some(r) = v else {
-          self.diagnostic.error("return without a value");
+          self.diagnostic.ice("return without a value");
         };
         bc.push(Bytecode::retn(r.into(), 0.into()))
       }
@@ -605,13 +605,13 @@ impl<'a> CodeGenCtx<'a> {
       }
       (RetValue, Uncond(c)) => {
         if c != Control::Return {
-          self.diagnostic.error("data destination: return value; control destination: not return");
+          self.diagnostic.ice("data destination: return value; control destination: not return");
         }
         let r = self.get_value(bc, opr, &mut Fusion::disabled());
         self.emit_jump(bc, c, Some(r));
       }
       (RetValue, Branch(_l1, _l2)) => {
-        self.diagnostic.error("data destination: return value; control destination: branch");
+        self.diagnostic.ice("data destination: return value; control destination: branch");
       }
     }
   }
@@ -785,7 +785,7 @@ impl<'a> CodeGenCtx<'a> {
             self.clean_any_loc_args(n_temps);
             self.emit_unary_op_with_slots(bc, op_str.0, r1, data, control, next);
           } else {
-            self.diagnostic.error("expected two arguments for binary arithmetic operators");
+            self.diagnostic.fatal("expected two arguments for binary arithmetic operators");
           }
         }
         "<" | "<=" | ">" | ">=" | "==" | "!=" => {
@@ -804,13 +804,13 @@ impl<'a> CodeGenCtx<'a> {
             self.clean_any_loc_args(n_temps);
             self.emit_store(bc, Value::Test(test), data, control, next);
           } else {
-            self.diagnostic.error("expected two arguments for comparison operator")
+            self.diagnostic.fatal("expected two arguments for comparison operator")
           }
         }
-        _ => self.diagnostic.error(&format!("unknown operator: {}", op_str.0)),
+        _ => self.diagnostic.fatal(&format!("unknown operator: {}", op_str.0)),
       }
     } else {
-      self.diagnostic.error("expected operator");
+      self.diagnostic.fatal("expected operator");
     }
   }
 
@@ -829,7 +829,7 @@ impl<'a> CodeGenCtx<'a> {
       StrLiteral(s, _) => Some(Value::StrLiteral(s)),
       Ident(token_str, _) => {
         let loc = self.scope.get_bound(token_str).unwrap_or_else(|| {
-          self.diagnostic.error(&format!("undeclared identifier: {}", token_str.0))
+          self.diagnostic.fatal(&format!("undeclared identifier: {}", token_str.0))
         });
         Some(Value::Loc(loc))
       }
@@ -861,13 +861,13 @@ impl<'a> CodeGenCtx<'a> {
       }
       Ident(token_str, _) => {
         let loc = self.scope.get_bound(token_str).unwrap_or_else(|| {
-          self.diagnostic.error(&format!("undeclared identifier: {}", token_str.0))
+          self.diagnostic.fatal(&format!("undeclared identifier: {}", token_str.0))
         });
         self.emit_store(bc, Value::Loc(loc), data, control, next);
       }
       Op(op_str, _) => self
         .diagnostic
-        .error(&format!("use operator `{}` as a first-class value is not supported yet", op_str.0)),
+        .fatal(&format!("use operator `{}` as a first-class value is not supported yet", op_str.0)),
       OpApply { op, pair, args, info: _ } => self.emit_op(bc, op, *pair, args, data, control, next),
       Apply { func, pair: _, args, info: _ } => {
         let func_reg = self.allocate_temporary();
@@ -898,7 +898,7 @@ impl<'a> CodeGenCtx<'a> {
         let args_len: u16 = args
           .len()
           .try_into()
-          .unwrap_or_else(|_| self.diagnostic.error("argument length overflow"));
+          .unwrap_or_else(|_| self.diagnostic.fatal("argument length overflow"));
         for _ in 0..args_len {
           reg_pop!(self);
         }
@@ -920,7 +920,7 @@ impl<'a> CodeGenCtx<'a> {
         let mut fvlocs = vec![];
         for fv in freevars {
           let loc = self.scope.get_bound(fv).unwrap_or_else(|| {
-            self.diagnostic.error(&format!("unable to find captured variable: {}", fv.0))
+            self.diagnostic.fatal(&format!("unable to find captured variable: {}", fv.0))
           });
           assert!(!matches!(loc, Location::Temporary));
           fvlocs.push(loc);
