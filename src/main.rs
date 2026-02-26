@@ -35,6 +35,9 @@ struct Cli {
   #[arg(long)]
   load: bool,
 
+  #[arg(long)]
+  no_tree: bool,
+
   #[arg(value_name = "INPUT_FILES")]
   input_files: Vec<String>,
 }
@@ -159,7 +162,7 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
       let parser = parser::Parser::new(&arena, &content);
       let tree = diag.enrich(parser.parse(), format!("failed to parse {}", file_path))?;
 
-      if cli.dump.is_none() {
+      if cli.dump.is_none() && !cli.no_tree {
         print_tree(&tree);
       }
 

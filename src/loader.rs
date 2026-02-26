@@ -111,7 +111,7 @@ impl<R: Read> Loader<R> {
     }
 
     Ok(Thunk {
-      name: "".to_string(), // Name is not stored in binary format
+      name: "".to_string(), // Will be filled later
       code: code.into_boxed_slice(),
       fvlocs: fvlocs.into_boxed_slice(),
       nparams,
