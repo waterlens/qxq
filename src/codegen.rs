@@ -203,7 +203,7 @@ macro_rules! reg_pop {
 }
 
 impl<'a> CodeGenCtx<'a> {
-  pub fn new(_arena: &'a Bump, tree: SynTree<'a, InfoKey>, diagnostic: Rc<Diagnostic>) -> Self {
+  pub fn new(_arena: &'a Bump, diagnostic: Rc<Diagnostic>, tree: SynTree<'a, InfoKey>) -> Self {
     let stack_frame = Stack::new();
     let scope = Scope::new(Rc::clone(&diagnostic));
     let information = tree.information;
@@ -1039,15 +1039,18 @@ impl<'a> CodeGenCtx<'a> {
 
 #[cfg(test)]
 mod tests {
+  use std::rc::Rc;
+
   use super::*;
   use crate::parser::Parser;
   #[allow(unused)]
   fn test_codegen(source: &str, expected_bytecode_str: &str) {
     let arena = Bump::new();
-    let mut parser = Parser::new(&arena, source);
+    let diag = Rc::new(Diagnostic::new());
+    let mut parser = Parser::new(&arena, diag, source);
     let tree = parser.parse().unwrap();
     let diag = Rc::new(Diagnostic::new());
-    let mut ctx = CodeGenCtx::new(&arena, tree, diag);
+    let mut ctx = CodeGenCtx::new(&arena, diag, tree);
     let mut bc = BytecodeCtx::new();
     ctx.emit_tree(&mut bc);
     let image = bc.finalize();

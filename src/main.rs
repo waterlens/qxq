@@ -95,10 +95,10 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           continue;
         }
         let arena = Bump::new();
-        let parser = parser::Parser::new(&arena, &line, Rc::clone(&diag));
+        let parser = parser::Parser::new(&arena, Rc::clone(&diag), &line);
         match parser.parse() {
           Ok(tree) => {
-            let mut codegen = codegen::CodeGenCtx::new(&arena, tree, Rc::clone(&diag));
+            let mut codegen = codegen::CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
             let mut bc = bytecode::BytecodeCtx::new();
             codegen.emit_tree(&mut bc);
             let image = bc.finalize();
@@ -159,14 +159,14 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
       let content =
         diag.context(fs::read_to_string(&file_path), format!("failed to read {}", file_path))?;
       let arena = Bump::new();
-      let parser = parser::Parser::new(&arena, &content, Rc::clone(&diag));
+      let parser = parser::Parser::new(&arena, Rc::clone(&diag), &content);
       let tree = diag.context(parser.parse(), format!("failed to parse {}", file_path))?;
 
       if cli.dump.is_none() && !cli.no_tree {
         print_tree(&tree);
       }
 
-      let mut codegen = codegen::CodeGenCtx::new(&arena, tree, Rc::clone(&diag));
+      let mut codegen = codegen::CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
       let mut bc = bytecode::BytecodeCtx::new();
       codegen.emit_tree(&mut bc);
       let image = bc.finalize();

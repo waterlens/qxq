@@ -297,7 +297,7 @@ struct FunctionCtx<'a> {
 }
 
 impl<'a> Parser<'a> {
-  pub fn new(arena: &'a Bump, src: &'a str, diag: Rc<Diagnostic>) -> Self {
+  pub fn new(arena: &'a Bump, diag: Rc<Diagnostic>, src: &'a str) -> Self {
     let tokenizer: Tokenizer<'a> = Tokenizer::new(arena, src, Rc::clone(&diag));
     let information: SlotMap<InfoKey, Info<'a>> = SlotMap::new();
     let mut parser =
@@ -871,18 +871,22 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
+  use std::rc::Rc;
+
   use super::*;
 
   fn test_parse_exprs(source: &str, expected_sexp_str: &str) {
     let arena = Bump::new();
-    let parser = Parser::new(&arena, source);
+    let diag = Rc::new(Diagnostic::new());
+    let parser = Parser::new(&arena, diag, source);
     let tree = parser.parse().unwrap();
     assert_eq!(tree.root.to_sexp(&SexpPool::new()).to_string(), expected_sexp_str);
   }
 
   fn test_parse_with_info(source: &str, expected_sexp_str: &str) {
     let arena = Bump::new();
-    let parser = Parser::new(&arena, source);
+    let diag = Rc::new(Diagnostic::new());
+    let parser = Parser::new(&arena, diag, source);
     let tree = parser.parse().unwrap();
     let info_expr = InfoExpr { expr: tree.root, map: &tree.information };
     let pool = SexpPool::new();
