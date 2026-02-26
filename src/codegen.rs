@@ -1061,7 +1061,7 @@ mod tests {
       r#"
     let f = 1; (1, f)
     "#,
-      "thunk::__top_thunk__ params::0 regs::3 captured::[]\nconstants::[\n  @0: 1\n]\nloadi        r0, #1\nloadi        r1, #1\nmove         r2, r0\nwrap         r1, k1, #2\nretn         r1, #0\n",
+      "thunk::__top_thunk__ params::0 regs::3 captured::[]\nconstants::[\n  @0: 1\n]\nloadc        r0, @0\nloadc        r1, @0\nmove         r2, r0\nwrap         r1, k1, #2\nretn         r1, #0\n",
     );
   }
 }

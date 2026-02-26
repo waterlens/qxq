@@ -396,6 +396,120 @@ pub enum Operands {
   CondS(OpCondS),
 }
 
+pub trait Dump {
+  fn dump(&self, buf: &mut [u8]);
+}
+
+pub trait Load {
+  fn load(buf: &[u8]) -> Self;
+}
+
+impl Dump for OpABC {
+  fn dump(&self, buf: &mut [u8]) {
+    buf[0] = self.dst.into();
+    buf[1] = self.o1.into();
+    buf[2] = self.o2.into();
+  }
+}
+
+impl Load for OpABC {
+  fn load(buf: &[u8]) -> Self {
+    Self { dst: buf[0].into(), o1: buf[1].into(), o2: buf[2].into() }
+  }
+}
+
+impl Dump for OpXYZ {
+  fn dump(&self, buf: &mut [u8]) {
+    buf[0] = self.dst.into();
+    buf[1] = self.o1.into();
+    buf[2] = self.o2.into();
+  }
+}
+
+impl Load for OpXYZ {
+  fn load(buf: &[u8]) -> Self {
+    Self { dst: buf[0].into(), o1: buf[1].into(), o2: buf[2].into() }
+  }
+}
+
+impl Dump for OpAB {
+  fn dump(&self, buf: &mut [u8]) {
+    buf[0] = self.dst.into();
+    let o1: u16 = self.o1.into();
+    buf[1..3].copy_from_slice(&o1.to_le_bytes());
+  }
+}
+
+impl Load for OpAB {
+  fn load(buf: &[u8]) -> Self {
+    Self { dst: buf[0].into(), o1: u16::from_le_bytes([buf[1], buf[2]]).into() }
+  }
+}
+
+impl Dump for OpABS {
+  fn dump(&self, buf: &mut [u8]) {
+    buf[0] = self.dst.into();
+    let o1: i16 = self.o1.into();
+    buf[1..3].copy_from_slice(&o1.to_le_bytes());
+  }
+}
+
+impl Load for OpABS {
+  fn load(buf: &[u8]) -> Self {
+    Self { dst: buf[0].into(), o1: i16::from_le_bytes([buf[1], buf[2]]).into() }
+  }
+}
+
+impl Dump for OpA {
+  fn dump(&self, buf: &mut [u8]) {
+    let o1: u32 = self.o1.into();
+    buf[0..3].copy_from_slice(&o1.to_le_bytes()[0..3]);
+  }
+}
+
+impl Load for OpA {
+  fn load(buf: &[u8]) -> Self {
+    let mut tmp = [0u8; 4];
+    tmp[0..3].copy_from_slice(&buf[0..3]);
+    Self { o1: u32::from_le_bytes(tmp).try_into().unwrap() }
+  }
+}
+
+impl Dump for OpAS {
+  fn dump(&self, buf: &mut [u8]) {
+    let dst: i32 = self.dst.into();
+    buf[0..3].copy_from_slice(&dst.to_le_bytes()[0..3]);
+  }
+}
+
+impl Load for OpAS {
+  fn load(buf: &[u8]) -> Self {
+    let mut tmp = [0u8; 4];
+    tmp[0..3].copy_from_slice(&buf[0..3]);
+    // Sign extend 24-bit to 32-bit
+    if tmp[2] & 0x80 != 0 {
+      tmp[3] = 0xff;
+    }
+    Self { dst: i32::from_le_bytes(tmp).try_into().unwrap() }
+  }
+}
+
+impl Dump for Operands {
+  fn dump(&self, buf: &mut [u8]) {
+    match self {
+      Operands::N => {}
+      Operands::ABC(op) => op.dump(buf),
+      Operands::XYZ(op) => op.dump(buf),
+      Operands::AB(op) => op.dump(buf),
+      Operands::ABS(op) => op.dump(buf),
+      Operands::A(op) => op.dump(buf),
+      Operands::AS(op) => op.dump(buf),
+      Operands::Cond(op) => op.dump(buf),
+      Operands::CondS(op) => op.dump(buf),
+    }
+  }
+}
+
 impl Operands {
   pub fn xyz(dst: Op8, o1: Op8, o2: Op8) -> OpXYZ {
     OpXYZ { dst, o1, o2 }
@@ -513,84 +627,11 @@ macro_rules! define_dump {
   ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
     impl Bytecode {
       pub fn dump(&self) -> [u8; 4] {
-        let opcode = self.0.opcode();
         let mut res = [0u8; 4];
-        res[0] = opcode;
-        match self.0 {
-          $(
-            Operator::$variant => {
-              define_dump!(@ser_inner self.1, &mut res[1..], $op_info);
-            }
-          )*
-        }
+        res[0] = self.0.opcode();
+        self.1.dump(&mut res[1..]);
         res
       }
-    }
-  };
-
-  (@ser_inner $val:expr, $buf:expr, ($op_enum:ident)) => {
-    // No extra operands
-  };
-
-  (@ser_inner $val:expr, $buf:expr, (ABC, OpABC, op)) => {
-    if let Operands::ABC(op) = $val {
-      $buf[0] = op.dst.into();
-      $buf[1] = op.o1.into();
-      $buf[2] = op.o2.into();
-    }
-  };
-
-  (@ser_inner $val:expr, $buf:expr, (XYZ, OpXYZ, op)) => {
-    if let Operands::XYZ(op) = $val {
-      $buf[0] = op.dst.into();
-      $buf[1] = op.o1.into();
-      $buf[2] = op.o2.into();
-    }
-  };
-
-  (@ser_inner $val:expr, $buf:expr, (AB, OpAB, op)) => {
-    if let Operands::AB(op) = $val {
-      $buf[0] = op.dst.into();
-      let o1: u16 = op.o1.into();
-      $buf[1..3].copy_from_slice(&o1.to_le_bytes());
-    }
-  };
-
-  (@ser_inner $val:expr, $buf:expr, (ABS, OpABS, op)) => {
-    if let Operands::ABS(op) = $val {
-      $buf[0] = op.dst.into();
-      let o1: i16 = op.o1.into();
-      $buf[1..3].copy_from_slice(&o1.to_le_bytes());
-    }
-  };
-
-  (@ser_inner $val:expr, $buf:expr, (A, OpA, op)) => {
-    if let Operands::A(op) = $val {
-      let o1: u32 = op.o1.into();
-      $buf[0..3].copy_from_slice(&o1.to_le_bytes()[0..3]);
-    }
-  };
-
-  (@ser_inner $val:expr, $buf:expr, (AS, OpAS, op)) => {
-    if let Operands::AS(op) = $val {
-      let dst: i32 = op.dst.into();
-      $buf[0..3].copy_from_slice(&dst.to_le_bytes()[0..3]);
-    }
-  };
-
-  (@ser_inner $val:expr, $buf:expr, (Cond, OpCond, op)) => {
-    if let Operands::Cond(op) = $val {
-      $buf[0] = op.dst.into();
-      let o1: u16 = op.o1.into();
-      $buf[1..3].copy_from_slice(&o1.to_le_bytes());
-    }
-  };
-
-  (@ser_inner $val:expr, $buf:expr, (CondS, OpCondS, op)) => {
-    if let Operands::CondS(op) = $val {
-      $buf[0] = op.dst.into();
-      let o1: i16 = op.o1.into();
-      $buf[1..3].copy_from_slice(&o1.to_le_bytes());
     }
   };
 }
@@ -616,72 +657,8 @@ macro_rules! define_load {
     Operands::N
   };
 
-  (@load_inner $buf:expr, (ABC, OpABC, op)) => {
-    Operands::ABC(OpABC {
-      dst: $buf[0].into(),
-      o1: $buf[1].into(),
-      o2: $buf[2].into(),
-    })
-  };
-
-  (@load_inner $buf:expr, (XYZ, OpXYZ, op)) => {
-    Operands::XYZ(OpXYZ {
-      dst: $buf[0].into(),
-      o1: $buf[1].into(),
-      o2: $buf[2].into(),
-    })
-  };
-
-  (@load_inner $buf:expr, (AB, OpAB, op)) => {
-    Operands::AB(OpAB {
-      dst: $buf[0].into(),
-      o1: u16::from_le_bytes([$buf[1], $buf[2]]).into(),
-    })
-  };
-
-  (@load_inner $buf:expr, (ABS, OpABS, op)) => {
-    Operands::ABS(OpABS {
-      dst: $buf[0].into(),
-      o1: i16::from_le_bytes([$buf[1], $buf[2]]).into(),
-    })
-  };
-
-  (@load_inner $buf:expr, (A, OpA, op)) => {
-    Operands::A(OpA {
-      o1: {
-        let mut tmp = [0u8; 4];
-        tmp[0..3].copy_from_slice(&$buf[0..3]);
-        u32::from_le_bytes(tmp).try_into().unwrap()
-      }
-    })
-  };
-
-  (@load_inner $buf:expr, (AS, OpAS, op)) => {
-    Operands::AS(OpAS {
-      dst: {
-        let mut tmp = [0u8; 4];
-        tmp[0..3].copy_from_slice(&$buf[0..3]);
-        // Sign extend 24-bit to 32-bit
-        if tmp[2] & 0x80 != 0 {
-          tmp[3] = 0xff;
-        }
-        i32::from_le_bytes(tmp).try_into().unwrap()
-      }
-    })
-  };
-
-  (@load_inner $buf:expr, (Cond, OpCond, op)) => {
-    Operands::Cond(OpCond {
-      dst: $buf[0].into(),
-      o1: u16::from_le_bytes([$buf[1], $buf[2]]).into(),
-    })
-  };
-
-  (@load_inner $buf:expr, (CondS, OpCondS, op)) => {
-    Operands::CondS(OpCondS {
-      dst: $buf[0].into(),
-      o1: i16::from_le_bytes([$buf[1], $buf[2]]).into(),
-    })
+  (@load_inner $buf:expr, ($op_enum:ident, $op_struct:ident, $op_var:ident)) => {
+    Operands::$op_enum($op_struct::load($buf))
   };
 }
 
