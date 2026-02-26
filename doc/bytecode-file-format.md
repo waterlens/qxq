@@ -38,10 +38,11 @@ After the header there is the bytecode region of a thunk.
 | --------------- | --------------- | --------------- | --------------- | --------------- |
 | Bytecode Instructions | | (4 * ninstrs) | | |
 
-The captured variables region follows the bytecode region. For each captured
-variable, the hi-byte can be either 0 for capturing variable in caller's slot,
-or 1 for capturing caller's captured variables. The lo-byte corresponds to the
-index of frame slots (registers) or the index of captured variables.
+The captured variables region follows the bytecode region. For 2-byte
+represented each captured variable, the 1st-byte can be either 0 for capturing
+variable in caller's slot, or 1 for capturing caller's captured variables. The
+2nd-byte corresponds to the index of frame slots (registers) or the index of
+captured variables.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |
