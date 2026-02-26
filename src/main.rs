@@ -14,7 +14,7 @@ use std::{
 #[command(group(
   ArgGroup::new("mode")
     .required(false)
-    .args(["check_expect", "test_expect", "update_expect", "dump"]),
+    .args(["check_expect", "test_expect", "update_expect", "dump", "load"]),
 ))]
 struct Cli {
   #[arg(long)]
@@ -31,6 +31,9 @@ struct Cli {
 
   #[arg(long, value_name = "OUTPUT_FILE")]
   dump: Option<String>,
+
+  #[arg(long)]
+  load: bool,
 
   #[arg(value_name = "INPUT_FILES")]
   input_files: Vec<String>,
@@ -137,6 +140,19 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
 
   if !cli.input_files.is_empty() {
     for file_path in cli.input_files {
+      if cli.load {
+        let image = if file_path == "-" {
+          let mut loader = loader::Loader::new(io::stdin().lock());
+          diag.enrich(loader.load(), "failed to load bytecode from stdin")?
+        } else {
+          let file =
+            diag.enrich(fs::File::open(&file_path), format!("failed to open {}", file_path))?;
+          let mut loader = loader::Loader::new(file);
+          diag.enrich(loader.load(), format!("failed to load bytecode from {}", file_path))?
+        };
+        print_thunks(&image);
+        continue;
+      }
       let content =
         diag.enrich(fs::read_to_string(&file_path), format!("failed to read {}", file_path))?;
       let arena = Bump::new();
@@ -153,8 +169,8 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
       let image = bc.finalize();
 
       if let Some(ref dump_path) = cli.dump {
-        let serializer = serializer::Serializer::new(image);
-        let data = serializer.serialize();
+        let dumper = dumper::Dumper::new(image);
+        let data = dumper.dump();
         if dump_path == "-" {
           if io::stdout().is_terminal() {
             return diag

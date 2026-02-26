@@ -268,6 +268,13 @@ impl Display for OpS16 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Op24(u32);
 
+impl TryFrom<u32> for Op24 {
+  type Error = ();
+  fn try_from(value: u32) -> Result<Self, Self::Error> {
+    if value <= 0x00ffffff { Ok(Self(value)) } else { Err(()) }
+  }
+}
+
 impl TryFrom<usize> for Op24 {
   type Error = ();
   fn try_from(value: usize) -> Result<Self, Self::Error> {
@@ -306,6 +313,13 @@ impl From<i16> for OpS24 {
 impl From<OpS24> for i32 {
   fn from(x: OpS24) -> Self {
     x.0
+  }
+}
+
+impl TryFrom<i32> for OpS24 {
+  type Error = ();
+  fn try_from(value: i32) -> Result<Self, Self::Error> {
+    if (-0x007fffff..=0x007fffff).contains(&value) { Ok(Self(value)) } else { Err(()) }
   }
 }
 
@@ -498,7 +512,7 @@ macro_rules! define_display {
 macro_rules! define_serialize {
   ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
     impl Bytecode {
-      pub fn serialize(&self) -> [u8; 4] {
+      pub fn dump(&self) -> [u8; 4] {
         let opcode = self.0.opcode();
         let mut res = [0u8; 4];
         res[0] = opcode;
@@ -581,12 +595,103 @@ macro_rules! define_serialize {
   };
 }
 
+macro_rules! define_load {
+  ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
+    impl Bytecode {
+      pub fn load(data: [u8; 4]) -> Result<Self, String> {
+        let opcode = data[0];
+        match opcode {
+          $(
+            $opcode => {
+              Ok(Self(Operator::$variant, define_load!(@load_inner &data[1..], $op_info)))
+            }
+          )*
+          _ => Err(format!("unknown opcode: {}", opcode)),
+        }
+      }
+    }
+  };
+
+  (@load_inner $buf:expr, (N)) => {
+    Operands::N
+  };
+
+  (@load_inner $buf:expr, (ABC, OpABC, op)) => {
+    Operands::ABC(OpABC {
+      dst: $buf[0].into(),
+      o1: $buf[1].into(),
+      o2: $buf[2].into(),
+    })
+  };
+
+  (@load_inner $buf:expr, (XYZ, OpXYZ, op)) => {
+    Operands::XYZ(OpXYZ {
+      dst: $buf[0].into(),
+      o1: $buf[1].into(),
+      o2: $buf[2].into(),
+    })
+  };
+
+  (@load_inner $buf:expr, (AB, OpAB, op)) => {
+    Operands::AB(OpAB {
+      dst: $buf[0].into(),
+      o1: u16::from_le_bytes([$buf[1], $buf[2]]).into(),
+    })
+  };
+
+  (@load_inner $buf:expr, (ABS, OpABS, op)) => {
+    Operands::ABS(OpABS {
+      dst: $buf[0].into(),
+      o1: i16::from_le_bytes([$buf[1], $buf[2]]).into(),
+    })
+  };
+
+  (@load_inner $buf:expr, (A, OpA, op)) => {
+    Operands::A(OpA {
+      o1: {
+        let mut tmp = [0u8; 4];
+        tmp[0..3].copy_from_slice(&$buf[0..3]);
+        u32::from_le_bytes(tmp).try_into().unwrap()
+      }
+    })
+  };
+
+  (@load_inner $buf:expr, (AS, OpAS, op)) => {
+    Operands::AS(OpAS {
+      dst: {
+        let mut tmp = [0u8; 4];
+        tmp[0..3].copy_from_slice(&$buf[0..3]);
+        // Sign extend 24-bit to 32-bit
+        if tmp[2] & 0x80 != 0 {
+          tmp[3] = 0xff;
+        }
+        i32::from_le_bytes(tmp).try_into().unwrap()
+      }
+    })
+  };
+
+  (@load_inner $buf:expr, (Cond, OpCond, op)) => {
+    Operands::Cond(OpCond {
+      dst: $buf[0].into(),
+      o1: u16::from_le_bytes([$buf[1], $buf[2]]).into(),
+    })
+  };
+
+  (@load_inner $buf:expr, (CondS, OpCondS, op)) => {
+    Operands::CondS(OpCondS {
+      dst: $buf[0].into(),
+      o1: i16::from_le_bytes([$buf[1], $buf[2]]).into(),
+    })
+  };
+}
+
 macro_rules! define_bytecode {
   ( $($all:tt)* ) => {
     define_operators!($($all)*);
     define_constructors!($($all)*);
     define_display!($($all)*);
     define_serialize!($($all)*);
+    define_load!($($all)*);
   }
 }
 

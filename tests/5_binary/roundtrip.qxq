@@ -1,0 +1,48 @@
+(* RUN: {qxq|cargo run --} %s --dump - | {qxq|cargo run --} --load - *)
+let s = "qx";
+let i = 100;
+let f = fn (x)
+  let g = fn (y)
+    let res = x + y + i;
+    res
+  end;
+  g(x)
+end;
+let result = f(1);
+(s, result)
+(* EXPECT:
+   --- Thunk ---
+   thunk:: params::1 regs::4 captured::[^0 as ^0, r0 as ^1]
+   loadf        r2, ^1
+   add.dd       r2, r2, r0
+   loadf        r3, ^0
+   add.dd       r1, r2, r3
+   retn         r1, #0
+   
+   --- Thunk ---
+   thunk:: params::1 regs::4 captured::[r1 as ^0]
+   clos         r1, fn0
+   move         r2, r1
+   move         r3, r0
+   apply        r2, #1
+   retn         r2, #0
+   
+   --- Thunk ---
+   thunk:: params::0 regs::6 captured::[]
+   constants::[
+     @0: "qx"
+     @1: 100
+     @2: 1
+   ]
+   loadc        r0, @0
+   loadc        r1, @1
+   clos         r2, fn1
+   move         r4, r2
+   loadc        r5, @2
+   apply        r4, #1
+   move         r3, r4
+   move         r4, r0
+   move         r5, r3
+   wrap         r4, k1, #2
+   retn         r4, #0
+*)
