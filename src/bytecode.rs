@@ -509,7 +509,7 @@ macro_rules! define_display {
   };
 }
 
-macro_rules! define_serialize {
+macro_rules! define_dump {
   ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
     impl Bytecode {
       pub fn dump(&self) -> [u8; 4] {
@@ -519,7 +519,7 @@ macro_rules! define_serialize {
         match self.0 {
           $(
             Operator::$variant => {
-              define_serialize!(@ser_inner self.1, &mut res[1..], $op_info);
+              define_dump!(@ser_inner self.1, &mut res[1..], $op_info);
             }
           )*
         }
@@ -690,7 +690,7 @@ macro_rules! define_bytecode {
     define_operators!($($all)*);
     define_constructors!($($all)*);
     define_display!($($all)*);
-    define_serialize!($($all)*);
+    define_dump!($($all)*);
     define_load!($($all)*);
   }
 }
