@@ -1,6 +1,7 @@
 use crate::diagnostic::Result as DResult;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
+use qxq_macros::define_bytecode;
 use std::fmt::{self, Display};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -530,182 +531,63 @@ impl Operands {
   }
 }
 
-macro_rules! define_operators {
-  ( $( $opcode:expr => $variant:ident ($($op_info:tt)*) fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum Operator {
-      $( $variant, )*
-    }
-
-    impl Operator {
-      pub fn opcode(&self) -> u8 {
-        match self {
-          $( Self::$variant => $opcode, )*
-        }
-      }
-    }
-  };
-}
-
-macro_rules! define_constructors {
-  (@step $variant:ident ( $op_enum:ident ) fn $fn_name:ident () {} ) => {
-    pub fn $fn_name() -> Self {
-      Self(Operator::$variant, Operands::$op_enum)
-    }
-  };
-
-  (@step $variant:ident ( $op_enum:ident, $op_struct:ident, $op_var:ident ) fn $fn_name:ident ( $($arg:ident : $arg_ty:ty),* ) { $($field:ident $(: $val:expr)?),* } ) => {
-    pub fn $fn_name($($arg : $arg_ty),*) -> Self {
-      Self(
-        Operator::$variant,
-        Operands::$op_enum($op_struct {
-          $($field $(: $val)?),*
-        })
-      )
-    }
-  };
-
-  ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
-    impl Bytecode {
-      $(
-        define_constructors!(@step $variant $op_info fn $fn_name $params $construct);
-      )*
-    }
-  }
-}
-
-macro_rules! define_display {
-  // Entry point
-  ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
-    impl Display for Bytecode {
-      fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-          $(
-            Operator::$variant => {
-              define_display!(@fmt_inner self.1, f, $op_info, $display)
-            }
-          )*
-        }
-        Ok(())
-      }
-    }
-  };
-
-  // Inner helpers
-  (@fmt_inner $val:expr, $f:ident, ($op_enum:ident), ($($fmt:tt)+)) => {
-    if let Operands::$op_enum = $val {
-      write!($f, $($fmt)+)?;
-    } else {
-      unreachable!("mismatched operands")
-    }
-  };
-
-  (@fmt_inner $val:expr, $f:ident, ($op_enum:ident, $op_struct:ident, $op_var:ident), ($($fmt:tt)+)) => {
-    if let Operands::$op_enum($op_var) = $val {
-      write!($f, $($fmt)+)?;
-    } else {
-      unreachable!("mismatched operands")
-    }
-  };
-}
-
-macro_rules! define_binary_repr {
-  ( $( $opcode:expr => $variant:ident $op_info:tt fn $fn_name:ident $params:tt $construct:tt => $display:tt ),* $(,)? ) => {
-    impl BinaryRepr for Bytecode {
-      fn dump(&self, buf: &mut [u8]) {
-        buf[0] = self.0.opcode();
-        self.1.dump(&mut buf[1..]);
-      }
-
-      fn load(buf: &[u8]) -> DResult<Self> {
-        let opcode = buf[0];
-        match opcode {
-          $(
-            $opcode => {
-              Ok(Self(Operator::$variant, define_binary_repr!(@load_inner &buf[1..], $op_info)))
-            }
-          )*
-          _ => Err(anyhow::anyhow!("unknown opcode: {}", opcode)),
-        }
-      }
-    }
-  };
-
-  (@load_inner $buf:expr, (N)) => {
-    Operands::N
-  };
-
-  (@load_inner $buf:expr, ($op_enum:ident, $op_struct:ident, $op_var:ident)) => {
-    Operands::$op_enum($op_struct::load($buf)?)
-  };
-}
-
-macro_rules! define_bytecode {
-  ( $($all:tt)* ) => {
-    define_operators!($($all)*);
-    define_constructors!($($all)*);
-    define_display!($($all)*);
-    define_binary_repr!($($all)*);
-  }
-}
-
 #[derive(Debug, Copy, Clone)]
 pub struct Bytecode(pub Operator, pub Operands);
 
 define_bytecode! {
-  0  => Trap   (ABC, OpABC, op)   fn trap(dst: Op8, o1: Op8, o2: Op8)   { dst, o1, o2 } => ("{:<12} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
-  1  => Nop    (N)                fn nop()                              {}              => ("{:<12}", "nop"),
-  2  => Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("{:<12} #{}", "exta", op.o1),
-  3  => LoadI  (AB, OpAB, op)     fn loadi(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "loadi", op.dst, op.o1),
-  4  => LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadui", op.dst, op.o1),
-  5  => LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, @{}", "loadc", op.dst, op.o1),
-  6  => LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, ^{}", "loadf", op.dst, op.o1),
-  7  => SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("{:<12} r{}, ^{}", "setf", op.dst, op.o1),
-  8  => Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<12} r{}, r{}", "move", op.dst, op.o1),
-  9  => Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "apply", op.dst, op.o1),
-  10 => Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, fn{}", "call", op.dst, op.o1),
-  11 => Retu   (N)                fn retu()                             {}              => ("{:<12}", "retu"),
-  12 => Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("{:<12} r{}", "ret", op.dst),
-  13 => Retn   (ABS, OpABS, op)   fn retn(dst: Op8, o1: OpS16)          { dst, o1 }     => ("{:<12} r{}, #{}", "retn", op.dst, op.o1),
-  14 => Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("{:<12} r{}, fn{}", "clos", op.dst, op.o1),
-  15 => Wrap   (ABC, OpABC, op)   fn wrap(dst: Op8, tag: Op8, n: Op8)   { dst, o1: tag, o2: n } => ("{:<12} r{}, k{}, #{}", "wrap", op.dst, op.o1, op.o2),
-  16 => MkObj  (ABC, OpABC, op)   fn mobj(dst: Op8, tag: Op8, fld: Op8) { dst, o1: tag, o2: fld } => ("{:<12} r{}, k{}, r{}", "mobj", op.dst, op.o1, op.o2),
-  17 => Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("{:<12} #{}", "jmp", op.dst),
-  18 => Goto   (AS, OpAS, op)     fn goto(dst: OpS24)                   { dst }         => ("{:<12} #{}", "goto", op.dst),
+  Trap   (ABC, OpABC, op)   fn trap(dst: Op8, o1: Op8, o2: Op8)   { dst, o1, o2 } => ("{:<12} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
+  Nop    (N)                fn nop()                              {}              => ("{:<12}", "nop"),
+  Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("{:<12} #{}", "exta", op.o1),
+  LoadI  (AB, OpAB, op)     fn loadi(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "loadi", op.dst, op.o1),
+  LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadui", op.dst, op.o1),
+  LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, @{}", "loadc", op.dst, op.o1),
+  LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, ^{}", "loadf", op.dst, op.o1),
+  SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("{:<12} r{}, ^{}", "setf", op.dst, op.o1),
+  Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<12} r{}, r{}", "move", op.dst, op.o1),
+  Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "apply", op.dst, op.o1),
+  Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, fn{}", "call", op.dst, op.o1),
+  Retu   (N)                fn retu()                             {}              => ("{:<12}", "retu"),
+  Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("{:<12} r{}", "ret", op.dst),
+  Retn   (ABS, OpABS, op)   fn retn(dst: Op8, o1: OpS16)          { dst, o1 }     => ("{:<12} r{}, #{}", "retn", op.dst, op.o1),
+  Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("{:<12} r{}, fn{}", "clos", op.dst, op.o1),
+  Wrap   (ABC, OpABC, op)   fn wrap(dst: Op8, tag: Op8, n: Op8)   { dst, o1: tag, o2: n } => ("{:<12} r{}, k{}, #{}", "wrap", op.dst, op.o1, op.o2),
+  MkObj  (ABC, OpABC, op)   fn mobj(dst: Op8, tag: Op8, fld: Op8) { dst, o1: tag, o2: fld } => ("{:<12} r{}, k{}, r{}", "mobj", op.dst, op.o1, op.o2),
+  Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("{:<12} #{}", "jmp", op.dst),
+  Goto   (AS, OpAS, op)     fn goto(dst: OpS24)                   { dst }         => ("{:<12} #{}", "goto", op.dst),
 
-  19 => AddDI  (XYZ, OpXYZ, op)   fn adddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "add.di", op.dst, op.o1, op.o2),
-  20 => SubDI  (XYZ, OpXYZ, op)   fn subdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
-  21 => MulDI  (XYZ, OpXYZ, op)   fn muldi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "mul.di", op.dst, op.o1, op.o2),
-  22 => DivDI  (XYZ, OpXYZ, op)   fn divdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "div.di", op.dst, op.o1, op.o2),
-  23 => ModDI  (XYZ, OpXYZ, op)   fn moddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "mod.di", op.dst, op.o1, op.o2),
+  AddDI  (XYZ, OpXYZ, op)   fn adddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "add.di", op.dst, op.o1, op.o2),
+  SubDI  (XYZ, OpXYZ, op)   fn subdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "sub.di", op.dst, op.o1, op.o2),
+  MulDI  (XYZ, OpXYZ, op)   fn muldi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "mul.di", op.dst, op.o1, op.o2),
+  DivDI  (XYZ, OpXYZ, op)   fn divdi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "div.di", op.dst, op.o1, op.o2),
+  ModDI  (XYZ, OpXYZ, op)   fn moddi(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, #{}", "mod.di", op.dst, op.o1, op.o2),
 
-  24 => AddDD  (XYZ, OpXYZ, op)   fn adddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "add.dd", op.dst, op.o1, op.o2),
-  25 => SubDD  (XYZ, OpXYZ, op)   fn subdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "sub.dd", op.dst, op.o1, op.o2),
-  26 => MulDD  (XYZ, OpXYZ, op)   fn muldd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "mul.dd", op.dst, op.o1, op.o2),
-  27 => DivDD  (XYZ, OpXYZ, op)   fn divdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
-  28 => ModDD  (XYZ, OpXYZ, op)   fn moddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
-  29 => NegD   (XYZ, OpXYZ, op)   fn negd(dst: Op8, o1: Op8)            { dst, o1, o2: 0.into() } => ("{:<12} r{}, r{}", "neg.d", op.dst, op.o1),
+  AddDD  (XYZ, OpXYZ, op)   fn adddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "add.dd", op.dst, op.o1, op.o2),
+  SubDD  (XYZ, OpXYZ, op)   fn subdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "sub.dd", op.dst, op.o1, op.o2),
+  MulDD  (XYZ, OpXYZ, op)   fn muldd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "mul.dd", op.dst, op.o1, op.o2),
+  DivDD  (XYZ, OpXYZ, op)   fn divdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "div.dd", op.dst, op.o1, op.o2),
+  ModDD  (XYZ, OpXYZ, op)   fn moddd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "mod.dd", op.dst, op.o1, op.o2),
+  NegD   (XYZ, OpXYZ, op)   fn negd(dst: Op8, o1: Op8)            { dst, o1, o2: 0.into() } => ("{:<12} r{}, r{}", "neg.d", op.dst, op.o1),
 
-  30 => SetCond (ABS, OpABS, op)  fn setcond(dst: Op8, o1: OpS16)       { dst, o1 }     => ("{:<12} r{}", if op.o1.0 >= 0 { "setc" } else { "setcj"}, op.dst),
+  SetCond (ABS, OpABS, op)  fn setcond(dst: Op8, o1: OpS16)       { dst, o1 }     => ("{:<12} r{}", if op.o1.0 >= 0 { "setc" } else { "setcj"}, op.dst),
 
-  31 => CmpNotF (Cond, OpCond, op) fn cmpnotf(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, #{}", "cmp.not.f", op.dst, op.o1),
-  32 => CmpEqDI (Cond, OpCond, op) fn cmpeqdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
-  33 => CmpNeDI (Cond, OpCond, op) fn cmpnedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, #{}", "cmp.ne.di", op.dst, op.o1),
+  CmpNotF (Cond, OpCond, op) fn cmpnotf(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, #{}", "cmp.not.f", op.dst, op.o1),
+  CmpEqDI (Cond, OpCond, op) fn cmpeqdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
+  CmpNeDI (Cond, OpCond, op) fn cmpnedi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, #{}", "cmp.ne.di", op.dst, op.o1),
 
-  34 => CmpEqDC (Cond, OpCond, op) fn cmpeqdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.eq.dc", op.dst, op.o1),
-  35 => CmpNeDC (Cond, OpCond, op) fn cmpnedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.ne.dc", op.dst, op.o1),
-  36 => CmpLtDC (Cond, OpCond, op) fn cmpltdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.lt.dc", op.dst, op.o1),
-  37 => CmpLeDC (Cond, OpCond, op) fn cmpledc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.le.dc", op.dst, op.o1),
-  38 => CmpGtDC (Cond, OpCond, op) fn cmpgtdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.gt.dc", op.dst, op.o1),
-  39 => CmpGeDC (Cond, OpCond, op) fn cmpgedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.ge.dc", op.dst, op.o1),
+  CmpEqDC (Cond, OpCond, op) fn cmpeqdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.eq.dc", op.dst, op.o1),
+  CmpNeDC (Cond, OpCond, op) fn cmpnedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.ne.dc", op.dst, op.o1),
+  CmpLtDC (Cond, OpCond, op) fn cmpltdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.lt.dc", op.dst, op.o1),
+  CmpLeDC (Cond, OpCond, op) fn cmpledc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.le.dc", op.dst, op.o1),
+  CmpGtDC (Cond, OpCond, op) fn cmpgtdc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.gt.dc", op.dst, op.o1),
+  CmpGeDC (Cond, OpCond, op) fn cmpgedc(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "cmp.ge.dc", op.dst, op.o1),
 
-  40 => CmpEqDD (Cond, OpCond, op) fn cmpeqdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.eq.dd", op.dst, op.o1),
-  41 => CmpNeDD (Cond, OpCond, op) fn cmpnedd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.ne.dd", op.dst, op.o1),
-  42 => CmpLtDD (Cond, OpCond, op) fn cmpltdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.lt.dd", op.dst, op.o1),
-  43 => CmpLeDD (Cond, OpCond, op) fn cmpledd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.le.dd", op.dst, op.o1),
+  CmpEqDD (Cond, OpCond, op) fn cmpeqdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.eq.dd", op.dst, op.o1),
+  CmpNeDD (Cond, OpCond, op) fn cmpnedd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.ne.dd", op.dst, op.o1),
+  CmpLtDD (Cond, OpCond, op) fn cmpltdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.lt.dd", op.dst, op.o1),
+  CmpLeDD (Cond, OpCond, op) fn cmpledd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.le.dd", op.dst, op.o1),
   // These are necessary: a < b is not equivalent to !(a >= b) under IEEE754
-  44 => CmpGtDD (Cond, OpCond, op) fn cmpgtdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.gt.dd", op.dst, op.o1),
-  45 => CmpGeDD (Cond, OpCond, op) fn cmpgedd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.ge.dd", op.dst, op.o1),
+  CmpGtDD (Cond, OpCond, op) fn cmpgtdd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.gt.dd", op.dst, op.o1),
+  CmpGeDD (Cond, OpCond, op) fn cmpgedd(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, r{}", "cmp.ge.dd", op.dst, op.o1),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

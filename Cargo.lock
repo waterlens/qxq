@@ -693,10 +693,20 @@ dependencies = [
  "once_cell",
  "ordermap",
  "phf",
+ "qxq_macros",
  "rustyline",
  "slotmap",
  "small-map",
  "smallvec",
+]
+
+[[package]]
+name = "qxq_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

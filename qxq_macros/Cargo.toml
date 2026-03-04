@@ -1,0 +1,16 @@
+[package]
+name = "qxq_macros"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[features]
+default = ["gen-c-bclist"]
+gen-c-bclist = []
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full", "extra-traits"] }
