@@ -1,0 +1,4 @@
+[submodule "vm"]
+	path = vm
+	url = git@celesorion:celesorion/quickaml.git
+	branch = qxq

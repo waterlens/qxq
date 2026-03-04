@@ -9,3 +9,7 @@ pub mod parser;
 pub mod sexp;
 pub mod tokenizer;
 pub mod uleb8;
+pub mod generated {
+  pub mod vm;
+}
+pub use generated::vm;
