@@ -287,15 +287,15 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn wrap_object(&mut self, bc: &mut BytecodeCtx, tag: Tag, start_field: RegId, len: usize) {
-    bc.push(Bytecode::wrap(
+    bc.push(Bytecode::wobj(
       start_field.into(),
       tag.into(),
       len.try_into().unwrap_or_else(|_| self.diagnostic.fatal("too many elements")),
     ));
   }
 
-  fn make_object(&mut self, bc: &mut BytecodeCtx, dst: RegId, tag: Tag, fld: RegId) {
-    bc.push(Bytecode::mobj(dst.into(), tag.into(), fld.into()));
+  fn make_object(&mut self, bc: &mut BytecodeCtx, dst: RegId, tag: Tag, src: RegId) {
+    bc.push(Bytecode::mobj(dst.into(), tag.into(), src.into()));
   }
 
   fn get_value_may_have_effect(&mut self, bc: &mut BytecodeCtx, opr: Value) {
@@ -483,7 +483,7 @@ impl<'a> CodeGenCtx<'a> {
     l2: Label,
     next: Control,
   ) {
-    self.emit_test(bc, test, false);
+    self.emit_test(bc, test, true);
     bc.push_relocate(l2);
     bc.push(Bytecode::jmp(0i16.into()));
     if c1 != next {

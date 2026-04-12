@@ -238,6 +238,7 @@ pub fn define_bytecode(input: TokenStream) -> TokenStream {
 #[cfg(feature = "gen-c-bclist")]
 fn generate_c_header(entries: &[BytecodeEntry]) {
   let mut content = String::new();
+  content.push_str("// clang-format off\n");
   content.push_str("#define OPS(_) \\\n");
 
   for entry in entries {
