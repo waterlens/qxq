@@ -106,7 +106,10 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
             codegen.emit_tree(&mut bc);
             let image = bc.finalize();
 
-            print_thunks(&image);
+            match runtime::execute(image, Rc::clone(&diag)) {
+              Ok(result) => println!("{result}"),
+              Err(e) => diag.report_err(&e),
+            }
             rl.add_history_entry(line.as_str())?;
           }
           Err(e) => diag.report_err(&e),

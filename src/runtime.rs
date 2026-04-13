@@ -1,7 +1,7 @@
 use std::{ffi::CStr, ptr::NonNull, rc::Rc};
 
 use crate::{
-  bytecode::{BinaryRepr, Bytecode, BytecodeImage, Constant, Operands, Operator, Tag, Thunk},
+  bytecode::{BinaryRepr, Bytecode, BytecodeImage, Constant, Operator, Thunk},
   diagnostic::{Diagnostic, Result},
   vm,
 };
