@@ -1,4 +1,4 @@
-(* RUN: {nonexistent_cmd|cargo run --} %s | grep "constants::\[" *)
+(* RUN: {nonexistent_cmd|cargo run -- --inspect} %s | grep "constants::\[" *)
 10
 (* EXPECT:
    constants::[

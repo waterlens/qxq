@@ -81,6 +81,7 @@ def main():
             else:
                 # Traditional test mode (--test)
                 run_mode = "TRADITIONAL"
+                cmd_args = ["--inspect", str(file)]
                 # Always run in traditional mode unless explicitly told to skip elsewhere
 
             if skip:

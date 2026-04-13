@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run --} %s *)
+(* RUN: {qxq|cargo run -- --inspect} %s *)
 1 + 2 * 3 - 4 / 5;
 (1 + 2) * 3;
 +1 - 2;
@@ -67,5 +67,5 @@
    loadc        r1, @0
    setc         r0, #0
    cmp.ne.dd    r0, r1
-   retn         r0, #0
+   ret          r0
 *)

@@ -1,4 +1,4 @@
-(* RUN: bash -c "diff <({qxq|cargo run --} %s --no-tree) <({qxq|cargo run --} %s --dump - | {qxq|cargo run --} --load -) || true" *)
+(* RUN: bash -c "diff <({qxq|cargo run -- --inspect} %s --no-tree) <({qxq|cargo run -- --inspect} %s --dump - | {qxq|cargo run -- --inspect --load} -) || true" *)
 let s = "qx";
 let i = 100;
 let f = fn (x)

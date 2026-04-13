@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run --} %s *)
+(* RUN: {qxq|cargo run -- --inspect} %s *)
 if 1 < 2 then 3 else 4 end;
 9 / 10
 (* EXPECT:
@@ -20,5 +20,5 @@ if 1 < 2 then 3 else 4 end;
    loadc        r0, @2
    loadc        r1, @3
    div.dd       r0, r0, r1
-   retn         r0, #0
+   ret          r0
 *)

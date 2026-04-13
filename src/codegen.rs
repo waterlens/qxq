@@ -428,7 +428,7 @@ impl<'a> CodeGenCtx<'a> {
         let Some(r) = v else {
           self.diagnostic.ice("return without a value");
         };
-        bc.push(Bytecode::retn(r.into(), 0.into()))
+        bc.push(Bytecode::ret(r.into()))
       }
       End => unreachable!("end control can only be used for hinting"),
     }
@@ -1099,7 +1099,7 @@ mod tests {
       r#"
     let f = 1; (1, f)
     "#,
-      "thunk::__top_thunk__ params::0 regs::3 captured::[]\nconstants::[\n  @0: 1\n]\nloadc        r0, @0\nloadc        r1, @0\nmove         r2, r0\nwrap         r1, k1, #2\nretn         r1, #0\n",
+      "thunk::__top_thunk__ params::0 regs::3 captured::[]\nconstants::[\n  @0: 1\n]\nloadc        r0, @0\nloadc        r1, @0\nmove         r2, r0\nwrap         r1, k1, #2\nret          r1\n",
     );
   }
 }

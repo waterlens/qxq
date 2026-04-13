@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run --} %s *)
+(* RUN: {qxq|cargo run -- --inspect} %s *)
 fn () 1 end;
 
 fn (x) x end;
@@ -17,21 +17,21 @@ add(1, 2)
      @0: 1
    ]
    loadc        r0, @0
-   retn         r0, #0
+   ret          r0
    
    --- Thunk ---
    thunk::fn params::1 regs::1 captured::[]
-   retn         r0, #0
+   ret          r0
    
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    add.dd       r2, r0, r1
-   retn         r2, #0
+   ret          r2
    
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    add.dd       r2, r0, r1
-   retn         r2, #0
+   ret          r2
    
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::4 captured::[]
@@ -47,5 +47,5 @@ add(1, 2)
    loadc        r2, @0
    loadc        r3, @1
    apply        r1, #2
-   retn         r1, #0
+   ret          r1
 *)

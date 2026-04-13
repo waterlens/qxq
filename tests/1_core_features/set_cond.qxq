@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run --} %s *)
+(* RUN: {qxq|cargo run -- --inspect} %s *)
 1 < 2;
 1 > 2;
 1 <= 2;
@@ -29,7 +29,7 @@ if choose(false, 0) then 30 else 40 end
    loadc        r1, @0
    setc         r1, #0
    cmp.eq.dd    r0, r1
-   retn         r1, #0
+   ret          r1
    
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
@@ -41,11 +41,11 @@ if choose(false, 0) then 30 else 40 end
    loadc        r2, @0
    setc         r2, #0
    cmp.eq.dd    r1, r2
-   retn         r2, #0
+   ret          r2
    loadc        r2, @0
    setc         r2, #0
    cmp.ne.dd    r1, r2
-   retn         r2, #0
+   ret          r2
    
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::5 captured::[]
@@ -95,7 +95,7 @@ if choose(false, 0) then 30 else 40 end
    cmp.not.f    r2, #0
    jmp          #2
    loadc        r2, @3
-   retn         r2, #0
+   ret          r2
    loadc        r2, @4
-   retn         r2, #0
+   ret          r2
 *)

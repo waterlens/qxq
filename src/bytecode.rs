@@ -417,13 +417,13 @@ impl BinaryRepr for OpABC {
 
 impl BinaryRepr for OpXYZ {
   fn dump(&self, buf: &mut [u8]) {
-    buf[0] = self.dst.into();
-    buf[1] = self.o1.into();
-    buf[2] = self.o2.into();
+    buf[0] = self.o1.into();
+    buf[1] = self.o2.into();
+    buf[2] = self.dst.into();
   }
 
   fn load(buf: &[u8]) -> DResult<Self> {
-    Ok(Self { dst: buf[0].into(), o1: buf[1].into(), o2: buf[2].into() })
+    Ok(Self { dst: buf[2].into(), o1: buf[0].into(), o2: buf[1].into() })
   }
 }
 
@@ -547,7 +547,7 @@ define_bytecode! {
   Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "apply", op.dst, op.o1),
   Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, fn{}", "call", op.dst, op.o1),
   Retu   (N)                fn retu()                             {}              => ("{:<12}", "retu"),
-  Ret    (AS, OpAS, op)     fn ret(dst: OpS24)                    { dst }         => ("{:<12} r{}", "ret", op.dst),
+  Ret    (ABC, OpABC, op)   fn ret(src: Op8)                      { dst: src, o1: 0.into(), o2: 0.into() } => ("{:<12} r{}", "ret", op.dst),
   Retn   (AB, OpAB, op)     fn retn(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, #{}", "retn", op.dst, op.o1),
   Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("{:<12} r{}, fn{}", "clos", op.dst, op.o1),
   WObj   (ABC, OpABC, op)   fn wobj(dst: Op8, tag: Op8, n: Op8)   { dst, o1: tag, o2: n } => ("{:<12} r{}, k{}, #{}", "wrap", op.dst, op.o1, op.o2),

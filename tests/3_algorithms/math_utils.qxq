@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run --} %s *)
+(* RUN: {qxq|cargo run -- --inspect} %s *)
 let abs = fn (n)
   if n < 0 then -n else n end
 end;
@@ -34,8 +34,8 @@ is_even(pow(2, 10))
    cmp.lt.dd    r0, r1
    jmp          #2
    neg.d        r1, r0
-   retn         r1, #0
-   retn         r0, #0
+   ret          r1
+   ret          r0
    
    --- Thunk ---
    thunk::fn params::2 regs::6 captured::[r0 as ^0, r1 as ^1, r2 as ^2]
@@ -45,14 +45,14 @@ is_even(pow(2, 10))
    loadf        r2, ^1
    cmp.ge.dd    r0, r2
    jmp          #1
-   retn         r1, #0
+   ret          r1
    loadf        r2, ^2
    loadc        r5, @0
    add.dd       r3, r0, r5
    loadf        r5, ^0
    mul.dd       r4, r1, r5
    apply        r2, #2
-   retn         r2, #0
+   ret          r2
    
    --- Thunk ---
    thunk::fn params::2 regs::6 captured::[]
@@ -65,23 +65,23 @@ is_even(pow(2, 10))
    loadc        r4, @0
    loadc        r5, @1
    apply        r3, #2
-   retn         r3, #0
+   ret          r3
    
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
    cmp.not.f    r0, #0
    jmp          #2
    mobj         r1, k2, r0
-   retn         r1, #0
+   ret          r1
    mobj         r1, k3, r0
-   retn         r1, #0
+   ret          r1
    
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    div.dd       r2, r0, r1
    mul.dd       r2, r1, r2
    sub.dd       r2, r0, r2
-   retn         r2, #0
+   ret          r2
    
    --- Thunk ---
    thunk::fn params::1 regs::4 captured::[r3 as ^0]
@@ -96,7 +96,7 @@ is_even(pow(2, 10))
    loadc        r2, @1
    setc         r1, #0
    cmp.eq.dd    r1, r2
-   retn         r1, #0
+   ret          r1
    
    --- Thunk ---
    thunk::fn params::1 regs::5 captured::[r4 as ^0, r2 as ^1]
@@ -106,7 +106,7 @@ is_even(pow(2, 10))
    apply        r3, #1
    move         r2, r3
    apply        r1, #1
-   retn         r1, #0
+   ret          r1
    
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::11 captured::[]
@@ -127,5 +127,5 @@ is_even(pow(2, 10))
    apply        r8, #2
    move         r7, r8
    apply        r6, #1
-   retn         r6, #0
+   ret          r6
 *)

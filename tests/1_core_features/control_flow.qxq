@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run --} %s *)
+(* RUN: {qxq|cargo run -- --inspect} %s *)
 if 1 > 0 then
   "greater"
 else
@@ -30,7 +30,7 @@ if true then 1 else 0 end
    cmp.not.f    r0, #0
    jmp          #2
    loadc        r0, @0
-   retn         r0, #0
+   ret          r0
    loadc        r0, @1
-   retn         r0, #0
+   ret          r0
 *)

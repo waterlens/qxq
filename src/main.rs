@@ -36,6 +36,9 @@ struct Cli {
   load: bool,
 
   #[arg(long)]
+  inspect: bool,
+
+  #[arg(long)]
   no_tree: bool,
 
   #[arg(value_name = "INPUT_FILES")]
@@ -153,7 +156,11 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           let mut loader = loader::Loader::new(file, Rc::clone(&diag));
           loader.load()?
         };
-        print_thunks(&image);
+        if cli.inspect {
+          print_thunks(&image);
+        } else {
+          println!("{}", runtime::execute(image, Rc::clone(&diag))?);
+        }
         continue;
       }
       let content =
@@ -162,7 +169,7 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
       let parser = parser::Parser::new(&arena, Rc::clone(&diag), &content);
       let tree = diag.context(parser.parse(), format!("failed to parse {}", file_path))?;
 
-      if cli.dump.is_none() && !cli.no_tree {
+      if cli.inspect && cli.dump.is_none() && !cli.no_tree {
         print_tree(&tree);
       }
 
@@ -184,7 +191,11 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           diag.context(fs::write(dump_path, &data), format!("failed to write {}", dump_path))?;
         }
       } else {
-        print_thunks(&image);
+        if cli.inspect {
+          print_thunks(&image);
+        } else {
+          println!("{}", runtime::execute(image, Rc::clone(&diag))?);
+        }
       }
     }
   } else if cli.dump.is_none() {

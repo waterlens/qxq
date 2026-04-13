@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run --} %s *)
+(* RUN: {qxq|cargo run -- --inspect} %s *)
 let x = 1;
 let y = 2;
 x + y;
@@ -26,13 +26,13 @@ factorial(5)
    cmp.lt.dd    r0, r1
    jmp          #2
    loadc        r1, @1
-   retn         r1, #0
+   ret          r1
    loadf        r1, ^0
    loadc        r3, @1
    sub.dd       r2, r0, r3
    apply        r1, #1
    mul.dd       r1, r0, r1
-   retn         r1, #0
+   ret          r1
    
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::5 captured::[]
@@ -48,5 +48,5 @@ factorial(5)
    move         r3, r2
    loadc        r4, @2
    apply        r3, #1
-   retn         r3, #0
+   ret          r3
 *)

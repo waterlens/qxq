@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run --} %s *)
+(* RUN: {qxq|cargo run -- --inspect} %s *)
 let compose = fn (f, g) fn (x) f(g(x)) end end;
 let inc = fn(x) x + 1 end;
 let inc2 = compose(inc, inc);
@@ -15,12 +15,12 @@ inc2(5)
    apply        r3, #1
    move         r2, r3
    apply        r1, #1
-   retn         r1, #0
+   ret          r1
    
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    clos         r2, fn0
-   retn         r2, #0
+   ret          r2
    
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
@@ -29,7 +29,7 @@ inc2(5)
    ]
    loadc        r1, @0
    add.dd       r1, r0, r1
-   retn         r1, #0
+   ret          r1
    
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::6 captured::[]
@@ -46,5 +46,5 @@ inc2(5)
    move         r3, r2
    loadc        r4, @0
    apply        r3, #1
-   retn         r3, #0
+   ret          r3
 *)

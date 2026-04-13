@@ -1,0 +1,10 @@
+(* RUN: {qxq|cargo run --} %s *)
+let x = 1 + 2;
+if x == 3 then
+  x + 4
+else
+  0
+end
+(* EXPECT:
+   7
+*)
