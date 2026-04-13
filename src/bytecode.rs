@@ -568,7 +568,8 @@ define_bytecode! {
   RemDD  (XYZ, OpXYZ, op)   fn remdd(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, r{}", "rem.dd", op.dst, op.o1, op.o2),
   NegD   (XYZ, OpXYZ, op)   fn negd(dst: Op8, o1: Op8)            { dst, o1, o2: 0.into() } => ("{:<12} r{}, r{}", "neg.d", op.dst, op.o1),
 
-  SetCond (ABS, OpABS, op)  fn setcond(dst: Op8, o1: OpS16)       { dst, o1 }     => ("{:<12} r{}", if op.o1.0 >= 0 { "setc" } else { "setcj"}, op.dst),
+  SetCond  (ABS, OpABS, op) fn setcond(dst: Op8, o1: OpS16)       { dst, o1 }     => ("{:<12} r{}, #{}", "setc", op.dst, op.o1),
+  SetCondJ (ABS, OpABS, op) fn setcondj(dst: Op8, o1: OpS16)      { dst, o1 }     => ("{:<12} r{}, #{}", "setcj", op.dst, op.o1),
 
   CmpNotF (Cond, OpCond, op) fn cmpnotf(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, #{}", "cmp.not.f", op.dst, op.o1),
   CmpEqDI (Cond, OpCond, op) fn cmpeqdi(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, #{}", "cmp.eq.di", op.dst, op.o1),
@@ -677,8 +678,10 @@ impl ThunkCtx {
   pub fn reverse_setcond(&mut self, pc: u32) -> bool {
     let new_opc = match self.fetch(pc) {
       Bytecode(Operator::SetCond, Operands::ABS(OpABS { dst, o1 })) => {
-        assert_ne!(o1.0, 0); // 0 implies only conditional set and no branch
-        Bytecode::setcond(dst, (-o1.0).into())
+        Bytecode::setcond(dst, (if o1.0 == 0 { 1 } else { 0 }).into())
+      }
+      Bytecode(Operator::SetCondJ, Operands::ABS(OpABS { dst, o1 })) => {
+        Bytecode::setcondj(dst, (if o1.0 == 0 { 1 } else { 0 }).into())
       }
       _ => return false,
     };

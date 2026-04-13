@@ -94,7 +94,7 @@ is_even(pow(2, 10))
    loadc        r3, @0
    apply        r1, #2
    loadc        r2, @1
-   setc         r1
+   setc         r1, #0
    cmp.eq.dd    r1, r2
    retn         r1, #0
    

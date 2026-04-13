@@ -84,7 +84,9 @@ impl<R: Read> Loader<R> {
     let mut code = Vec::with_capacity(ninstrs as usize);
     for _ in 0..ninstrs {
       code.push(
-        self.diag.context(BinaryRepr::load(&data[cursor..cursor + 4]), "failed to load bytecode")?,
+        self
+          .diag
+          .context(BinaryRepr::load(&data[cursor..cursor + 4]), "failed to load bytecode")?,
       );
       cursor += 4;
     }

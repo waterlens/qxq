@@ -279,7 +279,11 @@ impl<'a> CodeGenCtx<'a> {
 
   fn reify_test(&mut self, bc: &mut BytecodeCtx, r: RegId, test: Test, fuse_br: &mut Fusion) {
     fuse_br.position = bc.pc();
-    bc.push(Bytecode::setcond(r.into(), if fuse_br.enabled { i16::MAX.into() } else { 0.into() }));
+    bc.push(if fuse_br.enabled {
+      Bytecode::setcondj(r.into(), 0.into())
+    } else {
+      Bytecode::setcond(r.into(), 0.into())
+    });
     // if fuse_br enabled, the actual conditional instruction is emitted by the other procedure
     if !fuse_br.enabled {
       self.emit_test(bc, test, false);
@@ -462,15 +466,15 @@ impl<'a> CodeGenCtx<'a> {
     bc: &mut BytecodeCtx,
     value: Option<RegId>,
     test: Test,
-    l1: Label,
-    c2: Control,
+    c1: Control,
+    l2: Label,
     next: Control,
   ) {
     self.emit_test(bc, test, false);
-    bc.push_relocate(l1);
+    bc.push_relocate(l2);
     bc.push(Bytecode::jmp(0i16.into()));
-    if c2 != next {
-      self.emit_jump(bc, c2, value);
+    if c1 != next {
+      self.emit_jump(bc, c1, value);
     }
   }
 
@@ -479,15 +483,40 @@ impl<'a> CodeGenCtx<'a> {
     bc: &mut BytecodeCtx,
     value: Option<RegId>,
     test: Test,
-    c1: Control,
-    l2: Label,
+    l1: Label,
+    c2: Control,
     next: Control,
   ) {
+    debug_assert!(Self::can_emit_backward_test(test));
     self.emit_test(bc, test, true);
-    bc.push_relocate(l2);
+    bc.push_relocate(l1);
     bc.push(Bytecode::jmp(0i16.into()));
-    if c1 != next {
-      self.emit_jump(bc, c1, value);
+    if c2 != next {
+      self.emit_jump(bc, c2, value);
+    }
+  }
+
+  fn can_emit_backward_test(test: Test) -> bool {
+    matches!(test, Test::EqImm(..) | Test::Equal(..) | Test::NotEq(..) | Test::NotF(..))
+  }
+
+  fn emit_safe_test(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    value: Option<RegId>,
+    test: Test,
+    c1: Control,
+    c2: Control,
+    next: Control,
+  ) {
+    let skip = bc.fresh_label();
+    self.emit_test(bc, test, false);
+    bc.push_relocate(skip);
+    bc.push(Bytecode::jmp(0i16.into()));
+    self.emit_jump(bc, c1, value);
+    bc.push_label(skip);
+    if c2 != next {
+      self.emit_jump(bc, c2, value);
     }
   }
 
@@ -510,18 +539,24 @@ impl<'a> CodeGenCtx<'a> {
     next: Control,
   ) {
     match (c1, c2) {
-      (Control::Pos(l1), Control::Return) => self.emit_forward_test(bc, value, test, l1, c2, next),
+      (Control::Return, Control::Pos(l2)) => self.emit_forward_test(bc, value, test, c1, l2, next),
       (Control::Pos(l1), Control::Pos(l2)) => {
-        if c2 == next {
-          self.emit_forward_test(bc, value, test, l1, c2, next);
-        } else {
-          self.emit_backward_test(bc, value, test, c1, l2, next);
+        if c1 == next {
+          self.emit_forward_test(bc, value, test, c1, l2, next);
+        } else if Self::can_emit_backward_test(test) {
+          self.emit_backward_test(bc, value, test, l1, c2, next);
           self.reverse_setcond(bc, fuse_br);
+        } else {
+          self.emit_safe_test(bc, value, test, c1, c2, next);
         }
       }
-      (Control::Return, Control::Pos(l2)) => {
-        self.emit_backward_test(bc, value, test, c1, l2, next);
-        self.reverse_setcond(bc, fuse_br);
+      (Control::Pos(l1), Control::Return) => {
+        if Self::can_emit_backward_test(test) {
+          self.emit_backward_test(bc, value, test, l1, c2, next);
+          self.reverse_setcond(bc, fuse_br);
+        } else {
+          self.emit_safe_test(bc, value, test, c1, c2, next);
+        }
       }
       _ => unreachable!("return on both branches"),
     }
