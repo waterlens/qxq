@@ -65,6 +65,7 @@ impl Affinity {
     "-" => (Self::INFIX_START + 3, Self::INFIX_START + 4),
     "*" => (Self::INFIX_START + 5, Self::INFIX_START + 6),
     "/" => (Self::INFIX_START + 5, Self::INFIX_START + 6),
+    "%" => (Self::INFIX_START + 5, Self::INFIX_START + 6),
   };
   fn get_prefix(op: &str) -> Option<(u32, u32)> {
     Self::PREFIX.get(op).copied()

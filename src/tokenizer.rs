@@ -669,6 +669,7 @@ mod tests {
     test_tokenize("-", &[t(Op("-"), "-")]);
     test_tokenize("*", &[t(Op("*"), "*")]);
     test_tokenize("/", &[t(Op("/"), "/")]);
+    test_tokenize("%", &[t(Op("%"), "%")]);
     test_tokenize("=", &[t(Op("="), "=")]);
     test_tokenize(">", &[t(Op(">"), ">")]);
     test_tokenize("<", &[t(Op("<"), "<")]);

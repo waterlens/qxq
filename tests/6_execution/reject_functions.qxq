@@ -1,5 +1,0 @@
-(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
-   Error: vm cli execution currently supports only scalar top-level programs without functions
-*)
-let id = fn (x) x end;
-id

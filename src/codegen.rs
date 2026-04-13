@@ -670,6 +670,7 @@ impl<'a> CodeGenCtx<'a> {
         "-" => Bytecode::subdd(dst, o1, o2),
         "*" => Bytecode::muldd(dst, o1, o2),
         "/" => Bytecode::divdd(dst, o1, o2),
+        "%" => Bytecode::remdd(dst, o1, o2),
         _ => unreachable!("unknown binary operator: {}", op_str),
       }
     };
@@ -808,7 +809,7 @@ impl<'a> CodeGenCtx<'a> {
   ) {
     if let Expr::Op(op_str, _) = op {
       match op_str.0 {
-        "+" | "-" | "*" | "/" => {
+        "+" | "-" | "*" | "/" | "%" => {
           if args.len() == 2 {
             let (regs, n_temps) = self.eval_any_loc_args(bc, args);
             let (r1, r2) = (regs[0], regs[1]);
