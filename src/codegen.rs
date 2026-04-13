@@ -5,7 +5,7 @@ use indexmap::{IndexMap, IndexSet};
 use slotmap::SlotMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, FreeVarId, Label, Location, RegId, Tag},
+  bytecode::{Bytecode, BytecodeCtx, FloatBits, FreeVarId, Label, Location, RegId, Tag},
   diagnostic::Diagnostic,
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, SynTree},
   tokenizer::{Paired, TokenStr},
@@ -33,6 +33,7 @@ enum Value<'a> {
   Unit,
   BoolLiteral(bool),
   IntLiteral(i64),
+  FloatLiteral(FloatBits),
   StrLiteral(&'a str),
   Test(Test),
 }
@@ -260,6 +261,11 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::loadc(r.into(), idx.0.into()));
   }
 
+  fn reify_float_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, f: f64) {
+    let idx = bc.add_float(f);
+    bc.push(Bytecode::loadc(r.into(), idx.0.into()));
+  }
+
   fn reify_string_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, s: &str) {
     let idx = bc.add_str(s.to_string());
     bc.push(Bytecode::loadc(r.into(), idx.0.into()));
@@ -310,7 +316,7 @@ impl<'a> CodeGenCtx<'a> {
         self.get_temporary();
       }
       Loc(_) => (),
-      Unit | BoolLiteral(_) | IntLiteral(_) | StrLiteral(_) => (),
+      Unit | BoolLiteral(_) | IntLiteral(_) | FloatLiteral(_) | StrLiteral(_) => (),
       Test(test) => {
         let r = self.allocate_temporary();
         self.reify_test(bc, r, test, &mut Fusion::disabled());
@@ -343,6 +349,11 @@ impl<'a> CodeGenCtx<'a> {
       IntLiteral(i) => {
         let r = self.allocate_temporary();
         self.reify_int_literal(bc, r, i);
+        self.get_temporary()
+      }
+      FloatLiteral(f) => {
+        let r = self.allocate_temporary();
+        self.reify_float_literal(bc, r, f.0);
         self.get_temporary()
       }
       StrLiteral(s) => {
@@ -404,6 +415,7 @@ impl<'a> CodeGenCtx<'a> {
               self.make_object(bc, r, if b { Tag::TRUE } else { Tag::FALSE }, 0.into())
             }
             Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
+            Value::FloatLiteral(f) => self.reify_float_literal(bc, r, f.0),
             Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
             Value::Test(t) => self.reify_test(bc, r, t, fuse_br),
           }
@@ -588,7 +600,7 @@ impl<'a> CodeGenCtx<'a> {
           self.emit_branch(bc, None, test, Fusion::disabled(), c1, c2, next);
         }
       }
-      Loc(_) | Unit | BoolLiteral(_) | IntLiteral(_) | StrLiteral(_) => {
+      Loc(_) | Unit | BoolLiteral(_) | IntLiteral(_) | FloatLiteral(_) | StrLiteral(_) => {
         let mut disable_fu = Fusion::disabled();
         if let Some(loc) = dest {
           // not for Effect
@@ -862,6 +874,7 @@ impl<'a> CodeGenCtx<'a> {
     match expr {
       BoolLiteral(b, _) => Some(Value::BoolLiteral(*b)),
       IntLiteral(i, _) => Some(Value::IntLiteral(*i)),
+      FloatLiteral(f, _) => Some(Value::FloatLiteral(*f)),
       StrLiteral(s, _) => Some(Value::StrLiteral(s)),
       Ident(token_str, _) => {
         let loc = self.scope.get_bound(token_str).unwrap_or_else(|| {
@@ -891,6 +904,9 @@ impl<'a> CodeGenCtx<'a> {
       }
       IntLiteral(i, _) => {
         self.emit_store(bc, Value::IntLiteral(*i), data, control, next);
+      }
+      FloatLiteral(f, _) => {
+        self.emit_store(bc, Value::FloatLiteral(*f), data, control, next);
       }
       StrLiteral(s, _) => {
         self.emit_store(bc, Value::StrLiteral(s), data, control, next);

@@ -3,6 +3,7 @@ use hashbrown::HashMap;
 use indexmap::IndexMap;
 use qxq_macros::define_bytecode;
 use std::fmt::{self, Display};
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Tag(u8);
@@ -14,6 +15,7 @@ impl Tag {
   pub const TRUE: Self = Tag(3);
   pub const INT: Self = Tag(4);
   pub const STR: Self = Tag(5);
+  pub const FLOAT: Self = Tag(6);
 }
 
 impl From<u8> for Tag {
@@ -41,9 +43,34 @@ impl From<Tag> for u8 {
   }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct FloatBits(pub f64);
+
+impl PartialEq for FloatBits {
+  fn eq(&self, other: &Self) -> bool {
+    self.0.to_bits() == other.0.to_bits()
+  }
+}
+
+impl Eq for FloatBits {}
+
+impl Hash for FloatBits {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.0.to_bits().hash(state);
+  }
+}
+
+impl Display for FloatBits {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    // Use Debug format for f64 to ensure `.0` suffix on whole numbers
+    write!(f, "{:?}", self.0)
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constant {
   Int(i64),
+  Float(FloatBits),
   Str(String),
 }
 
@@ -58,28 +85,42 @@ impl Display for ConstantId {
 
 pub struct ConstantPool {
   pub ipool: IndexMap<i64, ConstantId>,
+  pub fpool: IndexMap<u64, ConstantId>,
   pub spool: IndexMap<String, ConstantId>,
 }
 
 impl ConstantPool {
   pub fn new() -> Self {
-    Self { ipool: IndexMap::new(), spool: IndexMap::new() }
+    Self { ipool: IndexMap::new(), fpool: IndexMap::new(), spool: IndexMap::new() }
+  }
+
+  fn next_id(&self) -> ConstantId {
+    ConstantId((self.ipool.len() + self.fpool.len() + self.spool.len()) as u16)
   }
 
   pub fn add_int(&mut self, n: i64) -> ConstantId {
-    let next_id = self.ipool.len() + self.spool.len();
-    *self.ipool.entry(n).or_insert_with(|| ConstantId(next_id as u16))
+    let next_id = self.next_id();
+    *self.ipool.entry(n).or_insert(next_id)
+  }
+
+  pub fn add_float(&mut self, f: f64) -> ConstantId {
+    let next_id = self.next_id();
+    *self.fpool.entry(f.to_bits()).or_insert(next_id)
   }
 
   pub fn add_str(&mut self, s: String) -> ConstantId {
-    let next_id = self.ipool.len() + self.spool.len();
-    *self.spool.entry(s).or_insert_with(|| ConstantId(next_id as u16))
+    let next_id = self.next_id();
+    *self.spool.entry(s).or_insert(next_id)
   }
 
   pub fn to_vec(&self) -> Box<[Constant]> {
-    let mut v = vec![Constant::Int(0); self.ipool.len() + self.spool.len()];
+    let total = self.ipool.len() + self.fpool.len() + self.spool.len();
+    let mut v = vec![Constant::Int(0); total];
     for (val, idx) in self.ipool.iter() {
       v[idx.0 as usize] = Constant::Int(*val);
+    }
+    for (bits, idx) in self.fpool.iter() {
+      v[idx.0 as usize] = Constant::Float(FloatBits(f64::from_bits(*bits)));
     }
     for (val, idx) in self.spool.iter() {
       v[idx.0 as usize] = Constant::Str(val.clone());
@@ -739,6 +780,7 @@ impl Display for Thunk {
       for (i, constant) in self.constants.iter().enumerate() {
         match constant {
           Constant::Int(n) => writeln!(f, "  @{}: {}", i, n)?,
+          Constant::Float(n) => writeln!(f, "  @{}: {}", i, n)?,
           Constant::Str(s) => writeln!(f, "  @{}: \"{}\"", i, s.escape_default())?,
         }
       }
@@ -803,6 +845,10 @@ impl BytecodeCtx {
 
   pub fn add_int(&mut self, n: i64) -> ConstantId {
     self.current.constants.add_int(n)
+  }
+
+  pub fn add_float(&mut self, f: f64) -> ConstantId {
+    self.current.constants.add_float(f)
   }
 
   pub fn add_str(&mut self, s: String) -> ConstantId {

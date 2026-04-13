@@ -46,6 +46,11 @@ fn encode_constant(constant: &Constant, diag: &Diagnostic) -> Result<vm::val_t> 
       let ok = unsafe { vm::vm_const_from_i64(*n, &mut out) };
       if ok { Ok(out) } else { diag.fail(format!("integer constant {n} exceeds vm range")) }
     }
+    Constant::Float(f) => {
+      let mut out = 0;
+      let ok = unsafe { vm::vm_const_from_f64(f.0, &mut out) };
+      if ok { Ok(out) } else { diag.fail("failed to encode float constant") }
+    }
     Constant::Str(_) => diag.fail("string constants are not supported by vm cli execution"),
   }
 }
@@ -80,6 +85,7 @@ impl ImageValidator {
           i32::try_from(*n)
             .map_err(|_| self.diag.error(format!("integer constant {n} exceeds vm range")))?;
         }
+        Constant::Float(_) => {}
         Constant::Str(_) => {
           return self.diag.fail("vm cli execution does not support string literals");
         }

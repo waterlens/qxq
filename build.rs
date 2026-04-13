@@ -50,6 +50,7 @@ fn main() {
     .allowlist_function("vm_free_function")
     .allowlist_function("vm_make_wrapper")
     .allowlist_function("vm_const_from_i64")
+    .allowlist_function("vm_const_from_f64")
     .allowlist_function("vm_format_result")
     .allowlist_function("vm_status_name")
     .allowlist_type("state")

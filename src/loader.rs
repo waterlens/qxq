@@ -117,6 +117,11 @@ impl<R: Read> Loader<R> {
           cursor += n;
           constants.push(Constant::Int(i64::from_le_bytes(val.to_le_bytes())));
         }
+        Tag::FLOAT => {
+          let (val, n) = uleb8::decode_uleb128(&data[cursor..]);
+          cursor += n;
+          constants.push(Constant::Float(crate::bytecode::FloatBits(f64::from_bits(val))));
+        }
         Tag::STR => {
           let (len, n) = uleb8::decode_uleb128(&data[cursor..]);
           cursor += n;

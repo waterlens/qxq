@@ -1,3 +1,4 @@
+use crate::bytecode::FloatBits;
 use crate::diagnostic::{Diagnostic, Result};
 use crate::sexp::{Sexp, SexpPool, ToSexp};
 use crate::tokenizer::{Keyword, Paired, Token, TokenStr, TokenTag, Tokenizer};
@@ -85,6 +86,7 @@ pub type ExprsRef<'a, I> = &'a [ExprRef<'a, I>];
 pub enum Expr<'a, I> {
   BoolLiteral(bool, I),
   IntLiteral(i64, I),
+  FloatLiteral(FloatBits, I),
   StrLiteral(&'a str, I),
   Ident(TokenStr<'a>, I),
   Op(TokenStr<'a>, I),
@@ -105,6 +107,7 @@ impl<I> ToSexp for Expr<'_, I> {
     match self {
       BoolLiteral(b, _) => pool.atom(if *b { "true" } else { "false" }),
       IntLiteral(n, _) => pool.atom(n.to_string()),
+      FloatLiteral(n, _) => pool.atom(n.to_string()),
       StrLiteral(s, _) => pool.atom(format!("\"{}\"", s.escape_default())),
       Ident(s, _) => pool.atom(s.as_ref()),
       Op(s, _) => pool.atom(s.as_ref()),
@@ -149,6 +152,7 @@ impl<I> Expr<'_, I> {
     match self {
       BoolLiteral(_, i)
       | IntLiteral(_, i)
+      | FloatLiteral(_, i)
       | StrLiteral(_, i)
       | Ident(_, i)
       | Op(_, i)
@@ -178,6 +182,10 @@ impl<'a> ToSexp for InfoExpr<'a> {
         true
       }
       IntLiteral(n, _) => {
+        parts.push(pool.atom(n.to_string()));
+        true
+      }
+      FloatLiteral(n, _) => {
         parts.push(pool.atom(n.to_string()));
         true
       }
@@ -536,6 +544,7 @@ impl<'a> Parser<'a> {
     let mut lhs_op = None;
     let mut lhs: ExprRef<'_, InfoKey> = match lhs_token.inner.tag {
       IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n.try_into()?, self.new_empty_info())),
+      FloatLiteral(f) => arena.alloc(ExprCon::FloatLiteral(f, self.new_empty_info())),
       StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s, self.new_empty_info())),
       Identifer => {
         let name = TokenStr::from_span(arena, lhs_token.inner.span);

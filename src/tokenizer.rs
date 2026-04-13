@@ -1,3 +1,4 @@
+use crate::bytecode::FloatBits;
 use crate::diagnostic::{Diagnostic, Result};
 use small_map::RapidSmallMap;
 use std::rc::Rc;
@@ -115,6 +116,7 @@ pub enum TokenTag<'a> {
   RawOp(&'a str),
   StrLiteral(&'a str),
   IntLiteral(i128),
+  FloatLiteral(FloatBits),
   PairedOpen(Paired),
   PairedClose(Paired),
   Error(TokenErr),
@@ -127,6 +129,7 @@ pub enum TokenErr {
   InvalidEscapeSequence,
   InvalidIntLiteralPrefix,
   InvalidIntLiteralDigit,
+  InvalidFloatLiteral,
   SymbolLikeOperatorFollowedByNonSpace,
   InvalidUnaryOperator,
   InvalidBinaryOperator,
@@ -142,6 +145,7 @@ impl std::fmt::Display for TokenErr {
       InvalidEscapeSequence => write!(f, "invalid escape sequence"),
       InvalidIntLiteralPrefix => write!(f, "invalid integer literal prefix"),
       InvalidIntLiteralDigit => write!(f, "invalid integer literal digit"),
+      InvalidFloatLiteral => write!(f, "invalid float literal"),
       SymbolLikeOperatorFollowedByNonSpace => {
         write!(f, "symbol-like operator followed by non-space")
       }
@@ -214,7 +218,8 @@ impl std::fmt::Display for Token<'_> {
       Op(op) => write!(f, "<op {op}>"),
       RawOp(op) => write!(f, "<raw op: `{op}`>"),
       StrLiteral(s) => write!(f, "<string literal {s:?}>"),
-      IntLiteral(i) => write!(f, "<string literal {i}>"),
+      IntLiteral(i) => write!(f, "<int literal {i}>"),
+      FloatLiteral(fl) => write!(f, "<float literal {fl}>"),
       PairedOpen(po) => write!(f, "<paired open {po}>"),
       PairedClose(pc) => write!(f, "<paired close {pc}>"),
       Error(err) => write!(f, "<error {err}>"),
@@ -364,7 +369,9 @@ where
     self.make_token(TokenTag::StrLiteral(self.arena.alloc_str(&buf)), loc)
   }
 
-  fn integer_literal(&'b mut self, loc: Loc, first_c: char, neg: bool) -> Token<'a> {
+  fn numeric_literal(&'b mut self, loc: Loc, first_c: char, neg: bool) -> Token<'a> {
+    use TokenErr::*;
+    let start = self.index; // position of first_c in buffer
     self.index += 1;
     let mut base: u32 = 10;
     let mut value: i128 = first_c.to_digit(10).unwrap().into();
@@ -385,7 +392,8 @@ where
           self.index += 1;
           base = 16;
         }
-        '0'..='9' => {}
+        '0'..='9' | '_' => {}
+        '.' | 'e' | 'E' => {} // handled below as float
         _ => return self.make_token(IntLiteral(value), loc),
       }
     }
@@ -395,7 +403,17 @@ where
         _ => return self.make_error(InvalidIntLiteralPrefix, loc),
       }
     }
-    while let '0'..='9' | 'a'..='f' | 'A'..='F' = self.ch() {
+    // Parse integer digits (with underscore separators)
+    loop {
+      match self.ch() {
+        '_' => {
+          self.index += 1;
+          continue;
+        }
+        '0'..='9' => {}
+        'a'..='f' | 'A'..='F' if base == 16 => {}
+        _ => break,
+      }
       let n = match self.ch().to_digit(base) {
         Some(n) => n as i128,
         None => {
@@ -403,12 +421,65 @@ where
           return self.make_error(InvalidIntLiteralDigit, loc);
         }
       };
-
       value *= base as i128;
       value = if neg { value - n } else { value + n };
       self.index += 1;
     }
+    // Float: only for decimal base, when followed by '.' + digit or 'e'/'E'
+    if base == 10
+      && (self.ch() == 'e'
+        || self.ch() == 'E'
+        || (self.ch() == '.' && self.ch_at(self.index + 1).is_ascii_digit()))
+    {
+      return self.float_literal_tail(loc, start, neg);
+    }
     self.make_token(IntLiteral(value), loc)
+  }
+
+  /// Continue parsing a float literal after the integer part has been consumed.
+  /// `start` is the buffer index of the first digit. The caller has already
+  /// advanced `self.index` past the integer digits.
+  fn float_literal_tail(&'b mut self, loc: Loc, start: usize, neg: bool) -> Token<'a> {
+    use TokenErr::*;
+    // Fractional part
+    if self.ch() == '.' {
+      self.index += 1;
+      while self.ch().is_ascii_digit() || self.ch() == '_' {
+        self.index += 1;
+      }
+    }
+    // Exponent part
+    if self.ch() == 'e' || self.ch() == 'E' {
+      self.index += 1;
+      if self.ch() == '+' || self.ch() == '-' {
+        self.index += 1;
+      }
+      if !self.ch().is_ascii_digit() {
+        return self.make_error(InvalidFloatLiteral, loc);
+      }
+      while self.ch().is_ascii_digit() || self.ch() == '_' {
+        self.index += 1;
+      }
+    }
+    // Parse from source slice, stripping underscores into a stack buffer.
+    // All float literal chars are ASCII, so one byte each.
+    let src = &self.buffer[start..self.index];
+    let mut buf = [0u8; 64];
+    let mut len = 0;
+    if neg {
+      buf[len] = b'-';
+      len += 1;
+    }
+    for &c in src {
+      if c != '_' {
+        buf[len] = c as u8;
+        len += 1;
+      }
+    }
+    match std::str::from_utf8(&buf[..len]).unwrap().parse::<f64>() {
+      Ok(f) => self.make_token(FloatLiteral(FloatBits(f)), loc),
+      Err(_) => self.make_error(InvalidFloatLiteral, loc),
+    }
   }
 
   fn ident(&'b mut self, loc: Loc) -> Token<'a> {
@@ -605,12 +676,12 @@ where
           return self.make_token(PairedClose(Brace), loc);
         }
         '"' => return self.string_literal(loc),
-        '0'..='9' => return self.integer_literal(loc, c, false),
+        '0'..='9' => return self.numeric_literal(loc, c, false),
         '+' | '-' => {
           let next_c = self.ch_at(self.index + 1);
           if next_c.is_ascii_digit() {
             self.index += 1;
-            return self.integer_literal(loc, next_c, c == '-');
+            return self.numeric_literal(loc, next_c, c == '-');
           }
           return self.operator(loc, c);
         }

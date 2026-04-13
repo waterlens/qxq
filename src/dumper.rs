@@ -54,6 +54,10 @@ impl Dumper {
             uleb8::encode_uleb128(Tag::INT.into(), &mut thunk_data);
             uleb8::encode_uleb128(u64::from_le_bytes(i.to_le_bytes()), &mut thunk_data);
           }
+          Constant::Float(f) => {
+            uleb8::encode_uleb128(Tag::FLOAT.into(), &mut thunk_data);
+            uleb8::encode_uleb128(f.0.to_bits(), &mut thunk_data);
+          }
           Constant::Str(s) => {
             uleb8::encode_uleb128(Tag::STR.into(), &mut thunk_data);
             uleb8::encode_uleb128(s.len() as u64, &mut thunk_data);
