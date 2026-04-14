@@ -26,7 +26,6 @@ pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
       native_functions.function_ptrs_mut(),
       image.thunks.len(),
       0,
-      native_functions.constants_mut().as_mut_ptr(),
       stack_slots,
       &mut result,
     )
@@ -114,32 +113,23 @@ impl ImageValidator {
 
 struct NativeFunctionSet {
   functions: Vec<OwnedFunction>,
-  constants: Vec<vm::val_t>,
 }
 
 impl NativeFunctionSet {
   fn new(thunks: &[Thunk], diag: &Diagnostic) -> Result<Self> {
     let mut functions = Vec::with_capacity(thunks.len());
-    let mut constants = Vec::new();
 
     for thunk in thunks {
-      functions.push(OwnedFunction::from_bytecode(&thunk.code, diag)?);
-      for constant in thunk.constants.iter() {
-        constants.push(encode_constant(constant, diag)?);
-      }
+      functions.push(OwnedFunction::from_thunk(thunk, diag)?);
     }
 
-    Ok(Self { functions, constants })
+    Ok(Self { functions })
   }
 
   fn function_ptrs_mut(&mut self) -> *mut *mut vm::function {
     // SAFETY: OwnedFunction is #[repr(transparent)] over NonNull<vm::function>,
     // which has the same layout as *mut vm::function.
     self.functions.as_mut_ptr().cast()
-  }
-
-  fn constants_mut(&mut self) -> &mut Vec<vm::val_t> {
-    &mut self.constants
   }
 }
 
@@ -153,9 +143,16 @@ struct OwnedFunction {
 }
 
 impl OwnedFunction {
-  fn from_bytecode(code: &[Bytecode], diag: &Diagnostic) -> Result<Self> {
-    let ops = code.iter().map(|bc| encode_bytecode(*bc)).collect::<Vec<_>>();
-    let ptr = unsafe { vm::vm_alloc_function(ops.as_ptr(), ops.len()) };
+  fn from_thunk(thunk: &Thunk, diag: &Diagnostic) -> Result<Self> {
+    let ops = thunk.code.iter().map(|bc| encode_bytecode(*bc)).collect::<Vec<_>>();
+    let constants = thunk
+      .constants
+      .iter()
+      .map(|constant| encode_constant(constant, diag))
+      .collect::<Result<Vec<_>>>()?;
+    let ptr = unsafe {
+      vm::vm_alloc_function(ops.as_ptr(), ops.len(), constants.as_ptr(), constants.len())
+    };
     let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm function"))?;
     Ok(Self { ptr })
   }
