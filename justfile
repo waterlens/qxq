@@ -30,8 +30,11 @@ update-expect *args:
 expect file:
     @cargo run -- --test-expect {{file}}
 
+unit-test:
+    @cargo test
+
 # Run all tests
-test-all: test (test "--release") test-expect (test-expect "--release")
+test-all: unit-test test (test "--release") test-expect (test-expect "--release")
 
 # Install tree-sitter highlighter
 highlight-install:

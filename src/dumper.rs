@@ -10,18 +10,28 @@ pub struct Dumper {
 }
 
 impl Dumper {
+  const BYTECODE_IMAGE_HEADER: usize = 8;
+  const BYTECODE_IMAGE_HEADER_SLICE_BEGIN: usize = 6;
+  const BYTECODE_IMAGE_HEADER_SLICE_END: usize = 8;
   pub fn new(image: BytecodeImage, diag: Rc<Diagnostic>) -> Self {
     Self { image, diag }
   }
 
   pub fn dump(&self) -> Result<Vec<u8>> {
     let mut data = Vec::new();
-    let mut thunk_table = Vec::new();
+    let mut thunk_data = vec![0, 0, 0, 0];
+
+    // Header (8 bytes)
+    data.extend_from_slice(b"QXQ\x07"); // Magic (4)
+    data.push(0x01); // Version (1)
+    data.push(0x00); // Flags (1)
+    data.extend_from_slice(&[0, 0]); // Checksum (2)
+    debug_assert_eq!(data.len(), Self::BYTECODE_IMAGE_HEADER);
 
     // Thunk Table
     for thunk in &self.image.thunks {
-      let mut thunk_data: Vec<u8> =
-        vec![0x00, thunk.nparams, thunk.nregs, thunk.fvlocs.len() as u8];
+      thunk_data.clear();
+      thunk_data.extend_from_slice(&[0x00, thunk.nparams, thunk.nregs, thunk.fvlocs.len() as u8]);
       uleb8::encode_uleb128(thunk.constants.len() as u64, &mut thunk_data);
       uleb8::encode_uleb128(thunk.code.len() as u64, &mut thunk_data);
 
@@ -67,23 +77,18 @@ impl Dumper {
       }
 
       // Write size and thunk data
-      uleb8::encode_uleb128(thunk_data.len() as u64, &mut thunk_table);
-      thunk_table.extend_from_slice(&thunk_data);
+      uleb8::encode_uleb128(thunk_data.len() as u64, &mut data);
+      data.extend_from_slice(&thunk_data);
     }
 
     // End of thunk table
-    uleb8::encode_uleb128(0, &mut thunk_table);
+    uleb8::encode_uleb128(0, &mut data);
 
     // Calculate Checksum of the thunk table
-    let checksum = checksum::crc16(&thunk_table);
+    let checksum = checksum::crc16(&data[Self::BYTECODE_IMAGE_HEADER..]);
+    data[Self::BYTECODE_IMAGE_HEADER_SLICE_BEGIN..Self::BYTECODE_IMAGE_HEADER_SLICE_END]
+      .copy_from_slice(&checksum.to_le_bytes());
 
-    // Header (8 bytes)
-    data.extend_from_slice(b"QXQ\x07"); // Magic (4)
-    data.push(0x01); // Version (1)
-    data.push(0x00); // Flags (1)
-    data.extend_from_slice(&checksum.to_le_bytes()); // Checksum (2)
-
-    data.extend_from_slice(&thunk_table);
     Ok(data)
   }
 }
