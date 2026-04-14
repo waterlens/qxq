@@ -10,6 +10,7 @@ pub mod runtime;
 pub mod sexp;
 pub mod tokenizer;
 pub mod uleb8;
+pub mod val;
 pub mod generated {
   pub mod vm;
 }

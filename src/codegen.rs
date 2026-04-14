@@ -9,6 +9,7 @@ use crate::{
   diagnostic::Diagnostic,
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, SynTree},
   tokenizer::{Paired, TokenStr},
+  val,
 };
 
 pub struct CodeGenCtx<'a> {
@@ -257,6 +258,15 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn reify_int_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, i: i64) {
+    if i < i32::MIN as i64 || i > i32::MAX as i64 {
+      if (val::MIN_SAFE_INTEGER..=val::MAX_SAFE_INTEGER).contains(&i) {
+        self.reify_float_literal(bc, r, i as f64);
+        return;
+      }
+      self
+        .diagnostic
+        .report(&format!("integer constant {} cannot be represented as i32 or f64", i));
+    }
     let idx = bc.add_int(i);
     bc.push(Bytecode::loadc(r.into(), idx.0.into()));
   }

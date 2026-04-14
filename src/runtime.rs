@@ -1,7 +1,7 @@
 use std::{ffi::CStr, ptr::NonNull, rc::Rc};
 
 use crate::{
-  bytecode::{BinaryRepr, Bytecode, BytecodeImage, Constant, Operator, Thunk},
+  bytecode::{BinaryRepr, Bytecode, BytecodeImage, Operator, Thunk},
   diagnostic::{Diagnostic, Result},
   vm,
 };
@@ -38,22 +38,6 @@ pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
   format_result(result, &diag)
 }
 
-fn encode_constant(constant: &Constant, diag: &Diagnostic) -> Result<vm::val_t> {
-  match constant {
-    Constant::Int(n) => {
-      let mut out = 0;
-      let ok = unsafe { vm::vm_const_from_i64(*n, &mut out) };
-      if ok { Ok(out) } else { diag.fail(format!("integer constant {n} exceeds vm range")) }
-    }
-    Constant::Float(f) => {
-      let mut out = 0;
-      let ok = unsafe { vm::vm_const_from_f64(f.0, &mut out) };
-      if ok { Ok(out) } else { diag.fail("failed to encode float constant") }
-    }
-    Constant::Str(_) => diag.fail("string constants are not supported by vm cli execution"),
-  }
-}
-
 struct ImageValidator {
   diag: Rc<Diagnostic>,
 }
@@ -76,19 +60,6 @@ impl ImageValidator {
     let thunk = &image.thunks[0];
     if !thunk.fvlocs.is_empty() {
       return self.diag.fail("vm cli execution does not support captured variables");
-    }
-
-    for constant in thunk.constants.iter() {
-      match constant {
-        Constant::Int(n) => {
-          i32::try_from(*n)
-            .map_err(|_| self.diag.error(format!("integer constant {n} exceeds vm range")))?;
-        }
-        Constant::Float(_) => {}
-        Constant::Str(_) => {
-          return self.diag.fail("vm cli execution does not support string literals");
-        }
-      }
     }
 
     for bc in thunk.code.iter() {
@@ -145,13 +116,13 @@ struct OwnedFunction {
 impl OwnedFunction {
   fn from_thunk(thunk: &Thunk, diag: &Diagnostic) -> Result<Self> {
     let ops = thunk.code.iter().map(|bc| encode_bytecode(*bc)).collect::<Vec<_>>();
-    let constants = thunk
-      .constants
-      .iter()
-      .map(|constant| encode_constant(constant, diag))
-      .collect::<Result<Vec<_>>>()?;
     let ptr = unsafe {
-      vm::vm_alloc_function(ops.as_ptr(), ops.len(), constants.as_ptr(), constants.len())
+      vm::vm_alloc_function(
+        ops.as_ptr(),
+        ops.len(),
+        thunk.constants.as_ptr().cast::<vm::val_t>(),
+        thunk.constants.len(),
+      )
     };
     let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm function"))?;
     Ok(Self { ptr })

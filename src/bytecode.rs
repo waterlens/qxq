@@ -1,4 +1,5 @@
 use crate::diagnostic::Result as DResult;
+use crate::val::Val;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 use qxq_macros::define_bytecode;
@@ -67,13 +68,6 @@ impl Display for FloatBits {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Constant {
-  Int(i64),
-  Float(FloatBits),
-  Str(String),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ConstantId(pub u16);
 
@@ -113,17 +107,22 @@ impl ConstantPool {
     *self.spool.entry(s).or_insert(next_id)
   }
 
-  pub fn to_vec(&self) -> Box<[Constant]> {
+  pub fn to_vec(&self) -> Box<[Val]> {
     let total = self.ipool.len() + self.fpool.len() + self.spool.len();
-    let mut v = vec![Constant::Int(0); total];
+    let mut v = vec![Val::empty(); total];
     for (val, idx) in self.ipool.iter() {
-      v[idx.0 as usize] = Constant::Int(*val);
+      debug_assert!(
+        *val >= i32::MIN as i64 && *val <= i32::MAX as i64,
+        "integer constant {} out of i32 range; should have been caught by frontend",
+        val
+      );
+      v[idx.0 as usize] = Val::from_i32(*val as i32);
     }
     for (bits, idx) in self.fpool.iter() {
-      v[idx.0 as usize] = Constant::Float(FloatBits(f64::from_bits(*bits)));
+      v[idx.0 as usize] = Val::from_f64(f64::from_bits(*bits));
     }
-    for (val, idx) in self.spool.iter() {
-      v[idx.0 as usize] = Constant::Str(val.clone());
+    for (s, idx) in self.spool.iter() {
+      v[idx.0 as usize] = Val::from_rust_str(s);
     }
     v.into_boxed_slice()
   }
@@ -668,8 +667,9 @@ pub struct Thunk {
   pub fvlocs: Box<[Location]>,
   pub nparams: u8,
   pub nregs: u8,
-  pub constants: Box<[Constant]>,
+  pub constants: Box<[Val]>,
 }
+
 
 impl ThunkCtx {
   pub fn new(name: &str, fvlocs: Box<[Location]>, nparams: u8) -> Self {
@@ -778,11 +778,7 @@ impl Display for Thunk {
     if !self.constants.is_empty() {
       writeln!(f, "constants::[")?;
       for (i, constant) in self.constants.iter().enumerate() {
-        match constant {
-          Constant::Int(n) => writeln!(f, "  @{}: {}", i, n)?,
-          Constant::Float(n) => writeln!(f, "  @{}: {}", i, n)?,
-          Constant::Str(s) => writeln!(f, "  @{}: \"{}\"", i, s.escape_default())?,
-        }
+        writeln!(f, "  @{}: {}", i, constant)?;
       }
       writeln!(f, "]")?;
     }

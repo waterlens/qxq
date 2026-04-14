@@ -1,9 +1,8 @@
-use crate::bytecode::{
-  BinaryRepr, BytecodeImage, Constant, FreeVarId, Location, RegId, Tag, Thunk,
-};
+use crate::bytecode::{BinaryRepr, BytecodeImage, FreeVarId, Location, RegId, Tag, Thunk};
 use crate::checksum;
 use crate::diagnostic::{Diagnostic, Result};
 use crate::uleb8;
+use crate::val::Val;
 use std::io::Read;
 use std::rc::Rc;
 
@@ -115,12 +114,13 @@ impl<R: Read> Loader<R> {
         Tag::INT => {
           let (val, n) = uleb8::decode_uleb128(&data[cursor..]);
           cursor += n;
-          constants.push(Constant::Int(i64::from_le_bytes(val.to_le_bytes())));
+          let i = i64::from_le_bytes(val.to_le_bytes());
+          constants.push(Val::from_i32(i as i32));
         }
         Tag::FLOAT => {
           let (val, n) = uleb8::decode_uleb128(&data[cursor..]);
           cursor += n;
-          constants.push(Constant::Float(crate::bytecode::FloatBits(f64::from_bits(val))));
+          constants.push(Val::from_f64(f64::from_bits(val)));
         }
         Tag::STR => {
           let (len, n) = uleb8::decode_uleb128(&data[cursor..]);
@@ -128,7 +128,7 @@ impl<R: Read> Loader<R> {
           let s = std::str::from_utf8(&data[cursor..cursor + len as usize]);
           let s = self.diag.context(s, "invalid UTF-8 string")?;
           cursor += len as usize;
-          constants.push(Constant::Str(s.to_string()));
+          constants.push(Val::from_rust_str(s));
         }
         _ => return self.diag.fail("unsupported constant tag"),
       }
