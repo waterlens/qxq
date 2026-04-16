@@ -1,0 +1,58 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+(* normal int comparisons in branch context *)
+let r = if 1 < 2 then 0 else 1 end;
+let r = r + if 2 < 1 then 2 else 0 end;
+let r = r + if 1 <= 1 then 0 else 3 end;
+let r = r + if 1 > 2 then 4 else 0 end;
+let r = r + if 2 > 1 then 0 else 5 end;
+let r = r + if 1 >= 1 then 0 else 6 end;
+let r = r + if 1 == 1 then 0 else 7 end;
+let r = r + if 1 == 2 then 8 else 0 end;
+let r = r + if 1 != 2 then 0 else 9 end;
+let r = r + if 1 != 1 then 10 else 0 end;
+
+(* normal float comparisons *)
+let r = r + if 1.5 < 2.5 then 0 else 11 end;
+let r = r + if 1.5 == 1.5 then 0 else 12 end;
+
+(* mixed int+float comparisons in branch context (fallback) *)
+let r = r + if 1 < 1.5 then 0 else 13 end;
+let r = r + if 1.5 > 1 then 0 else 14 end;
+let r = r + if 1 <= 1.0 then 0 else 15 end;
+let r = r + if 1.0 >= 1 then 0 else 16 end;
+let r = r + if 1 == 1.0 then 0 else 17 end;
+let r = r + if 1 != 1.0 then 18 else 0 end;
+let r = r + if 1 != 2.0 then 0 else 19 end;
+
+(* string equality in branch context (non-numeric eq fallback) *)
+let s = if "hello" == "hello" then 0 else 20 end;
+let r = r + s;
+let s = if "hello" == "world" then 21 else 0 end;
+let r = r + s;
+let s = if "hello" != "world" then 0 else 22 end;
+let r = r + s;
+let s = if "" == "" then 0 else 23 end;
+let r = r + s;
+
+(* setc context: comparison used as value then branched on *)
+let x = 1 < 1.5;
+let r = r + if x then 0 else 24 end;
+let x = 1 == 1.0;
+let r = r + if x then 0 else 25 end;
+let x = "abc" == "abc";
+let s = if x then 0 else 26 end;
+let r = r + s;
+let x = 2 > 1.0;
+let r = r + if x then 0 else 27 end;
+let x = 1 != 2.0;
+let r = r + if x then 0 else 28 end;
+let x = "a" != "b";
+let s = if x then 0 else 29 end;
+let r = r + s;
+
+r
+
+(* EXPECT:
+   0
+*)

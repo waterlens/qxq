@@ -1038,6 +1038,14 @@ impl<'a> CodeGenCtx<'a> {
         let l2 = bc.fresh_label();
         let c1 = Control::Pos(l1);
         let c2 = Control::Pos(l2);
+        // Pin a register when the destination is a temporary so that both
+        // branches write to the same slot.
+        let data = if data == DataDest::Loc(Location::Temporary) {
+          let r = self.allocate_temporary();
+          DataDest::Loc(Location::Slot(r))
+        } else {
+          data
+        };
         self.emit_expr(bc, c, DataDest::Effect, ControlDest::Branch(c1, c2), c1);
         bc.push_label(l1);
         self.emit_expr(bc, t, data, control, c2);

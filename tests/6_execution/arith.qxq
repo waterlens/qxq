@@ -1,0 +1,73 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+(* normal int arithmetic *)
+let r = if 3 + 4 == 7 then 0 else 1 end;
+let r = r + if 10 - 3 == 7 then 0 else 2 end;
+let r = r + if 10 * 20 == 200 then 0 else 3 end;
+let r = r + if 7 / 2 == 3 then 0 else 4 end;
+let r = r + if 7 % 3 == 1 then 0 else 5 end;
+
+(* floor division and euclidean remainder with negative operands *)
+let r = r + if (0 - 7) / 2 == (0 - 4) then 0 else 6 end;
+let r = r + if (0 - 7) % 3 == 2 then 0 else 7 end;
+
+(* normal float arithmetic *)
+let r = r + if 1.5 + 2.5 == 4.0 then 0 else 8 end;
+let r = r + if 10.0 - 3.5 == 6.5 then 0 else 9 end;
+let r = r + if 2.0 * 3.0 == 6.0 then 0 else 10 end;
+let r = r + if 7.0 / 2.0 == 3.5 then 0 else 11 end;
+
+(* int overflow: add *)
+let r = r + if 2147483647 + 1 == 2147483648.0 then 0 else 12 end;
+let r = r + if 2147483647 + 2147483647 == 4294967294.0 then 0 else 13 end;
+
+(* int overflow: sub *)
+let r = r + if (0 - 2147483648) - 1 == (0.0 - 2147483649.0) then 0 else 14 end;
+
+(* int overflow: mul *)
+let r = r + if 2147483647 * 2 == 4294967294.0 then 0 else 15 end;
+
+(* int overflow: div (INT32_MIN / -1) *)
+let r = r + if (0 - 2147483648) / (0 - 1) == 2147483648.0 then 0 else 16 end;
+
+(* mixed int+float: add *)
+let r = r + if 1000 + 0.5 == 1000.5 then 0 else 17 end;
+let r = r + if 0.5 + 1000 == 1000.5 then 0 else 18 end;
+
+(* mixed int+float: sub *)
+let r = r + if 10 - 0.5 == 9.5 then 0 else 19 end;
+let r = r + if 10.5 - 3 == 7.5 then 0 else 20 end;
+
+(* mixed int+float: mul *)
+let r = r + if 3 * 1.5 == 4.5 then 0 else 21 end;
+let r = r + if 1.5 * 3 == 4.5 then 0 else 22 end;
+
+(* mixed int+float: div *)
+let r = r + if 7 / 2.0 == 3.5 then 0 else 23 end;
+let r = r + if 7.0 / 2 == 3.5 then 0 else 24 end;
+
+(* mixed int+float: rem *)
+let r = r + if 7 % 2.5 == 2.0 then 0 else 25 end;
+let r = r + if 7.5 % 2 == 1.5 then 0 else 26 end;
+
+(* unary negation: normal *)
+let x = 5;
+let r = r + if -x == (0 - 5) then 0 else 27 end;
+
+(* unary negation: INT32_MIN overflow *)
+let x = 0 - 2147483648;
+let r = r + if -x == 2147483648.0 then 0 else 28 end;
+
+(* chain overflow *)
+let x = 2147483647;
+let r = r + if x * x > 0.0 then 0 else 29 end;
+
+(* safe integer boundary: 2^53 *)
+let r = r + if 9007199254740992.0 + 1.0 == 9007199254740992.0 then 0 else 30 end;
+let r = r + if 9007199254740992.0 - 1.0 == 9007199254740991.0 then 0 else 31 end;
+
+r
+
+(* EXPECT:
+   0
+*)
