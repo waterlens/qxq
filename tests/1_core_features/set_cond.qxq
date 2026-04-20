@@ -48,7 +48,7 @@ if choose(false, 0) then 30 else 40 end
    ret          r2
    
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::5 captured::[]
+   thunk::__top_thunk__ params::0 regs::7 captured::[]
    constants::[
      @0: 1
      @1: 2
@@ -83,14 +83,18 @@ if choose(false, 0) then 30 else 40 end
    clos         r0, fn0
    clos         r1, fn1
    move         r2, r0
-   loadc        r3, @0
+   loadi        r3, #0
+   loadi        r4, #0
+   loadc        r5, @0
    apply        r2, #1
    mobj         r3, k2, r0
    setc         r2, #0
    cmp.eq.dd    r2, r3
    move         r2, r1
-   mobj         r3, k2, r0
-   loadc        r4, @2
+   loadi        r3, #0
+   loadi        r4, #0
+   mobj         r5, k2, r0
+   loadc        r6, @2
    apply        r2, #2
    cmp.not.f    r2, #0
    jmp          #2

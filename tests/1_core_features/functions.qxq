@@ -34,7 +34,7 @@ add(1, 2)
    ret          r2
    
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::4 captured::[]
+   thunk::__top_thunk__ params::0 regs::6 captured::[]
    constants::[
      @0: 1
      @1: 2
@@ -44,8 +44,10 @@ add(1, 2)
    clos         r0, fn2
    clos         r0, fn3
    move         r1, r0
-   loadc        r2, @0
-   loadc        r3, @1
+   loadi        r2, #0
+   loadi        r3, #0
+   loadc        r4, @0
+   loadc        r5, @1
    apply        r1, #2
    ret          r1
 *)

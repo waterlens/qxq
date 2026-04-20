@@ -1,0 +1,49 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+let r = 0;
+
+(* simple direct call *)
+let add = fn (a, b) a + b end;
+let r = r + if add(1, 2) == 3 then 0 else 1 end;
+
+(* nested calls as arguments *)
+let inc = fn (x) x + 1 end;
+let square = fn (x) x * x end;
+let r = r + if square(inc(4)) == 25 then 0 else 2 end;
+
+(* first-class unary function argument *)
+let twice = fn (f, x) f(f(x)) end;
+let r = r + if twice(inc, 40) == 42 then 0 else 3 end;
+
+(* first-class binary function argument *)
+let apply2 = fn (f, x, y) f(x, y) end;
+let r = r + if apply2(add, 19, 23) == 42 then 0 else 4 end;
+
+(* return non-capturing functions from a branch *)
+let choose_id = fn (flag)
+  if flag then
+    fn (x) x end
+  else
+    fn (x) x + 1 end
+  end
+end;
+let f = choose_id(true);
+let g = choose_id(false);
+let r = r + if f(7) == 7 then 0 else 5 end;
+let r = r + if g(7) == 8 then 0 else 6 end;
+
+(* define and call a non-capturing function in another function body *)
+let nested = fn (a)
+  let double = fn (x) x * 2 end;
+  double(a) + 1
+end;
+let r = r + if nested(20) == 41 then 0 else 7 end;
+
+(* immediately invoked function literal *)
+let r = r + if (fn (x) x + 1 end)(2) == 3 then 0 else 8 end;
+
+r
+
+(* EXPECT:
+   0
+*)

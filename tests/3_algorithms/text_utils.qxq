@@ -37,7 +37,7 @@ repeat("ha", 3)
    ret          r1
    
    --- Thunk ---
-   thunk::fn params::2 regs::6 captured::[r2 as ^0, r1 as ^1, r0 as ^2]
+   thunk::fn params::2 regs::8 captured::[r2 as ^0, r1 as ^1, r0 as ^2]
    constants::[
      @0: 1
    ]
@@ -46,28 +46,32 @@ repeat("ha", 3)
    jmp          #1
    ret          r1
    loadf        r2, ^0
-   loadc        r5, @0
-   add.dd       r3, r0, r5
-   loadf        r5, ^2
-   add.dd       r4, r1, r5
+   loadi        r3, #0
+   loadi        r4, #0
+   loadc        r7, @0
+   add.dd       r5, r0, r7
+   loadf        r7, ^2
+   add.dd       r6, r1, r7
    apply        r2, #2
    ret          r2
    
    --- Thunk ---
-   thunk::fn params::2 regs::6 captured::[]
+   thunk::fn params::2 regs::8 captured::[]
    constants::[
      @0: 0
      @1: ""
    ]
    clos         r2, fn1
    move         r3, r2
-   loadc        r4, @0
-   loadc        r5, @1
+   loadi        r4, #0
+   loadi        r5, #0
+   loadc        r6, @0
+   loadc        r7, @1
    apply        r3, #2
    ret          r3
    
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::7 captured::[]
+   thunk::__top_thunk__ params::0 regs::9 captured::[]
    constants::[
      @0: "hello"
      @1: "world"
@@ -78,12 +82,16 @@ repeat("ha", 3)
    loadc        r1, @1
    clos         r2, fn0
    move         r3, r2
-   move         r4, r1
+   loadi        r4, #0
+   loadi        r5, #0
+   move         r6, r1
    apply        r3, #1
    clos         r3, fn2
    move         r4, r3
-   loadc        r5, @2
-   loadc        r6, @3
+   loadi        r5, #0
+   loadi        r6, #0
+   loadc        r7, @2
+   loadc        r8, @3
    apply        r4, #2
    ret          r4
 *)

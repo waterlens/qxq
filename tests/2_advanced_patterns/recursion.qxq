@@ -25,7 +25,7 @@ fib(10)
    --- Syntax Tree ---
    (block (let factorial (fn (n) (block (let-rec iter (fn (i acc) (if (> i n) acc (iter (+ i 1) (* acc i))))) (iter 1 1)))) (let-rec fib (fn (n) (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))) (factorial 5) (fib 10))
    --- Thunk ---
-   thunk::fn params::2 regs::6 captured::[r1 as ^0, r0 as ^1]
+   thunk::fn params::2 regs::8 captured::[r1 as ^0, r0 as ^1]
    constants::[
      @0: 1
    ]
@@ -34,26 +34,30 @@ fib(10)
    jmp          #1
    ret          r1
    loadf        r2, ^0
-   loadc        r5, @0
-   add.dd       r3, r0, r5
-   mul.dd       r4, r1, r0
+   loadi        r3, #0
+   loadi        r4, #0
+   loadc        r7, @0
+   add.dd       r5, r0, r7
+   mul.dd       r6, r1, r0
    apply        r2, #2
    ret          r2
    
    --- Thunk ---
-   thunk::fn params::1 regs::5 captured::[]
+   thunk::fn params::1 regs::7 captured::[]
    constants::[
      @0: 1
    ]
    clos         r1, fn0
    move         r2, r1
-   loadc        r3, @0
-   loadc        r4, @0
+   loadi        r3, #0
+   loadi        r4, #0
+   loadc        r5, @0
+   loadc        r6, @0
    apply        r2, #2
    ret          r2
    
    --- Thunk ---
-   thunk::fn params::1 regs::5 captured::[r1 as ^0]
+   thunk::fn params::1 regs::7 captured::[r1 as ^0]
    constants::[
      @0: 1
      @1: 2
@@ -63,18 +67,22 @@ fib(10)
    jmp          #1
    ret          r0
    loadf        r1, ^0
-   loadc        r3, @0
-   sub.dd       r2, r0, r3
+   loadi        r2, #0
+   loadi        r3, #0
+   loadc        r5, @0
+   sub.dd       r4, r0, r5
    apply        r1, #1
    loadf        r2, ^0
-   loadc        r4, @1
-   sub.dd       r3, r0, r4
+   loadi        r3, #0
+   loadi        r4, #0
+   loadc        r6, @1
+   sub.dd       r5, r0, r6
    apply        r2, #1
    add.dd       r1, r1, r2
    ret          r1
    
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::4 captured::[]
+   thunk::__top_thunk__ params::0 regs::6 captured::[]
    constants::[
      @0: 5
      @1: 10
@@ -82,10 +90,14 @@ fib(10)
    clos         r0, fn1
    clos         r1, fn2
    move         r2, r0
-   loadc        r3, @0
+   loadi        r3, #0
+   loadi        r4, #0
+   loadc        r5, @0
    apply        r2, #1
    move         r2, r1
-   loadc        r3, @1
+   loadi        r3, #0
+   loadi        r4, #0
+   loadc        r5, @1
    apply        r2, #1
    ret          r2
 *)

@@ -38,7 +38,7 @@ is_even(pow(2, 10))
    ret          r0
    
    --- Thunk ---
-   thunk::fn params::2 regs::6 captured::[r0 as ^0, r1 as ^1, r2 as ^2]
+   thunk::fn params::2 regs::8 captured::[r0 as ^0, r1 as ^1, r2 as ^2]
    constants::[
      @0: 1
    ]
@@ -47,23 +47,27 @@ is_even(pow(2, 10))
    jmp          #1
    ret          r1
    loadf        r2, ^2
-   loadc        r5, @0
-   add.dd       r3, r0, r5
-   loadf        r5, ^0
-   mul.dd       r4, r1, r5
+   loadi        r3, #0
+   loadi        r4, #0
+   loadc        r7, @0
+   add.dd       r5, r0, r7
+   loadf        r7, ^0
+   mul.dd       r6, r1, r7
    apply        r2, #2
    ret          r2
    
    --- Thunk ---
-   thunk::fn params::2 regs::6 captured::[]
+   thunk::fn params::2 regs::8 captured::[]
    constants::[
      @0: 0
      @1: 1
    ]
    clos         r2, fn1
    move         r3, r2
-   loadc        r4, @0
-   loadc        r5, @1
+   loadi        r4, #0
+   loadi        r5, #0
+   loadc        r6, @0
+   loadc        r7, @1
    apply        r3, #2
    ret          r3
    
@@ -84,14 +88,16 @@ is_even(pow(2, 10))
    ret          r2
    
    --- Thunk ---
-   thunk::fn params::1 regs::4 captured::[r3 as ^0]
+   thunk::fn params::1 regs::6 captured::[r3 as ^0]
    constants::[
      @0: 2
      @1: 0
    ]
    loadf        r1, ^0
-   move         r2, r0
-   loadc        r3, @0
+   loadi        r2, #0
+   loadi        r3, #0
+   move         r4, r0
+   loadc        r5, @0
    apply        r1, #2
    loadc        r2, @1
    setc         r1, #0
@@ -99,17 +105,21 @@ is_even(pow(2, 10))
    ret          r1
    
    --- Thunk ---
-   thunk::fn params::1 regs::5 captured::[r4 as ^0, r2 as ^1]
+   thunk::fn params::1 regs::9 captured::[r4 as ^0, r2 as ^1]
    loadf        r1, ^1
-   loadf        r3, ^0
-   move         r4, r0
-   apply        r3, #1
-   move         r2, r3
+   loadi        r2, #0
+   loadi        r3, #0
+   loadf        r5, ^0
+   loadi        r6, #0
+   loadi        r7, #0
+   move         r8, r0
+   apply        r5, #1
+   move         r4, r5
    apply        r1, #1
    ret          r1
    
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::11 captured::[]
+   thunk::__top_thunk__ params::0 regs::15 captured::[]
    constants::[
      @0: 2
      @1: 10
@@ -121,11 +131,15 @@ is_even(pow(2, 10))
    clos         r4, fn5
    clos         r5, fn6
    move         r6, r4
-   move         r8, r1
-   loadc        r9, @0
-   loadc        r10, @1
-   apply        r8, #2
-   move         r7, r8
+   loadi        r7, #0
+   loadi        r8, #0
+   move         r10, r1
+   loadi        r11, #0
+   loadi        r12, #0
+   loadc        r13, @0
+   loadc        r14, @1
+   apply        r10, #2
+   move         r9, r10
    apply        r6, #1
    ret          r6
 *)
