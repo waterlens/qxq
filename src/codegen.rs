@@ -980,10 +980,14 @@ impl<'a> CodeGenCtx<'a> {
         if *rec {
           self.update_symbols(name, r);
         }
-        self.emit_expr(bc, expr, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(next), next);
+        let l = bc.fresh_label();
+        let c = Control::Pos(l);
+        self.emit_expr(bc, expr, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(c), c);
         if !*rec {
           self.update_symbols(name, r);
         }
+        bc.push_label(l);
+        self.emit_store(bc, Value::Unit, data, control, next);
       }
       Fn { name, params, body, info } => {
         let freevars = &self.information.get(*info).unwrap().freevars;
