@@ -944,9 +944,7 @@ impl<'a> CodeGenCtx<'a> {
         );
         bc.push_label(l);
         let pad0 = self.allocate_temporary();
-        let pad1 = self.allocate_temporary();
         bc.push(Bytecode::loadi(pad0.into(), 0u16.into()));
-        bc.push(Bytecode::loadi(pad1.into(), 0u16.into()));
         let mut args_regs = Vec::with_capacity(args.len());
         args_regs.resize_with(args.len(), || self.allocate_temporary());
         for (elem, r) in (*args).iter().zip(args_regs.into_iter()) {
@@ -968,7 +966,6 @@ impl<'a> CodeGenCtx<'a> {
         for _ in 0..args_len {
           reg_pop!(self);
         }
-        reg_pop!(self);
         reg_pop!(self);
         bc.push(Bytecode::apply(func_reg.into(), args_len.into()));
         self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next);

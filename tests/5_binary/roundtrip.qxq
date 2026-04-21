@@ -16,11 +16,11 @@ let result = f(1);
    ---
    > thunk:: params::1 regs::4 captured::[^0 as ^0, r0 as ^1]
    10c10
-   < thunk::fn params::1 regs::6 captured::[r1 as ^0]
+   < thunk::fn params::1 regs::5 captured::[r1 as ^0]
    ---
-   > thunk:: params::1 regs::6 captured::[r1 as ^0]
-   20c20
-   < thunk::__top_thunk__ params::0 regs::8 captured::[]
+   > thunk:: params::1 regs::5 captured::[r1 as ^0]
+   19c19
+   < thunk::__top_thunk__ params::0 regs::7 captured::[]
    ---
-   > thunk:: params::0 regs::8 captured::[]
+   > thunk:: params::0 regs::7 captured::[]
 *)

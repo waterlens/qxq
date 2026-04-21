@@ -17,7 +17,7 @@ factorial(5)
    --- Syntax Tree ---
    (block (let x 1) (let y 2) (+ x y) (let-rec factorial (fn (n) (if (< n 2) 1 (* n (factorial (- n 1)))))) (factorial 5))
    --- Thunk ---
-   thunk::fn params::1 regs::6 captured::[r2 as ^0]
+   thunk::fn params::1 regs::5 captured::[r2 as ^0]
    constants::[
      @0: 2
      @1: 1
@@ -29,15 +29,14 @@ factorial(5)
    ret          r1
    loadf        r1, ^0
    loadi        r2, #0
-   loadi        r3, #0
-   loadc        r5, @1
-   sub.dd       r4, r0, r5
+   loadc        r4, @1
+   sub.dd       r3, r0, r4
    apply        r1, #1
    mul.dd       r1, r0, r1
    ret          r1
    
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::7 captured::[]
+   thunk::__top_thunk__ params::0 regs::6 captured::[]
    constants::[
      @0: 1
      @1: 2
@@ -49,8 +48,7 @@ factorial(5)
    clos         r2, fn0
    move         r3, r2
    loadi        r4, #0
-   loadi        r5, #0
-   loadc        r6, @2
+   loadc        r5, @2
    apply        r3, #1
    ret          r3
 *)
