@@ -106,14 +106,19 @@ impl<'a> Scope<'a> {
     self.bound.push(IndexSet::new());
   }
 
-  fn enter_function(&mut self, freevars: &[TokenStr<'a>]) {
+  fn enter_function(&mut self, self_name: &Option<TokenStr<'a>>, freevars: &[TokenStr<'a>]) {
+    let mut bound = indexmap::indexset! {};
+    if let Some(self_name) = self_name {
+      self.symbols.entry(*self_name).or_insert(vec![]).push(Location::FreeVar(FreeVarId(0)));
+      bound.insert(*self_name);
+    }
     for (i, name) in freevars.iter().enumerate() {
       let i: u16 =
         i.try_into().unwrap_or_else(|_| self.diagnostic.fatal("free variable id overflow"));
-      self.symbols.entry(*name).or_insert(vec![]).push(Location::FreeVar(FreeVarId(i)));
+      self.symbols.entry(*name).or_insert(vec![]).push(Location::FreeVar(FreeVarId(i + 1)));
+      bound.insert(*name);
     }
-    let freevars = IndexSet::from_iter(freevars.iter().cloned());
-    self.bound.push(freevars);
+    self.bound.push(bound);
   }
 
   fn leave(&mut self) {
@@ -980,7 +985,7 @@ impl<'a> CodeGenCtx<'a> {
           self.update_symbols(name, r);
         }
       }
-      Fn { params, body, info } => {
+      Fn { name, params, body, info } => {
         let freevars = &self.information.get(*info).unwrap().freevars;
         let mut fvlocs = vec![];
         for fv in freevars {
@@ -990,7 +995,7 @@ impl<'a> CodeGenCtx<'a> {
           assert!(!matches!(loc, Location::Temporary));
           fvlocs.push(loc);
         }
-        self.scope.enter_function(freevars);
+        self.scope.enter_function(name, freevars);
         self.enter_new_frame();
         for param in *params {
           let reg = self.allocate_temporary();

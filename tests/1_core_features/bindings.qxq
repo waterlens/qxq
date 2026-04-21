@@ -15,9 +15,9 @@ factorial(5)
 
 (* EXPECT:
    --- Syntax Tree ---
-   (block (let x 1) (let y 2) (+ x y) (let-rec factorial (fn (n) (if (< n 2) 1 (* n (factorial (- n 1)))))) (factorial 5))
+   (block (let x 1) (let y 2) (+ x y) (let-rec factorial (fn factorial (n) (if (< n 2) 1 (* n (factorial (- n 1)))))) (factorial 5))
    --- Thunk ---
-   thunk::fn params::1 regs::5 captured::[r2 as ^0]
+   thunk::fn params::1 regs::5 captured::[]
    constants::[
      @0: 2
      @1: 1

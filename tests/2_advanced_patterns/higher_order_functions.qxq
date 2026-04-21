@@ -8,10 +8,10 @@ inc2(5)
    --- Syntax Tree ---
    (block (let compose (fn (f g) (fn (x) (f (g x))))) (let inc (fn (x) (+ x 1))) (let inc2 (compose inc inc)) (inc2 5))
    --- Thunk ---
-   thunk::fn params::1 regs::7 captured::[r0 as ^0, r1 as ^1]
-   loadf        r1, ^0
+   thunk::fn params::1 regs::7 captured::[r0 as ^1, r1 as ^2]
+   loadf        r1, ^1
    loadi        r2, #0
-   loadf        r4, ^1
+   loadf        r4, ^2
    loadi        r5, #0
    move         r6, r0
    apply        r4, #1

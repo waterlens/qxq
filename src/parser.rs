@@ -93,7 +93,7 @@ pub enum Expr<'a, I> {
   OpApply { op: ExprRef<'a, I>, pair: Option<Paired>, args: ExprsRef<'a, I>, info: I },
   Apply { func: ExprRef<'a, I>, pair: Option<Paired>, args: ExprsRef<'a, I>, info: I },
   Bind { rec: bool, name: TokenStr<'a>, expr: ExprRef<'a, I>, info: I },
-  Fn { params: &'a [TokenStr<'a>], body: ExprRef<'a, I>, info: I },
+  Fn { name: Option<TokenStr<'a>>, params: &'a [TokenStr<'a>], body: ExprRef<'a, I>, info: I },
   Block(ExprsRef<'a, I>, I),
   If(ExprRef<'a, I>, ExprRef<'a, I>, ExprRef<'a, I>, I),
   Tuple(ExprsRef<'a, I>, I),
@@ -122,11 +122,19 @@ impl<I> ToSexp for Expr<'_, I> {
         pool.atom(name.as_ref()),
         expr.to_sexp(pool),
       ]),
-      Fn { params, body, info: _ } => pool.list(&[
-        pool.atom("fn"),
-        pool.list(params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>()),
-        body.to_sexp(pool),
-      ]),
+      Fn { name, params, body, info: _ } => match name {
+        Some(name) => pool.list(&[
+          pool.atom("fn"),
+          pool.atom(name),
+          pool.list(params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>()),
+          body.to_sexp(pool),
+        ]),
+        None => pool.list(&[
+          pool.atom("fn"),
+          pool.list(params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>()),
+          body.to_sexp(pool),
+        ]),
+      },
       Block(xs, _) => pool
         .non_empty_list(pool.atom("block"), xs.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>()),
       If(a, b, c, _) => {
@@ -217,8 +225,11 @@ impl<'a> ToSexp for InfoExpr<'a> {
         parts.push(InfoExpr { expr, map: self.map }.to_sexp(pool));
         false
       }
-      Fn { params, body, info: _ } => {
+      Fn { name, params, body, info: _ } => {
         parts.push(pool.atom("fn"));
+        if let Some(name) = name {
+          parts.push(pool.atom(name.as_ref()));
+        }
         parts.push(pool.list(params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>()));
         parts.push(InfoExpr { expr: body, map: self.map }.to_sexp(pool));
         false
@@ -303,6 +314,7 @@ struct FunctionCtx<'a> {
   scopes: Vec<IndexSet<TokenStr<'a>>>,
   local_counts: HashMap<TokenStr<'a>, u32>,
   freevars: IndexSet<TokenStr<'a>>,
+  self_name: Option<TokenStr<'a>>,
 }
 
 impl<'a> Parser<'a> {
@@ -311,15 +323,16 @@ impl<'a> Parser<'a> {
     let information: SlotMap<InfoKey, Info<'a>> = SlotMap::new();
     let mut parser =
       Self { arena, tokenizer, token: None, information, func_stack: Vec::with_capacity(4), diag };
-    parser.enter_function();
+    parser.enter_function(None);
     parser
   }
 
-  fn enter_function(&mut self) {
+  fn enter_function(&mut self, name: Option<TokenStr<'a>>) {
     self.func_stack.push(FunctionCtx {
       scopes: vec![IndexSet::new()],
       local_counts: HashMap::new(),
       freevars: IndexSet::new(),
+      self_name: name,
     });
   }
 
@@ -372,7 +385,8 @@ impl<'a> Parser<'a> {
   }
 
   fn use_var_in_ctx(ctx: &mut FunctionCtx<'a>, name: TokenStr<'a>) {
-    if ctx.local_counts.contains_key(&name) {
+    if matches!(ctx.self_name, Some(name2) if name2 == name) || ctx.local_counts.contains_key(&name)
+    {
       return; // Bound locally
     }
     // Not bound locally, so it's free
@@ -537,6 +551,52 @@ impl<'a> Parser<'a> {
     Ok(name)
   }
 
+  fn parse_function<'t>(&'t mut self, name: Option<TokenStr<'a>>) -> PeekExpr<'a> {
+    self.enter_function(name);
+    let _ = self.expect_paired_open(Paired::Parenthesis)?;
+
+    let mut params = vec![];
+
+    if !self.peek_paired_close(Paired::Parenthesis, false) {
+      let param_name = self.parse_ident(true)?;
+      params.push(param_name);
+
+      if self.peek_operator(",", false) {
+        while self.peek_operator(",", false) {
+          self.skip_token();
+
+          while self.peek_newline() {
+            self.skip_token();
+          }
+
+          let param_name = self.parse_ident(true)?;
+          params.push(param_name);
+        }
+      }
+    }
+
+    let _ = self.expect_paired_close(Paired::Parenthesis, false)?;
+
+    while self.peek_newline() {
+      self.skip_token();
+    }
+
+    let body = self.parse_exprs()?;
+
+    let _ = self.expect_keyword(Keyword::End, true)?;
+
+    let freevars = self.leave_function();
+
+    let func = self.arena.alloc(ExprCon::Fn {
+      name,
+      params: self.arena.alloc_slice_copy(&params),
+      body: body.inner,
+      info: self.new_info(freevars),
+    });
+
+    Ok(PeekResult { inner: func })
+  }
+
   fn parse_expr_with_affinity<'t>(&'t mut self, minaff: u32) -> PeekExpr<'a> {
     use TokenTag::*;
     let arena = self.arena;
@@ -613,48 +673,7 @@ impl<'a> Parser<'a> {
         })
       }
       Kw(kw) => match kw {
-        Keyword::Fn => {
-          self.enter_function();
-          let _ = self.expect_paired_open(Paired::Parenthesis)?;
-
-          let mut params = vec![];
-
-          if !self.peek_paired_close(Paired::Parenthesis, false) {
-            let param_name = self.parse_ident(true)?;
-            params.push(param_name);
-
-            if self.peek_operator(",", false) {
-              while self.peek_operator(",", false) {
-                self.skip_token();
-
-                while self.peek_newline() {
-                  self.skip_token();
-                }
-
-                let param_name = self.parse_ident(true)?;
-                params.push(param_name);
-              }
-            }
-          }
-
-          let _ = self.expect_paired_close(Paired::Parenthesis, false)?;
-
-          while self.peek_newline() {
-            self.skip_token();
-          }
-
-          let body = self.parse_exprs()?;
-
-          let _ = self.expect_keyword(Keyword::End, true)?;
-
-          let freevars = self.leave_function();
-
-          arena.alloc(ExprCon::Fn {
-            params: arena.alloc_slice_copy(&params),
-            body: body.inner,
-            info: self.new_info(freevars),
-          })
-        }
+        Keyword::Fn => self.parse_function(None)?.inner,
         Keyword::Let => {
           let is_rec = self.peek_keyword(Keyword::Rec, false);
           if is_rec {
@@ -669,7 +688,16 @@ impl<'a> Parser<'a> {
             self.declare_local(name);
           }
 
-          let body = self.parse_expr()?;
+          let body = if is_rec {
+            if self.peek_keyword(Keyword::Fn, false) {
+              self.skip_token();
+              self.parse_function(Some(name))?
+            } else {
+              return self.diag.fail("let rec is not followed by a function definiton");
+            }
+          } else {
+            self.parse_expr()?
+          };
 
           if !is_rec {
             self.declare_local(name);
@@ -949,7 +977,7 @@ mod tests {
   fn test_let_bindings() {
     test_parse_exprs("let a = 10 + 2", "(let a (+ 10 2))");
     test_parse_exprs("let x = 10", "(let x 10)");
-    test_parse_exprs("let rec x = 10 + 2", "(let-rec x (+ 10 2))");
+    test_parse_exprs("let rec x = fn (x) x end", "(let-rec x (fn x (x) x))");
   }
 
   #[test]
@@ -994,7 +1022,7 @@ mod tests {
     );
     test_parse_with_info(
       "fn (y) let rec f = fn (x) f(x) + y + z end; f(1) end",
-      "(fn (y) (block (let-rec f (fn (x) (+ (+ (f x) y) z) (freevars f y z))) (f 1)) (freevars z))",
+      "(fn (y) (block (let-rec f (fn f (x) (+ (+ (f x) y) z) (freevars y z))) (f 1)) (freevars z))",
     );
     test_parse_with_info(
       "fn (x) let y = 1; x + y + z end",

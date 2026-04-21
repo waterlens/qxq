@@ -6,7 +6,7 @@ use crate::{
   vm,
 };
 
-const STACK_HEADROOM_SLOTS: usize = 32;
+const STACK_HEADROOM_SLOTS: usize = 256;
 const RESULT_BUF_LEN: usize = 64;
 
 pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
@@ -85,6 +85,7 @@ impl ImageValidator {
   fn validate_bytecode(&self, bytecode: Bytecode) -> Result<()> {
     use Operator::*;
     match bytecode {
+      Bytecode(LoadF, Operands::AB(op)) if u16::from(op.o1) == 0 => Ok(()),
       Bytecode(LoadF | SetF, _) => {
         self.diag.fail(format!("illegal instruction: {}", bytecode))
       }
@@ -270,7 +271,7 @@ mod tests {
     let validator = ImageValidator::new(Rc::clone(&diag));
     let thunk = Thunk {
       name: String::new(),
-      code: vec![Bytecode::loadf(0.into(), 0.into())].into(),
+      code: vec![Bytecode::loadf(0.into(), 1.into())].into(),
       fvlocs: vec![].into(),
       nparams: 0,
       nregs: 1,

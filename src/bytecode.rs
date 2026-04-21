@@ -670,7 +670,6 @@ pub struct Thunk {
   pub constants: Box<[Val]>,
 }
 
-
 impl ThunkCtx {
   pub fn new(name: &str, fvlocs: Box<[Location]>, nparams: u8) -> Self {
     Self {
@@ -766,10 +765,10 @@ impl Display for Thunk {
     write!(f, "thunk::{} params::{} regs::{} captured::[", self.name, self.nparams, self.nregs)?;
     let mut fvlocs = self.fvlocs.iter();
     if let Some(fvloc) = fvlocs.next() {
-      write!(f, "{fvloc} as ^0")?;
+      write!(f, "{fvloc} as ^1")?;
 
       for (i, fvloc) in fvlocs.enumerate() {
-        let i = i + 1;
+        let i = i + 2;
         write!(f, ", {fvloc} as ^{i}")?;
       }
     }

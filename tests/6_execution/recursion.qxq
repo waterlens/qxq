@@ -1,0 +1,30 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+let rec factorial = fn (n)
+  if n < 2 then
+    1
+  else
+    n * factorial(n - 1)
+  end
+end;
+
+let rec fib = fn (n)
+  if n <= 1 then
+    n
+  else
+    fib(n - 1) + fib(n - 2)
+  end
+end;
+
+let r = 0;
+let r = r + if factorial(5) == 120 then 0 else 1 end;
+let r = r + if factorial(0) == 1 then 0 else 2 end;
+let r = r + if factorial(1) == 1 then 0 else 4 end;
+let r = r + if fib(10) == 55 then 0 else 8 end;
+let r = r + if fib(0) == 0 then 0 else 16 end;
+let r = r + if fib(1) == 1 then 0 else 32 end;
+r
+
+(* EXPECT:
+   0
+*)
