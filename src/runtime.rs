@@ -16,14 +16,14 @@ pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
   let max_nregs = image.thunks.iter().map(|t| t.nregs as usize).max().unwrap_or(0);
   let numobject = compute_numobject(&image);
 
-  let mut native_functions = NativeFunctionSet::new(&image.thunks, &diag)?;
-  let wrapper = OwnedFunction::wrapper(image.thunks.len() - 1, &diag)?;
+  let mut native_thunks = NativeThunkSet::new(&image.thunks, &diag)?;
+  let wrapper = OwnedThunk::wrapper(image.thunks.len() - 1, &diag)?;
   let mut result = 0u64;
   let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
   let status = unsafe {
     vm::vm_exec(
       wrapper.as_ptr(),
-      native_functions.function_ptrs_mut(),
+      native_thunks.thunk_ptrs_mut(),
       image.thunks.len(),
       numobject,
       stack_slots,
@@ -96,68 +96,69 @@ impl ImageValidator {
   }
 }
 
-struct NativeFunctionSet {
-  functions: Vec<OwnedFunction>,
+struct NativeThunkSet {
+  thunks: Vec<OwnedThunk>,
 }
 
-impl NativeFunctionSet {
+impl NativeThunkSet {
   fn new(thunks: &[Thunk], diag: &Diagnostic) -> Result<Self> {
-    let mut functions = Vec::with_capacity(thunks.len());
+    let mut native_thunks = Vec::with_capacity(thunks.len());
 
     for thunk in thunks {
-      functions.push(OwnedFunction::from_thunk(thunk, diag)?);
+      native_thunks.push(OwnedThunk::from_thunk(thunk, diag)?);
     }
 
-    Ok(Self { functions })
+    Ok(Self { thunks: native_thunks })
   }
 
-  fn function_ptrs_mut(&mut self) -> *mut *mut vm::function {
-    // SAFETY: OwnedFunction is #[repr(transparent)] over NonNull<vm::function>,
-    // which has the same layout as *mut vm::function.
-    self.functions.as_mut_ptr().cast()
+  fn thunk_ptrs_mut(&mut self) -> *mut *mut vm::thunk {
+    // SAFETY: OwnedThunk is #[repr(transparent)] over NonNull<vm::thunk>,
+    // which has the same layout as *mut vm::thunk.
+    self.thunks.as_mut_ptr().cast()
   }
 }
 
-/// SAFETY: This type is `#[repr(transparent)]` over `NonNull<vm::function>`,
-/// which has the same layout as `*mut vm::function`. This allows
-/// `&mut [OwnedFunction]` to be cast to `*mut *mut vm::function` for FFI
+/// SAFETY: This type is `#[repr(transparent)]` over `NonNull<vm::thunk>`,
+/// which has the same layout as `*mut vm::thunk`. This allows
+/// `&mut [OwnedThunk]` to be cast to `*mut *mut vm::thunk` for FFI
 /// without copying.
 #[repr(transparent)]
-struct OwnedFunction {
-  ptr: NonNull<vm::function>,
+struct OwnedThunk {
+  ptr: NonNull<vm::thunk>,
 }
 
-impl OwnedFunction {
+impl OwnedThunk {
   fn from_thunk(thunk: &Thunk, diag: &Diagnostic) -> Result<Self> {
     let ops = thunk.code.iter().map(|bc| encode_bytecode(*bc)).collect::<Vec<_>>();
     let ptr = unsafe {
-      vm::vm_alloc_function(
+      vm::vm_thunk_alloc(
         ops.as_ptr(),
         ops.len(),
         thunk.constants.as_ptr().cast::<vm::val_t>(),
         thunk.constants.len(),
         thunk.nregs,
+        thunk.fvlocs.len(),
       )
     };
-    let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm function"))?;
+    let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm thunk"))?;
     Ok(Self { ptr })
   }
 
   fn wrapper(top_idx: usize, diag: &Diagnostic) -> Result<Self> {
-    let ptr = unsafe { vm::vm_make_wrapper(top_idx) };
+    let ptr = unsafe { vm::vm_thunk_make_wrapper(top_idx) };
     let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm wrapper"))?;
     Ok(Self { ptr })
   }
 
-  fn as_ptr(&self) -> *mut vm::function {
+  fn as_ptr(&self) -> *mut vm::thunk {
     self.ptr.as_ptr()
   }
 }
 
-impl Drop for OwnedFunction {
+impl Drop for OwnedThunk {
   fn drop(&mut self) {
     unsafe {
-      vm::vm_free_function(self.ptr.as_ptr());
+      vm::vm_thunk_free(self.ptr.as_ptr());
     }
   }
 }
@@ -218,8 +219,8 @@ mod tests {
     validator.validate(&image)?;
     let max_nregs = image.thunks.iter().map(|t| t.nregs as usize).max().unwrap_or(0);
     let numobject = compute_numobject(&image);
-    let mut native_functions = NativeFunctionSet::new(&image.thunks, &diag)?;
-    let wrapper = OwnedFunction::wrapper(image.thunks.len() - 1, &diag)?;
+    let mut native_thunks = NativeThunkSet::new(&image.thunks, &diag)?;
+    let wrapper = OwnedThunk::wrapper(image.thunks.len() - 1, &diag)?;
     let mut result = 0u64;
     let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
     let mut rargs = vm::runtime_args {
@@ -232,7 +233,7 @@ mod tests {
     let status = unsafe {
       vm::vm_exec_with_args(
         wrapper.as_ptr(),
-        native_functions.function_ptrs_mut(),
+        native_thunks.thunk_ptrs_mut(),
         image.thunks.len(),
         numobject,
         stack_slots,
