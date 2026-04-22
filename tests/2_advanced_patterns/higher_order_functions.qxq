@@ -26,18 +26,12 @@ inc2(5)
    
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
-   constants::[
-     @0: 1
-   ]
-   loadc        r1, @0
+   loadi        r1, #1
    add.dd       r1, r0, r1
    ret          r1
    
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::7 captured::[]
-   constants::[
-     @0: 5
-   ]
    clos         r0, fn1
    clos         r1, fn2
    move         r3, r0
@@ -48,7 +42,7 @@ inc2(5)
    move         r2, r3
    move         r3, r2
    loadi        r4, #0
-   loadc        r5, @0
+   loadi        r5, #5
    apply        r3, #1
    ret          r3
 *)

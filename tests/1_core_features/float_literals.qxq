@@ -16,27 +16,25 @@
      @0: 1.5
      @1: 2.5
      @2: -0.0
-     @3: 0
-     @4: 0.0
-     @5: 1000
-     @6: 0.5
-     @7: 3.14
-     @8: 2.0
+     @3: 0.0
+     @4: 0.5
+     @5: 3.14
+     @6: 2.0
    ]
    loadc        r0, @0
    loadc        r1, @1
    add.dd       r0, r0, r1
    loadc        r0, @2
-   loadc        r1, @3
+   loadi        r1, #0
    mul.dd       r0, r0, r1
-   loadc        r0, @4
-   loadc        r1, @3
+   loadc        r0, @3
+   loadi        r1, #0
    div.dd       r0, r0, r1
+   loadi        r0, #1000
+   loadc        r1, @4
+   add.dd       r0, r0, r1
    loadc        r0, @5
    loadc        r1, @6
-   add.dd       r0, r0, r1
-   loadc        r0, @7
-   loadc        r1, @8
    mul.dd       r0, r0, r1
    ret          r0
 *)

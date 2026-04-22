@@ -1,5 +1,5 @@
-(* RUN: {nonexistent_cmd|cargo run -- --inspect} %s | grep "constants::\[" *)
+(* RUN: {nonexistent_cmd|cargo run -- --inspect} %s | grep "loadi" *)
 10
 (* EXPECT:
-   constants::[
+   loadi        r0, #10
 *)

@@ -38,16 +38,13 @@ repeat("ha", 3)
    
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[r1 as ^1, r0 as ^2]
-   constants::[
-     @0: 1
-   ]
    loadf        r2, ^1
    cmp.ge.dd    r0, r2
    jmp          #1
    ret          r1
    loadf        r2, ^0
    loadi        r3, #0
-   loadc        r6, @0
+   loadi        r6, #1
    add.dd       r4, r0, r6
    loadf        r6, ^2
    add.dd       r5, r1, r6
@@ -57,14 +54,13 @@ repeat("ha", 3)
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[]
    constants::[
-     @0: 0
-     @1: ""
+     @0: ""
    ]
    clos         r2, fn1
    move         r3, r2
    loadi        r4, #0
-   loadc        r5, @0
-   loadc        r6, @1
+   loadi        r5, #0
+   loadc        r6, @0
    apply        r3, #2
    ret          r3
    
@@ -74,7 +70,6 @@ repeat("ha", 3)
      @0: "hello"
      @1: "world"
      @2: "ha"
-     @3: 3
    ]
    loadc        r0, @0
    loadc        r1, @1
@@ -87,7 +82,7 @@ repeat("ha", 3)
    move         r4, r3
    loadi        r5, #0
    loadc        r6, @2
-   loadc        r7, @3
+   loadi        r7, #3
    apply        r4, #2
    ret          r4
 *)

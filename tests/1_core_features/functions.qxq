@@ -13,10 +13,7 @@ add(1, 2)
    (block (fn () 1) (fn (x) x) (fn (x y) (+ x y)) (let add (fn (a b) (+ a b))) (add 1 2))
    --- Thunk ---
    thunk::fn params::0 regs::1 captured::[]
-   constants::[
-     @0: 1
-   ]
-   loadc        r0, @0
+   loadi        r0, #1
    ret          r0
    
    --- Thunk ---
@@ -35,18 +32,14 @@ add(1, 2)
    
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::5 captured::[]
-   constants::[
-     @0: 1
-     @1: 2
-   ]
    clos         r0, fn0
    clos         r0, fn1
    clos         r0, fn2
    clos         r0, fn3
    move         r1, r0
    loadi        r2, #0
-   loadc        r3, @0
-   loadc        r4, @1
+   loadi        r3, #1
+   loadi        r4, #2
    apply        r1, #2
    ret          r1
 *)

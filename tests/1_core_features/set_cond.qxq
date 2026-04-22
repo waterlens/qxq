@@ -23,68 +23,55 @@ if choose(false, 0) then 30 else 40 end
    (block (< 1 2) (> 1 2) (<= 1 2) (>= 1 2) (== 1 2) (!= 1 2) (let eq0 (fn (n) (== n 0))) (let choose (fn (b x) (if b (== x 0) (!= x 0)))) (== (eq0 1) false) (if (choose false 0) 30 40))
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
-   constants::[
-     @0: 0
-   ]
-   loadc        r1, @0
+   loadi        r1, #0
    setc         r1, #0
    cmp.eq.dd    r0, r1
    ret          r1
    
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
-   constants::[
-     @0: 0
-   ]
    cmp.not.f    r0, #0
    jmp          #4
-   loadc        r2, @0
+   loadi        r2, #0
    setc         r2, #0
    cmp.eq.dd    r1, r2
    ret          r2
-   loadc        r2, @0
+   loadi        r2, #0
    setc         r2, #0
    cmp.ne.dd    r1, r2
    ret          r2
    
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::6 captured::[]
-   constants::[
-     @0: 1
-     @1: 2
-     @2: 0
-     @3: 30
-     @4: 40
-   ]
-   loadc        r0, @0
-   loadc        r1, @1
+   loadi        r0, #1
+   loadi        r1, #2
    setc         r0, #0
    cmp.lt.dd    r0, r1
-   loadc        r0, @0
-   loadc        r1, @1
+   loadi        r0, #1
+   loadi        r1, #2
    setc         r0, #0
    cmp.gt.dd    r0, r1
-   loadc        r0, @0
-   loadc        r1, @1
+   loadi        r0, #1
+   loadi        r1, #2
    setc         r0, #0
    cmp.le.dd    r0, r1
-   loadc        r0, @0
-   loadc        r1, @1
+   loadi        r0, #1
+   loadi        r1, #2
    setc         r0, #0
    cmp.ge.dd    r0, r1
-   loadc        r0, @0
-   loadc        r1, @1
+   loadi        r0, #1
+   loadi        r1, #2
    setc         r0, #0
    cmp.eq.dd    r0, r1
-   loadc        r0, @0
-   loadc        r1, @1
+   loadi        r0, #1
+   loadi        r1, #2
    setc         r0, #0
    cmp.ne.dd    r0, r1
    clos         r0, fn0
    clos         r1, fn1
    move         r2, r0
    loadi        r3, #0
-   loadc        r4, @0
+   loadi        r4, #1
    apply        r2, #1
    mobj         r3, k2, r0
    setc         r2, #0
@@ -92,12 +79,12 @@ if choose(false, 0) then 30 else 40 end
    move         r2, r1
    loadi        r3, #0
    mobj         r4, k2, r0
-   loadc        r5, @2
+   loadi        r5, #0
    apply        r2, #2
    cmp.not.f    r2, #0
    jmp          #2
-   loadc        r2, @3
+   loadi        r2, #30
    ret          r2
-   loadc        r2, @4
+   loadi        r2, #40
    ret          r2
 *)

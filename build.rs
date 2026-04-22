@@ -11,7 +11,7 @@ fn main() {
   build.flag("-std=c2x").flag("-Wall").flag("-Wextra").define("JUMP_MODE", "0");
 
   if release {
-    build.flag("-O3").define("DECODE_MODE", "0").define("NDEBUG", None::<&str>);
+    build.flag("-O3").define("DECODE_MODE", "1").define("NDEBUG", None::<&str>);
   } else {
     build.flag("-O0").define("DECODE_MODE", "1");
   }

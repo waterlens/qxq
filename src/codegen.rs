@@ -267,6 +267,14 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn reify_int_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, i: i64) {
+    if (i16::MIN as i64..=i16::MAX as i64).contains(&i) {
+      bc.push(Bytecode::loadi(r.into(), (i as i16 as u16).into()));
+      return;
+    }
+    if (0..=u16::MAX as i64).contains(&i) {
+      bc.push(Bytecode::loadui(r.into(), (i as u16).into()));
+      return;
+    }
     if i < i32::MIN as i64 || i > i32::MAX as i64 {
       if (val::MIN_SAFE_INTEGER..=val::MAX_SAFE_INTEGER).contains(&i) {
         self.reify_float_literal(bc, r, i as f64);
@@ -1169,7 +1177,15 @@ mod tests {
       r#"
     let f = 1; (1, f)
     "#,
-      "thunk::__top_thunk__ params::0 regs::3 captured::[]\nconstants::[\n  @0: 1\n]\nloadc        r0, @0\nloadc        r1, @0\nmove         r2, r0\nwrap         r1, k1, #2\nret          r1\n",
+      "thunk::__top_thunk__ params::0 regs::3 captured::[]\nloadi        r0, #1\nloadi        r1, #1\nmove         r2, r0\nwrap         r1, k1, #2\nret          r1\n",
+    );
+  }
+
+  #[test]
+  fn int_literal_immediate_ranges() {
+    test_codegen(
+      "(32767, 32768, 65535, 65536)",
+      "thunk::__top_thunk__ params::0 regs::4 captured::[]\nconstants::[\n  @0: 65536\n]\nloadi        r0, #32767\nloadui       r1, #32768\nloadui       r2, #65535\nloadc        r3, @0\nwrap         r0, k1, #4\nret          r0\n",
     );
   }
 }
