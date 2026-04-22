@@ -3,21 +3,17 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-  let opt_level = env::var("OPT_LEVEL").unwrap();
+  let profile = env::var("PROFILE").unwrap();
+  let release = profile == "release";
 
   let mut build = cc::Build::new();
 
-  build
-    .flag("-std=c2x")
-    .flag("-Wall")
-    .flag("-Wextra")
-    .define("JUMP_MODE", "0")
-    .define("DECODE_MODE", "1");
+  build.flag("-std=c2x").flag("-Wall").flag("-Wextra").define("JUMP_MODE", "0");
 
-  if opt_level != "0" {
-    build.flag("-O3");
+  if release {
+    build.flag("-O3").define("DECODE_MODE", "0").define("NDEBUG", None::<&str>);
   } else {
-    build.flag("-O0");
+    build.flag("-O0").define("DECODE_MODE", "1");
   }
 
   println!("cargo:rerun-if-changed=build.rs");
