@@ -2,13 +2,16 @@ use bumpalo::Bump;
 use clap::{ArgGroup, Parser};
 use qxq::diagnostic::Result;
 use qxq::*;
-use rustyline::{DefaultEditor, config::Configurer, error::ReadlineError};
+use rustyline::{
+  config::Configurer, error::ReadlineError, Cmd, ConditionalEventHandler, DefaultEditor, Event,
+  EventContext, EventHandler, KeyEvent, Movement, RepeatCount,
+};
 use serde::{Deserialize, Serialize};
 use std::{
   fs,
   io::{self, IsTerminal, Write},
   rc::Rc,
-  time::Instant,
+  time::{Duration, Instant},
 };
 
 #[derive(Parser)]
@@ -102,6 +105,47 @@ fn apply_repl_command(config: &ReplConfig, cmd: &str) -> Result<ReplConfig> {
   Ok(serde_json::from_value(value)?)
 }
 
+struct ReplInterruptHandler;
+
+fn repl_interrupt_command(line: &str) -> Cmd {
+  if line.is_empty() {
+    Cmd::Interrupt
+  } else {
+    Cmd::Kill(Movement::WholeBuffer)
+  }
+}
+
+impl ConditionalEventHandler for ReplInterruptHandler {
+  fn handle(
+    &self,
+    _evt: &Event,
+    _n: RepeatCount,
+    _positive: bool,
+    ctx: &EventContext,
+  ) -> Option<Cmd> {
+    Some(repl_interrupt_command(ctx.line()))
+  }
+}
+
+struct ReplTimings {
+  parse: Duration,
+  codegen: Duration,
+  finalize: Duration,
+  execute: Option<Duration>,
+  total: Duration,
+}
+
+fn print_repl_timings(t: &ReplTimings) {
+  color_print::cprintln!("<dim>elapsed:</dim>");
+  color_print::cprintln!("<dim>  parse:</dim>    <cyan>{:.6}s</cyan>", t.parse.as_secs_f64());
+  color_print::cprintln!("<dim>  codegen:</dim>  <cyan>{:.6}s</cyan>", t.codegen.as_secs_f64());
+  color_print::cprintln!("<dim>  finalize:</dim> <cyan>{:.6}s</cyan>", t.finalize.as_secs_f64());
+  if let Some(exec) = t.execute {
+    color_print::cprintln!("<dim>  execute:</dim>  <cyan>{:.6}s</cyan>", exec.as_secs_f64());
+  }
+  color_print::cprintln!("<dim>  total:</dim>    <cyan>{:.6}s</cyan>", t.total.as_secs_f64());
+}
+
 fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
   show_message();
   let mut rl = DefaultEditor::new()?;
@@ -109,6 +153,7 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
 
   rl.set_history_ignore_space(true);
   rl.set_max_history_size(1024)?;
+  rl.bind_sequence(KeyEvent::ctrl('C'), EventHandler::Conditional(Box::new(ReplInterruptHandler)));
 
   history_path.as_ref().inspect(|path| {
     if let Ok(true) = path.try_exists() {
@@ -136,31 +181,50 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           }
           continue;
         }
-        let start = Instant::now();
+        let total_start = Instant::now();
         let arena = Bump::new();
+        let parse_start = Instant::now();
         let parser = parser::Parser::new(&arena, Rc::clone(&diag), &line);
         match parser.parse() {
           Ok(tree) => {
+            let parse_dur = parse_start.elapsed();
             if config.inspect {
               print_tree(&tree);
             }
+            let codegen_start = Instant::now();
             let mut codegen = codegen::CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
             let mut bc = bytecode::BytecodeCtx::new();
             match codegen.emit_tree(&mut bc) {
               Ok(()) => {
+                let codegen_dur = codegen_start.elapsed();
+                let finalize_start = Instant::now();
                 let image = bc.finalize();
+                let finalize_dur = finalize_start.elapsed();
                 if config.inspect {
                   print_thunks(&image);
+                  if config.elapsed {
+                    print_repl_timings(&ReplTimings {
+                      parse: parse_dur,
+                      codegen: codegen_dur,
+                      finalize: finalize_dur,
+                      execute: None,
+                      total: total_start.elapsed(),
+                    });
+                  }
                 } else {
+                  let exec_start = Instant::now();
                   match runtime::execute(image, Rc::clone(&diag)) {
                     Ok(result) => {
-                      let duration = start.elapsed();
+                      let exec_dur = exec_start.elapsed();
                       println!("{result}");
                       if config.elapsed {
-                        color_print::cprintln!(
-                          "<dim>elapsed:</dim> <cyan>{:.6}s</cyan>",
-                          duration.as_secs_f64()
-                        );
+                        print_repl_timings(&ReplTimings {
+                          parse: parse_dur,
+                          codegen: codegen_dur,
+                          finalize: finalize_dur,
+                          execute: Some(exec_dur),
+                          total: total_start.elapsed(),
+                        });
                       }
                     }
                     Err(e) => diag.report_err(&e),
@@ -174,10 +238,7 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           Err(e) => diag.report_err(&e),
         }
       }
-      Err(ReadlineError::Interrupted) => {
-        println!("Interrupted");
-        break;
-      }
+      Err(ReadlineError::Interrupted) => break,
       Err(ReadlineError::Eof) => break,
       Err(err) => {
         diag.report_err(&err.into());
@@ -354,5 +415,15 @@ mod tests {
     let _ = apply_repl_command(&config, "+verbose");
     assert!(!config.elapsed);
     assert!(!config.inspect);
+  }
+
+  #[test]
+  fn repl_interrupt_clears_non_empty_input() {
+    assert_eq!(repl_interrupt_command("1 + 2"), Cmd::Kill(Movement::WholeBuffer));
+  }
+
+  #[test]
+  fn repl_interrupt_exits_empty_input() {
+    assert_eq!(repl_interrupt_command(""), Cmd::Interrupt);
   }
 }
