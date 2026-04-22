@@ -3,10 +3,12 @@ use clap::{ArgGroup, Parser};
 use qxq::diagnostic::Result;
 use qxq::*;
 use rustyline::{DefaultEditor, config::Configurer, error::ReadlineError};
+use serde_json::Value;
 use std::{
   fs,
   io::{self, IsTerminal, Write},
   rc::Rc,
+  time::Instant,
 };
 
 #[derive(Parser)]
@@ -76,6 +78,32 @@ fn print_thunks(image: &bytecode::BytecodeImage) {
   );
 }
 
+fn detect_colon_command(line: &str) -> Option<&str> {
+  let rest = line.strip_prefix(':')?;
+  if rest.trim().is_empty() {
+    return Some("");
+  }
+  if rest.starts_with(char::is_whitespace) {
+    return None;
+  }
+  Some(rest)
+}
+
+fn validate_repl_config(config: &Value) -> std::result::Result<(), String> {
+  let obj = config.as_object().ok_or("config must be an object")?;
+  for (key, val) in obj {
+    match key.as_str() {
+      "elapsed" => {
+        if !val.is_boolean() {
+          return Err(format!("elapsed must be a boolean, got {val}"));
+        }
+      }
+      _ => return Err(format!("unknown option: {key}")),
+    }
+  }
+  Ok(())
+}
+
 fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
   show_message();
   let mut rl = DefaultEditor::new()?;
@@ -90,6 +118,8 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
     }
   });
 
+  let mut config: Value = serde_json::from_str(r#"{"elapsed": false}"#).unwrap();
+
   loop {
     let readline = rl.readline("> ");
     match readline {
@@ -97,6 +127,25 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
         if line.trim().is_empty() {
           continue;
         }
+        if let Some(cmd) = detect_colon_command(&line) {
+          if cmd.is_empty() {
+            diag.report("empty command");
+            continue;
+          }
+          let mut candidate = config.clone();
+          if let Err(e) = ssof::apply_str(&mut candidate, cmd) {
+            diag.report(&format!("invalid command: {e}"));
+            continue;
+          }
+          if let Err(e) = validate_repl_config(&candidate) {
+            diag.report(&format!("invalid config: {e}"));
+            continue;
+          }
+          config = candidate;
+          continue;
+        }
+        let elapsed_enabled = config["elapsed"].as_bool().unwrap_or(false);
+        let start = Instant::now();
         let arena = Bump::new();
         let parser = parser::Parser::new(&arena, Rc::clone(&diag), &line);
         match parser.parse() {
@@ -107,7 +156,16 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
               Ok(()) => {
                 let image = bc.finalize();
                 match runtime::execute(image, Rc::clone(&diag)) {
-                  Ok(result) => println!("{result}"),
+                  Ok(result) => {
+                    let duration = start.elapsed();
+                    println!("{result}");
+                    if elapsed_enabled {
+                      color_print::cprintln!(
+                        "<dim>elapsed:</dim> <cyan>{:.6}s</cyan>",
+                        duration.as_secs_f64()
+                      );
+                    }
+                  }
                   Err(e) => diag.report_err(&e),
                 }
               }
@@ -132,6 +190,73 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
 
   history_path.inspect(|path| rl.save_history(path).expect("unable to save history"));
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn detect_colon_commands() {
+    assert_eq!(detect_colon_command(":+elapsed"), Some("+elapsed"));
+    assert_eq!(detect_colon_command(":-elapsed"), Some("-elapsed"));
+    assert_eq!(detect_colon_command(":"), Some(""));
+    assert_eq!(detect_colon_command(":   "), Some(""));
+  }
+
+  #[test]
+  fn reject_space_after_colon() {
+    assert_eq!(detect_colon_command(": +elapsed"), None);
+    assert_eq!(detect_colon_command(": x 1 + 1"), None);
+  }
+
+  #[test]
+  fn reject_leading_space() {
+    assert_eq!(detect_colon_command(" :+elapsed"), None);
+    assert_eq!(detect_colon_command("  :+elapsed"), None);
+  }
+
+  #[test]
+  fn normal_lines_not_commands() {
+    assert_eq!(detect_colon_command("1 + 2"), None);
+    assert_eq!(detect_colon_command("let x = 1"), None);
+    assert_eq!(detect_colon_command(""), None);
+  }
+
+  #[test]
+  fn config_enable_disable() {
+    let mut config: Value = serde_json::from_str(r#"{"elapsed": false}"#).unwrap();
+    ssof::apply_str(&mut config, "+elapsed").unwrap();
+    validate_repl_config(&config).unwrap();
+    assert_eq!(config["elapsed"], true);
+
+    ssof::apply_str(&mut config, "-elapsed").unwrap();
+    validate_repl_config(&config).unwrap();
+    assert_eq!(config["elapsed"], false);
+  }
+
+  #[test]
+  fn config_reject_non_boolean_elapsed() {
+    let mut config: Value = serde_json::from_str(r#"{"elapsed": false}"#).unwrap();
+    ssof::apply_str(&mut config, "elapsed=42").unwrap();
+    assert!(validate_repl_config(&config).is_err());
+  }
+
+  #[test]
+  fn config_reject_unknown_option() {
+    let mut config: Value = serde_json::from_str(r#"{"elapsed": false}"#).unwrap();
+    ssof::apply_str(&mut config, "+verbose").unwrap();
+    assert!(validate_repl_config(&config).is_err());
+  }
+
+  #[test]
+  fn config_failed_patch_does_not_mutate() {
+    let config: Value = serde_json::from_str(r#"{"elapsed": false}"#).unwrap();
+    let mut candidate = config.clone();
+    ssof::apply_str(&mut candidate, "+verbose").unwrap();
+    let _ = validate_repl_config(&candidate);
+    assert_eq!(config["elapsed"], false);
+  }
 }
 
 fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
