@@ -1,6 +1,6 @@
 use bumpalo::Bump;
 use clap::{ArgGroup, Parser};
-use qxq::diagnostic::Result;
+use qxq::diagnostic::{Diagnostic, Result};
 use qxq::*;
 use rustyline::{
   config::Configurer, error::ReadlineError, Cmd, ConditionalEventHandler, DefaultEditor, Event,
@@ -8,6 +8,8 @@ use rustyline::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+  env,
+  ffi::OsString,
   fs,
   io::{self, IsTerminal, Write},
   rc::Rc,
@@ -39,6 +41,20 @@ struct Cli {
 
   #[arg(long)]
   load: bool,
+
+  #[arg(
+    long,
+    conflicts_with_all = [
+      "check_expect",
+      "test_expect",
+      "update_expect",
+      "skip_multiple_expect",
+      "dump",
+      "inspect",
+      "no_tree",
+    ]
+  )]
+  perf: bool,
 
   #[arg(long)]
   inspect: bool,
@@ -86,6 +102,7 @@ fn print_thunks(image: &bytecode::BytecodeImage) {
 struct ReplConfig {
   elapsed: bool,
   inspect: bool,
+  perf: bool,
 }
 
 fn detect_colon_command(line: &str) -> Option<&str> {
@@ -146,6 +163,95 @@ fn print_repl_timings(t: &ReplTimings) {
   color_print::cprintln!("<dim>  total:</dim>    <cyan>{:.6}s</cyan>", t.total.as_secs_f64());
 }
 
+fn validate_cli(cli: &Cli, diag: &Diagnostic) -> Result<()> {
+  if cli.perf {
+    if cli.input_files.len() != 1 {
+      return diag.fail("--perf requires exactly one input file");
+    }
+    if cli.load && cli.input_files[0] == "-" {
+      return diag.fail("--perf --load cannot read bytecode from stdin");
+    }
+  }
+  Ok(())
+}
+
+fn print_perf_report(report: &perf::ProfileReport) {
+  color_print::cprintln!("<dim>artifact:</dim> <cyan>{}</cyan>", report.artifact.display());
+  for command in &report.commands {
+    color_print::cprintln!("<dim>command:</dim>  <cyan>{command}</cyan>");
+  }
+}
+
+fn target_args_for_input(load: bool, input: &str) -> Vec<OsString> {
+  let mut args = Vec::new();
+  if load {
+    args.push(OsString::from("--load"));
+  }
+  args.push(OsString::from(input));
+  args
+}
+
+fn run_perf_for_target_args(
+  target_args: &[OsString],
+  diag: &Diagnostic,
+) -> Result<perf::ProfileReport> {
+  let target_exe = diag.context(env::current_exe(), "failed to resolve current qxq executable")?;
+  let run_id = perf::new_run_id();
+  let plan = perf::build_plan(
+    perf::Platform::current(),
+    &perf::default_root(),
+    &run_id,
+    &target_exe,
+    target_args,
+    diag,
+  )?;
+  perf::run_profile(&plan, diag)
+}
+
+fn run_cli_perf(cli: &Cli, diag: &Diagnostic) -> Result<()> {
+  debug_assert_eq!(cli.input_files.len(), 1, "validate_cli must ensure exactly one input file");
+  let target_args = target_args_for_input(cli.load, &cli.input_files[0]);
+  let report = run_perf_for_target_args(&target_args, diag)?;
+  print_perf_report(&report);
+  Ok(())
+}
+
+fn run_repl_perf_expression(line: &str, diag: &Diagnostic) -> Result<()> {
+  let root = perf::default_root();
+  let run_id = perf::new_run_id();
+  diag.context(fs::create_dir_all(&root), format!("failed to create {}", root.display()))?;
+  let source_path = perf::repl_source_path(&root, &run_id);
+  diag.context(
+    fs::write(&source_path, line),
+    format!("failed to write temporary perf source {}", source_path.display()),
+  )?;
+
+  let result = (|| {
+    let target_args = vec![source_path.as_os_str().to_os_string()];
+    let target_exe =
+      diag.context(env::current_exe(), "failed to resolve current qxq executable")?;
+    let plan = perf::build_plan(
+      perf::Platform::current(),
+      &root,
+      &run_id,
+      &target_exe,
+      &target_args,
+      diag,
+    )?;
+    perf::run_profile(&plan, diag)
+  })();
+  let cleanup = fs::remove_file(&source_path);
+
+  if let Err(err) = cleanup {
+    eprintln!(
+      "Warning: failed to remove temporary perf source {}: {err}",
+      source_path.display()
+    );
+  }
+
+  result.map(|report| print_perf_report(&report))
+}
+
 fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
   show_message();
   let mut rl = DefaultEditor::new()?;
@@ -178,6 +284,15 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           match apply_repl_command(&config, cmd) {
             Ok(candidate) => config = candidate,
             Err(e) => diag.report(&format!("invalid config: {e}")),
+          }
+          continue;
+        }
+        if config.perf {
+          match run_repl_perf_expression(&line, &diag) {
+            Ok(()) => {
+              rl.add_history_entry(line.as_str())?;
+            }
+            Err(e) => diag.report_err(&e),
           }
           continue;
         }
@@ -252,6 +367,12 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
 }
 
 fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
+  validate_cli(&cli, &diag)?;
+
+  if cli.perf {
+    return run_cli_perf(&cli, &diag);
+  }
+
   if let Some(file) = cli.check_expect {
     return expect::run_check(&file);
   }
@@ -342,6 +463,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use clap::Parser;
+
+  fn test_diag() -> Diagnostic {
+    Diagnostic::new()
+  }
 
   #[test]
   fn detect_colon_commands() {
@@ -349,6 +475,8 @@ mod tests {
     assert_eq!(detect_colon_command(":-elapsed"), Some("-elapsed"));
     assert_eq!(detect_colon_command(":+inspect"), Some("+inspect"));
     assert_eq!(detect_colon_command(":-inspect"), Some("-inspect"));
+    assert_eq!(detect_colon_command(":+perf"), Some("+perf"));
+    assert_eq!(detect_colon_command(":-perf"), Some("-perf"));
     assert_eq!(detect_colon_command(":"), Some(""));
     assert_eq!(detect_colon_command(":   "), Some(""));
   }
@@ -397,10 +525,23 @@ mod tests {
   }
 
   #[test]
+  fn config_enable_disable_perf() {
+    let config = ReplConfig::default();
+    assert!(!config.perf);
+
+    let config = apply_repl_command(&config, "+perf").unwrap();
+    assert!(config.perf);
+
+    let config = apply_repl_command(&config, "-perf").unwrap();
+    assert!(!config.perf);
+  }
+
+  #[test]
   fn config_reject_non_boolean() {
     let config = ReplConfig::default();
     assert!(apply_repl_command(&config, "elapsed=42").is_err());
     assert!(apply_repl_command(&config, "inspect=hello").is_err());
+    assert!(apply_repl_command(&config, "perf=hello").is_err());
   }
 
   #[test]
@@ -415,6 +556,56 @@ mod tests {
     let _ = apply_repl_command(&config, "+verbose");
     assert!(!config.elapsed);
     assert!(!config.inspect);
+    assert!(!config.perf);
+  }
+
+  #[test]
+  fn cli_accepts_perf_source_file() {
+    let diag = test_diag();
+    let cli = Cli::try_parse_from(["qxq", "--perf", "program.qxq"]).unwrap();
+    assert!(cli.perf);
+    assert!(!cli.load);
+    assert_eq!(cli.input_files, vec!["program.qxq"]);
+    validate_cli(&cli, &diag).unwrap();
+  }
+
+  #[test]
+  fn cli_accepts_perf_loaded_bytecode_file() {
+    let diag = test_diag();
+    let cli = Cli::try_parse_from(["qxq", "--perf", "--load", "program.qxc"]).unwrap();
+    assert!(cli.perf);
+    assert!(cli.load);
+    assert_eq!(cli.input_files, vec!["program.qxc"]);
+    validate_cli(&cli, &diag).unwrap();
+  }
+
+  #[test]
+  fn cli_rejects_perf_without_input() {
+    let diag = test_diag();
+    let cli = Cli::try_parse_from(["qxq", "--perf"]).unwrap();
+    assert!(validate_cli(&cli, &diag).is_err());
+  }
+
+  #[test]
+  fn cli_rejects_perf_with_multiple_inputs() {
+    let diag = test_diag();
+    let cli = Cli::try_parse_from(["qxq", "--perf", "a.qxq", "b.qxq"]).unwrap();
+    assert!(validate_cli(&cli, &diag).is_err());
+  }
+
+  #[test]
+  fn cli_rejects_perf_loading_from_stdin() {
+    let diag = test_diag();
+    let cli = Cli::try_parse_from(["qxq", "--perf", "--load", "-"]).unwrap();
+    assert!(validate_cli(&cli, &diag).is_err());
+  }
+
+  #[test]
+  fn cli_rejects_perf_with_incompatible_modes() {
+    assert!(Cli::try_parse_from(["qxq", "--perf", "--dump", "out.qxc", "program.qxq"]).is_err());
+    assert!(Cli::try_parse_from(["qxq", "--perf", "--inspect", "program.qxq"]).is_err());
+    assert!(Cli::try_parse_from(["qxq", "--perf", "--no-tree", "program.qxq"]).is_err());
+    assert!(Cli::try_parse_from(["qxq", "--perf", "--test-expect", "program.qxq"]).is_err());
   }
 
   #[test]
