@@ -205,7 +205,7 @@ mod tests {
     let diag = Rc::new(Diagnostic::new());
     let mut codegen = CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
     let mut bc = BytecodeCtx::new();
-    codegen.emit_tree(&mut bc);
+    codegen.emit_tree(&mut bc)?;
     let image = bc.finalize();
     execute(image, Rc::clone(&diag))
   }

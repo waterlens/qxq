@@ -22,8 +22,8 @@ impl Diagnostic {
   }
 
   /// For fatal user errors that stop compilation immediately.
-  pub fn fatal(&self, message: &str) -> ! {
-    panic!("Fatal Error: {message}");
+  pub fn fatal<T>(&self, message: &str) -> Result<T> {
+    Err(anyhow!(message.to_string()))
   }
 
   /// For non-fatal reporting (just printing).

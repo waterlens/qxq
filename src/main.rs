@@ -103,11 +103,14 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           Ok(tree) => {
             let mut codegen = codegen::CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
             let mut bc = bytecode::BytecodeCtx::new();
-            codegen.emit_tree(&mut bc);
-            let image = bc.finalize();
-
-            match runtime::execute(image, Rc::clone(&diag)) {
-              Ok(result) => println!("{result}"),
+            match codegen.emit_tree(&mut bc) {
+              Ok(()) => {
+                let image = bc.finalize();
+                match runtime::execute(image, Rc::clone(&diag)) {
+                  Ok(result) => println!("{result}"),
+                  Err(e) => diag.report_err(&e),
+                }
+              }
               Err(e) => diag.report_err(&e),
             }
             rl.add_history_entry(line.as_str())?;
@@ -178,7 +181,7 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
 
       let mut codegen = codegen::CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
       let mut bc = bytecode::BytecodeCtx::new();
-      codegen.emit_tree(&mut bc);
+      codegen.emit_tree(&mut bc)?;
       let image = bc.finalize();
 
       if let Some(ref dump_path) = cli.dump {
