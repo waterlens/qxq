@@ -31,7 +31,6 @@ fib(10)
    jmp          #1
    ret          r1
    loadf        r2, ^0
-   loadi        r3, #0
    loadi        r6, #1
    add.dd       r4, r0, r6
    mul.dd       r5, r1, r0
@@ -42,7 +41,6 @@ fib(10)
    thunk::fn params::1 regs::6 captured::[]
    clos         r1, fn0
    move         r2, r1
-   loadi        r3, #0
    loadi        r4, #1
    loadi        r5, #1
    apply        r2, #2
@@ -55,12 +53,10 @@ fib(10)
    jmp          #1
    ret          r0
    loadf        r1, ^0
-   loadi        r2, #0
    loadi        r4, #1
    sub.dd       r3, r0, r4
    apply        r1, #1
    loadf        r2, ^0
-   loadi        r3, #0
    loadi        r5, #2
    sub.dd       r4, r0, r5
    apply        r2, #1
@@ -72,11 +68,9 @@ fib(10)
    clos         r0, fn1
    clos         r1, fn2
    move         r2, r0
-   loadi        r3, #0
    loadi        r4, #5
    apply        r2, #1
    move         r2, r1
-   loadi        r3, #0
    loadi        r4, #10
    apply        r2, #1
    ret          r2

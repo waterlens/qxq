@@ -975,8 +975,8 @@ impl<'a> CodeGenCtx<'a> {
           c,
         )?;
         bc.push_label(l);
-        let pad0 = self.allocate_temporary()?;
-        bc.push(Bytecode::loadi(pad0.into(), 0u16.into()));
+        let _frame_ra = self.allocate_temporary()?;
+        // don't explicity set the value of frame return address
         let mut args_regs = Vec::with_capacity(args.len());
         for _ in 0..args.len() {
           args_regs.push(self.allocate_temporary()?);

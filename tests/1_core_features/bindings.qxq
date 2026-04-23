@@ -24,7 +24,6 @@ factorial(5)
    loadi        r1, #1
    ret          r1
    loadf        r1, ^0
-   loadi        r2, #0
    loadi        r4, #1
    sub.dd       r3, r0, r4
    apply        r1, #1
@@ -38,7 +37,6 @@ factorial(5)
    add.dd       r2, r0, r1
    clos         r2, fn0
    move         r3, r2
-   loadi        r4, #0
    loadi        r5, #5
    apply        r3, #1
    ret          r3

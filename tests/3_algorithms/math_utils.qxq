@@ -41,7 +41,6 @@ is_even(pow(2, 10))
    jmp          #1
    ret          r1
    loadf        r2, ^0
-   loadi        r3, #0
    loadi        r6, #1
    add.dd       r4, r0, r6
    loadf        r6, ^1
@@ -53,7 +52,6 @@ is_even(pow(2, 10))
    thunk::fn params::2 regs::7 captured::[]
    clos         r2, fn1
    move         r3, r2
-   loadi        r4, #0
    loadi        r5, #0
    loadi        r6, #1
    apply        r3, #2
@@ -78,7 +76,6 @@ is_even(pow(2, 10))
    --- Thunk ---
    thunk::fn params::1 regs::5 captured::[r3 as ^1]
    loadf        r1, ^1
-   loadi        r2, #0
    move         r3, r0
    loadi        r4, #2
    apply        r1, #2
@@ -90,9 +87,7 @@ is_even(pow(2, 10))
    --- Thunk ---
    thunk::fn params::1 regs::7 captured::[r4 as ^1, r2 as ^2]
    loadf        r1, ^2
-   loadi        r2, #0
    loadf        r4, ^1
-   loadi        r5, #0
    move         r6, r0
    apply        r4, #1
    move         r3, r4
@@ -108,9 +103,7 @@ is_even(pow(2, 10))
    clos         r4, fn5
    clos         r5, fn6
    move         r6, r4
-   loadi        r7, #0
    move         r9, r1
-   loadi        r10, #0
    loadi        r11, #2
    loadi        r12, #10
    apply        r9, #2

@@ -37,7 +37,6 @@ add(1, 2)
    clos         r0, fn2
    clos         r0, fn3
    move         r1, r0
-   loadi        r2, #0
    loadi        r3, #1
    loadi        r4, #2
    apply        r1, #2

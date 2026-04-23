@@ -19,7 +19,7 @@ let result = f(1);
    < thunk::fn params::1 regs::5 captured::[r1 as ^1]
    ---
    > thunk:: params::1 regs::5 captured::[r1 as ^1]
-   19c19
+   18c18
    < thunk::__top_thunk__ params::0 regs::7 captured::[]
    ---
    > thunk:: params::0 regs::7 captured::[]

@@ -43,7 +43,6 @@ repeat("ha", 3)
    jmp          #1
    ret          r1
    loadf        r2, ^0
-   loadi        r3, #0
    loadi        r6, #1
    add.dd       r4, r0, r6
    loadf        r6, ^2
@@ -58,7 +57,6 @@ repeat("ha", 3)
    ]
    clos         r2, fn1
    move         r3, r2
-   loadi        r4, #0
    loadi        r5, #0
    loadc        r6, @0
    apply        r3, #2
@@ -75,12 +73,10 @@ repeat("ha", 3)
    loadc        r1, @1
    clos         r2, fn0
    move         r3, r2
-   loadi        r4, #0
    move         r5, r1
    apply        r3, #1
    clos         r3, fn2
    move         r4, r3
-   loadi        r5, #0
    loadc        r6, @2
    loadi        r7, #3
    apply        r4, #2
