@@ -5,12 +5,31 @@ use indexmap::{IndexMap, IndexSet};
 use slotmap::SlotMap;
 
 use crate::{
-  bytecode::{Bytecode, BytecodeCtx, FloatBits, FreeVarId, Label, Location, RegId, Tag},
+  bytecode::{
+    Bytecode, BytecodeCtx, ConstantId, FloatBits, FreeVarId, Label, Location, RegId,
+    SmallConstantId, Tag,
+  },
   diagnostic::{Diagnostic, Result},
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, SynTree},
   tokenizer::{Paired, TokenStr},
   val,
 };
+
+fn fits_i16(i: i64) -> bool {
+  (i16::MIN as i64..=i16::MAX as i64).contains(&i)
+}
+
+fn fits_u16(i: i64) -> bool {
+  (0..=u16::MAX as i64).contains(&i)
+}
+
+fn fits_i32(i: i64) -> bool {
+  (i32::MIN as i64..=i32::MAX as i64).contains(&i)
+}
+
+fn fits_safe_integer(i: i64) -> bool {
+  (val::MIN_SAFE_INTEGER..=val::MAX_SAFE_INTEGER).contains(&i)
+}
 
 pub struct CodeGenCtx<'a> {
   diagnostic: Rc<Diagnostic>,
@@ -54,8 +73,14 @@ enum ControlDest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Test {
-  #[allow(unused)]
-  EqImm(RegId, u16),
+  EqualImm(RegId, i16),
+  NotEqImm(RegId, i16),
+  EqualConst(RegId, ConstantId),
+  NotEqConst(RegId, ConstantId),
+  LessConst(RegId, ConstantId),
+  LessOrEqualConst(RegId, ConstantId),
+  GreaterConst(RegId, ConstantId),
+  GreaterOrEqualConst(RegId, ConstantId),
   Equal(RegId, RegId),
   NotEq(RegId, RegId),
   Less(RegId, RegId),
@@ -63,6 +88,16 @@ enum Test {
   LessOrEqual(RegId, RegId),
   GreaterOrEqual(RegId, RegId),
   NotF(RegId),
+}
+
+enum CmpOperand {
+  Imm(i16),
+  Const(ConstantId),
+}
+
+enum ArithOperand {
+  Reg(RegId),
+  Const(SmallConstantId),
 }
 
 struct ValInfo<'a> {
@@ -267,11 +302,11 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn reify_int_literal(&mut self, bc: &mut BytecodeCtx, r: RegId, i: i64) {
-    if (i16::MIN as i64..=i16::MAX as i64).contains(&i) {
-      bc.push(Bytecode::loadi(r.into(), (i as i16 as u16).into()));
+    if fits_i16(i) {
+      bc.push(Bytecode::loadi(r.into(), (i as i16).into()));
       return;
     }
-    if (0..=u16::MAX as i64).contains(&i) {
+    if fits_u16(i) {
       bc.push(Bytecode::loadui(r.into(), (i as u16).into()));
       return;
     }
@@ -481,7 +516,14 @@ impl<'a> CodeGenCtx<'a> {
     use self::Test::*;
     if !negate_cond {
       match test {
-        EqImm(r, imm) => bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
+        EqualImm(r, imm) => bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
+        NotEqImm(r, imm) => bc.push(Bytecode::cmpnedi(r.into(), imm.into())),
+        EqualConst(r, c) => bc.push(Bytecode::cmpeqdc(r.into(), c.0.into())),
+        NotEqConst(r, c) => bc.push(Bytecode::cmpnedc(r.into(), c.0.into())),
+        LessConst(r, c) => bc.push(Bytecode::cmpltdc(r.into(), c.0.into())),
+        LessOrEqualConst(r, c) => bc.push(Bytecode::cmpledc(r.into(), c.0.into())),
+        GreaterConst(r, c) => bc.push(Bytecode::cmpgtdc(r.into(), c.0.into())),
+        GreaterOrEqualConst(r, c) => bc.push(Bytecode::cmpgedc(r.into(), c.0.into())),
         Equal(r1, r2) => bc.push(Bytecode::cmpeqdd(r1.into(), r2.into())),
         NotEq(r1, r2) => bc.push(Bytecode::cmpnedd(r1.into(), r2.into())),
         Less(r1, r2) => bc.push(Bytecode::cmpltdd(r1.into(), r2.into())),
@@ -492,7 +534,14 @@ impl<'a> CodeGenCtx<'a> {
       }
     } else {
       match test {
-        EqImm(r, imm) => bc.push(Bytecode::cmpnedi(r.into(), imm.into())),
+        EqualImm(r, imm) => bc.push(Bytecode::cmpnedi(r.into(), imm.into())),
+        NotEqImm(r, imm) => bc.push(Bytecode::cmpeqdi(r.into(), imm.into())),
+        EqualConst(r, c) => bc.push(Bytecode::cmpnedc(r.into(), c.0.into())),
+        NotEqConst(r, c) => bc.push(Bytecode::cmpeqdc(r.into(), c.0.into())),
+        LessConst(r, c) => bc.push(Bytecode::cmpgedc(r.into(), c.0.into())),
+        LessOrEqualConst(r, c) => bc.push(Bytecode::cmpgtdc(r.into(), c.0.into())),
+        GreaterConst(r, c) => bc.push(Bytecode::cmpltdc(r.into(), c.0.into())),
+        GreaterOrEqualConst(r, c) => bc.push(Bytecode::cmpledc(r.into(), c.0.into())),
         Equal(r1, r2) => bc.push(Bytecode::cmpnedd(r1.into(), r2.into())),
         NotEq(r1, r2) => bc.push(Bytecode::cmpeqdd(r1.into(), r2.into())),
         Less(r1, r2) => bc.push(Bytecode::cmpgedd(r1.into(), r2.into())),
@@ -540,7 +589,16 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn can_emit_backward_test(test: Test) -> bool {
-    matches!(test, Test::EqImm(..) | Test::Equal(..) | Test::NotEq(..) | Test::NotF(..))
+    matches!(
+      test,
+      Test::EqualImm(..)
+        | Test::NotEqImm(..)
+        | Test::EqualConst(..)
+        | Test::NotEqConst(..)
+        | Test::Equal(..)
+        | Test::NotEq(..)
+        | Test::NotF(..)
+    )
   }
 
   fn emit_safe_test(
@@ -701,21 +759,25 @@ impl<'a> CodeGenCtx<'a> {
     bc: &mut BytecodeCtx,
     op: &'a str,
     opr1: RegId,
-    opr2: RegId,
+    opr2: ArithOperand,
     data: DataDest,
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
-    let make_bc = |op_str: &str, dst: RegId, o1: RegId, o2: RegId| -> Bytecode {
+    let make_bc = |op_str: &str, dst: RegId, o1: RegId, o2: ArithOperand| -> Bytecode {
       let dst = dst.into();
       let o1 = o1.into();
-      let o2 = o2.into();
-      match op_str {
-        "+" => Bytecode::adddd(dst, o1, o2),
-        "-" => Bytecode::subdd(dst, o1, o2),
-        "*" => Bytecode::muldd(dst, o1, o2),
-        "/" => Bytecode::divdd(dst, o1, o2),
-        "%" => Bytecode::remdd(dst, o1, o2),
+      match (op_str, o2) {
+        ("+", ArithOperand::Reg(r)) => Bytecode::adddd(dst, o1, r.into()),
+        ("-", ArithOperand::Reg(r)) => Bytecode::subdd(dst, o1, r.into()),
+        ("*", ArithOperand::Reg(r)) => Bytecode::muldd(dst, o1, r.into()),
+        ("/", ArithOperand::Reg(r)) => Bytecode::divdd(dst, o1, r.into()),
+        ("%", ArithOperand::Reg(r)) => Bytecode::remdd(dst, o1, r.into()),
+        ("+", ArithOperand::Const(c)) => Bytecode::adddc(dst, o1, c.into()),
+        ("-", ArithOperand::Const(c)) => Bytecode::subdc(dst, o1, c.into()),
+        ("*", ArithOperand::Const(c)) => Bytecode::muldc(dst, o1, c.into()),
+        ("/", ArithOperand::Const(c)) => Bytecode::divdc(dst, o1, c.into()),
+        ("%", ArithOperand::Const(c)) => Bytecode::remdc(dst, o1, c.into()),
         _ => unreachable!("unknown binary operator: {}", op_str),
       }
     };
@@ -844,6 +906,123 @@ impl<'a> CodeGenCtx<'a> {
     }
   }
 
+  fn expr_as_pool_literal<'b>(expr: &'b Expr<'a, InfoKey>) -> Option<Value<'a>> {
+    match expr {
+      Expr::IntLiteral(i, _) => Some(Value::IntLiteral(*i)),
+      Expr::FloatLiteral(f, _) => Some(Value::FloatLiteral(*f)),
+      Expr::StrLiteral(s, _) => Some(Value::StrLiteral(s)),
+      _ => None,
+    }
+  }
+
+  fn value_to_cmp_operand(bc: &mut BytecodeCtx, v: &Value, is_eq_ne: bool) -> Option<CmpOperand> {
+    match v {
+      Value::IntLiteral(i) if is_eq_ne && fits_i16(*i) => Some(CmpOperand::Imm(*i as i16)),
+      Value::IntLiteral(i) => Some(CmpOperand::Const(bc.add_int(*i))),
+      Value::FloatLiteral(f) => Some(CmpOperand::Const(bc.add_float(f.0))),
+      Value::StrLiteral(s) => Some(CmpOperand::Const(bc.add_str(s.to_string()))),
+      _ => None,
+    }
+  }
+
+  fn value_to_arith_operand(bc: &mut BytecodeCtx, v: &Value) -> Option<SmallConstantId> {
+    match v {
+      Value::IntLiteral(i) if fits_i32(*i) => bc.add_int(*i).try_small(),
+      Value::IntLiteral(i) if fits_safe_integer(*i) => bc.add_float(*i as f64).try_small(),
+      Value::FloatLiteral(f) => bc.add_float(f.0).try_small(),
+      _ => None,
+    }
+  }
+
+  fn emit_arith_args(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    _op: &str,
+    args: ExprsRef<'a, InfoKey>,
+  ) -> Result<(RegId, ArithOperand)> {
+    let rhs_literal = Self::expr_as_pool_literal(&args[1]);
+
+    if let Some(ref rhs_val) = rhs_literal {
+      if let Some(sc) = Self::value_to_arith_operand(bc, rhs_val) {
+        let (regs, n_temps) = self.eval_any_loc_args(bc, &args[..1])?;
+        let r1 = regs[0];
+        self.clean_any_loc_args(n_temps);
+        return Ok((r1, ArithOperand::Const(sc)));
+      }
+    }
+
+    let (regs, n_temps) = self.eval_any_loc_args(bc, args)?;
+    let (r1, r2) = (regs[0], regs[1]);
+    self.clean_any_loc_args(n_temps);
+    Ok((r1, ArithOperand::Reg(r2)))
+  }
+
+  fn make_dc_test(op: &str, r: RegId, c: ConstantId) -> Test {
+    match op {
+      "==" => Test::EqualConst(r, c),
+      "!=" => Test::NotEqConst(r, c),
+      "<" => Test::LessConst(r, c),
+      "<=" => Test::LessOrEqualConst(r, c),
+      ">" => Test::GreaterConst(r, c),
+      ">=" => Test::GreaterOrEqualConst(r, c),
+      _ => unreachable!(),
+    }
+  }
+
+  fn emit_cmp_operand(op: &str, r: RegId, operand: CmpOperand) -> Test {
+    match operand {
+      CmpOperand::Imm(imm) => {
+        if op == "==" { Test::EqualImm(r, imm) } else { Test::NotEqImm(r, imm) }
+      }
+      CmpOperand::Const(cid) => Self::make_dc_test(op, r, cid),
+    }
+  }
+
+  fn emit_cmp_args(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    op: &str,
+    args: ExprsRef<'a, InfoKey>,
+  ) -> Result<Test> {
+    let is_eq_ne = matches!(op, "==" | "!=");
+    let rhs_literal = Self::expr_as_pool_literal(&args[1]);
+    let lhs_literal = if is_eq_ne { Self::expr_as_pool_literal(&args[0]) } else { None };
+
+    // RHS is a literal — emit only the LHS, use DI or DC for the RHS.
+    if let Some(ref rhs_val) = rhs_literal {
+      if let Some(operand) = Self::value_to_cmp_operand(bc, rhs_val, is_eq_ne) {
+        let (regs, n_temps) = self.eval_any_loc_args(bc, &args[..1])?;
+        let r1 = regs[0];
+        self.clean_any_loc_args(n_temps);
+        return Ok(Self::emit_cmp_operand(op, r1, operand));
+      }
+    }
+
+    // Commute eq/ne when LHS is a literal — emit only the RHS.
+    if let Some(ref lhs_val) = lhs_literal {
+      if let Some(operand) = Self::value_to_cmp_operand(bc, lhs_val, is_eq_ne) {
+        let (regs, n_temps) = self.eval_any_loc_args(bc, &args[1..2])?;
+        let r2 = regs[0];
+        self.clean_any_loc_args(n_temps);
+        return Ok(Self::emit_cmp_operand(op, r2, operand));
+      }
+    }
+
+    // Fallback: materialize both into registers, emit DD.
+    let (regs, n_temps) = self.eval_any_loc_args(bc, args)?;
+    let (r1, r2) = (regs[0], regs[1]);
+    self.clean_any_loc_args(n_temps);
+    Ok(match op {
+      "<" => Test::Less(r1, r2),
+      ">" => Test::Greater(r1, r2),
+      "<=" => Test::LessOrEqual(r1, r2),
+      ">=" => Test::GreaterOrEqual(r1, r2),
+      "==" => Test::Equal(r1, r2),
+      "!=" => Test::NotEq(r1, r2),
+      _ => unreachable!(),
+    })
+  }
+
   fn emit_op(
     &mut self,
     bc: &mut BytecodeCtx,
@@ -858,10 +1037,8 @@ impl<'a> CodeGenCtx<'a> {
       match op_str.0 {
         "+" | "-" | "*" | "/" | "%" => {
           if args.len() == 2 {
-            let (regs, n_temps) = self.eval_any_loc_args(bc, args)?;
-            let (r1, r2) = (regs[0], regs[1]);
-            self.clean_any_loc_args(n_temps);
-            self.emit_binary_op_with_slots(bc, op_str.0, r1, r2, data, control, next)?;
+            let (r1, opr2) = self.emit_arith_args(bc, op_str.0, args)?;
+            self.emit_binary_op_with_slots(bc, op_str.0, r1, opr2, data, control, next)?;
           } else if op_str.0 == "-" && args.len() == 1 {
             let (regs, n_temps) = self.eval_any_loc_args(bc, args)?;
             let r1 = regs[0];
@@ -873,18 +1050,7 @@ impl<'a> CodeGenCtx<'a> {
         }
         "<" | "<=" | ">" | ">=" | "==" | "!=" => {
           if args.len() == 2 {
-            let (regs, n_temps) = self.eval_any_loc_args(bc, args)?;
-            let (r1, r2) = (regs[0], regs[1]);
-            let test = match op_str.0 {
-              "<" => Test::Less(r1, r2),
-              ">" => Test::Greater(r1, r2),
-              "<=" => Test::LessOrEqual(r1, r2),
-              ">=" => Test::GreaterOrEqual(r1, r2),
-              "==" => Test::Equal(r1, r2),
-              "!=" => Test::NotEq(r1, r2),
-              _ => unreachable!(),
-            };
-            self.clean_any_loc_args(n_temps);
+            let test = self.emit_cmp_args(bc, op_str.0, args)?;
             self.emit_store(bc, Value::Test(test), data, control, next)?;
           } else {
             return self.diagnostic.fatal("expected two arguments for comparison operator");

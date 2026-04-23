@@ -5,14 +5,16 @@ if 1 < 2 then 3 else 4 end;
    --- Syntax Tree ---
    (block (if (< 1 2) 3 4) (/ 9 10))
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::2 captured::[]
+   thunk::__top_thunk__ params::0 regs::1 captured::[]
+   constants::[
+     @0: 2
+     @1: 10
+   ]
    loadi        r0, #1
-   loadi        r1, #2
-   cmp.lt.dd    r0, r1
+   cmp.lt.dc    r0, @0
    jmp          #1
    jmp          #0
    loadi        r0, #9
-   loadi        r1, #10
-   div.dd       r0, r0, r1
+   div.dc       r0, r0, @1
    ret          r0
 *)

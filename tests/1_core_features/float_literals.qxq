@@ -11,30 +11,26 @@
    --- Syntax Tree ---
    (block (+ 1.5 2.5) 1000.0 (* -0.0 0) (/ 0.0 0) 250.0 0.15 (+ 1000 0.5) (* 3.14 2.0))
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::2 captured::[]
+   thunk::__top_thunk__ params::0 regs::1 captured::[]
    constants::[
-     @0: 1.5
-     @1: 2.5
-     @2: -0.0
-     @3: 0.0
-     @4: 0.5
-     @5: 3.14
+     @0: 2.5
+     @1: 1.5
+     @2: 0
+     @3: -0.0
+     @4: 0.0
+     @5: 0.5
      @6: 2.0
+     @7: 3.14
    ]
-   loadc        r0, @0
-   loadc        r1, @1
-   add.dd       r0, r0, r1
-   loadc        r0, @2
-   loadi        r1, #0
-   mul.dd       r0, r0, r1
+   loadc        r0, @1
+   add.dc       r0, r0, @0
    loadc        r0, @3
-   loadi        r1, #0
-   div.dd       r0, r0, r1
+   mul.dc       r0, r0, @2
+   loadc        r0, @4
+   div.dc       r0, r0, @2
    loadi        r0, #1000
-   loadc        r1, @4
-   add.dd       r0, r0, r1
-   loadc        r0, @5
-   loadc        r1, @6
-   mul.dd       r0, r0, r1
+   add.dc       r0, r0, @5
+   loadc        r0, @7
+   mul.dc       r0, r0, @6
    ret          r0
 *)

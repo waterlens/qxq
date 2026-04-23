@@ -13,16 +13,16 @@ if true then 1 else 0 end
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::2 captured::[]
    constants::[
-     @0: "not"
-     @1: " greater"
+     @0: 0
+     @1: "not"
+     @2: " greater"
    ]
    loadi        r0, #1
-   loadi        r1, #0
-   cmp.gt.dd    r0, r1
+   cmp.gt.dc    r0, @0
    jmp          #1
    jmp          #3
-   loadc        r0, @0
-   loadc        r1, @1
+   loadc        r0, @1
+   loadc        r1, @2
    add.dd       r0, r0, r1
    mobj         r0, k3, r0
    cmp.not.f    r0, #0

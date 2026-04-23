@@ -38,13 +38,15 @@ repeat("ha", 3)
    
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[r1 as ^1, r0 as ^2]
+   constants::[
+     @0: 1
+   ]
    loadf        r2, ^1
    cmp.ge.dd    r0, r2
    jmp          #1
    ret          r1
    loadf        r2, ^0
-   loadi        r6, #1
-   add.dd       r4, r0, r6
+   add.dc       r4, r0, @0
    loadf        r6, ^2
    add.dd       r5, r1, r6
    apply        r2, #2

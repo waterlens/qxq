@@ -359,15 +359,15 @@ mod tests {
     let n_dead = heap_size / s1 + 200;
     let mut code = Vec::new();
     for i in 1u8..=5 {
-      code.push(Bytecode::loadi(i.into(), (i as u16).into()));
+      code.push(Bytecode::loadi(i.into(), (i as i16).into()));
       code.push(Bytecode::wobj(i.into(), 0u8.into(), 1u8.into()));
     }
     for j in 0..n_dead {
-      let v = (j & 0x7fff) as u16;
+      let v = (j & 0x7fff) as i16;
       code.push(Bytecode::loadi(6u8.into(), v.into()));
       code.push(Bytecode::wobj(6u8.into(), 0u8.into(), 1u8.into()));
     }
-    code.push(Bytecode::loadi(0u8.into(), 42u16.into()));
+    code.push(Bytecode::loadi(0u8.into(), 42i16.into()));
     code.push(Bytecode::ret(0u8.into()));
     let thunk = Thunk {
       name: String::new(),
@@ -398,26 +398,26 @@ mod tests {
     let heap_size = 1024;
     let n_fill = heap_size / s1;
     let mut code = Vec::new();
-    code.push(Bytecode::loadi(1u8.into(), 1u16.into()));
+    code.push(Bytecode::loadi(1u8.into(), 1i16.into()));
     code.push(Bytecode::wobj(1u8.into(), 0u8.into(), 1u8.into()));
-    code.push(Bytecode::loadi(2u8.into(), 2u16.into()));
+    code.push(Bytecode::loadi(2u8.into(), 2i16.into()));
     code.push(Bytecode::wobj(2u8.into(), 0u8.into(), 1u8.into()));
-    code.push(Bytecode::loadi(3u8.into(), 3u16.into()));
+    code.push(Bytecode::loadi(3u8.into(), 3i16.into()));
     code.push(Bytecode::wobj(3u8.into(), 0u8.into(), 1u8.into()));
-    code.push(Bytecode::loadi(4u8.into(), 4u16.into()));
+    code.push(Bytecode::loadi(4u8.into(), 4i16.into()));
     code.push(Bytecode::wobj(4u8.into(), 0u8.into(), 1u8.into()));
     for _ in 0..n_fill {
-      code.push(Bytecode::loadi(5u8.into(), 0u16.into()));
+      code.push(Bytecode::loadi(5u8.into(), 0i16.into()));
       code.push(Bytecode::wobj(5u8.into(), 0u8.into(), 1u8.into()));
     }
-    code.push(Bytecode::loadi(1u8.into(), 0u16.into()));
-    code.push(Bytecode::loadi(2u8.into(), 0u16.into()));
-    code.push(Bytecode::loadi(4u8.into(), 0u16.into()));
-    code.push(Bytecode::loadi(5u8.into(), 10u16.into()));
-    code.push(Bytecode::loadi(6u8.into(), 20u16.into()));
-    code.push(Bytecode::loadi(7u8.into(), 30u16.into()));
+    code.push(Bytecode::loadi(1u8.into(), 0i16.into()));
+    code.push(Bytecode::loadi(2u8.into(), 0i16.into()));
+    code.push(Bytecode::loadi(4u8.into(), 0i16.into()));
+    code.push(Bytecode::loadi(5u8.into(), 10i16.into()));
+    code.push(Bytecode::loadi(6u8.into(), 20i16.into()));
+    code.push(Bytecode::loadi(7u8.into(), 30i16.into()));
     code.push(Bytecode::wobj(5u8.into(), 0u8.into(), 3u8.into()));
-    code.push(Bytecode::loadi(0u8.into(), 99u16.into()));
+    code.push(Bytecode::loadi(0u8.into(), 99i16.into()));
     code.push(Bytecode::ret(0u8.into()));
     let thunk = Thunk {
       name: String::new(),

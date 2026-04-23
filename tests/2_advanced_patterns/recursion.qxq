@@ -25,14 +25,16 @@ fib(10)
    --- Syntax Tree ---
    (block (let factorial (fn (n) (block (let-rec iter (fn iter (i acc) (if (> i n) acc (iter (+ i 1) (* acc i))))) (iter 1 1)))) (let-rec fib (fn fib (n) (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))) (factorial 5) (fib 10))
    --- Thunk ---
-   thunk::fn params::2 regs::7 captured::[r0 as ^1]
+   thunk::fn params::2 regs::6 captured::[r0 as ^1]
+   constants::[
+     @0: 1
+   ]
    loadf        r2, ^1
    cmp.gt.dd    r0, r2
    jmp          #1
    ret          r1
    loadf        r2, ^0
-   loadi        r6, #1
-   add.dd       r4, r0, r6
+   add.dc       r4, r0, @0
    mul.dd       r5, r1, r0
    apply        r2, #2
    ret          r2
@@ -47,18 +49,19 @@ fib(10)
    ret          r2
    
    --- Thunk ---
-   thunk::fn params::1 regs::6 captured::[]
-   loadi        r1, #1
-   cmp.le.dd    r0, r1
+   thunk::fn params::1 regs::5 captured::[]
+   constants::[
+     @0: 1
+     @1: 2
+   ]
+   cmp.le.dc    r0, @0
    jmp          #1
    ret          r0
    loadf        r1, ^0
-   loadi        r4, #1
-   sub.dd       r3, r0, r4
+   sub.dc       r3, r0, @0
    apply        r1, #1
    loadf        r2, ^0
-   loadi        r5, #2
-   sub.dd       r4, r0, r5
+   sub.dc       r4, r0, @1
    apply        r2, #1
    add.dd       r1, r1, r2
    ret          r1

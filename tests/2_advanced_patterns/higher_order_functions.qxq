@@ -24,8 +24,10 @@ inc2(5)
    
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
-   loadi        r1, #1
-   add.dd       r1, r0, r1
+   constants::[
+     @0: 1
+   ]
+   add.dc       r1, r0, @0
    ret          r1
    
    --- Thunk ---
