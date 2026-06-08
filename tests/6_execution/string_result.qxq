@@ -1,0 +1,7 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+"\n\t\\\""
+
+(* EXPECT:
+   "\n\t\\\""
+*)

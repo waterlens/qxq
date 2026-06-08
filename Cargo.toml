@@ -6,6 +6,9 @@ repository = "https://github.com/waterlens/qxq"
 description = "A playground for interpreters and JIT compilers"
 license = "MIT"
 
+[profile.release]
+strip = "symbols"
+
 [workspace]
 members = ["qxq_macros"]
 

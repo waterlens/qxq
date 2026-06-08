@@ -278,6 +278,21 @@ mod tests {
   }
 
   #[test]
+  fn execution_string_result_uses_escaped_display() {
+    let result = compile_and_run("\"hello\"").unwrap();
+    assert_eq!(result, "\"hello\"");
+
+    let result = compile_and_run("\"\\n\\t\\\\\\\"\"").unwrap();
+    assert_eq!(result, "\"\\n\\t\\\\\\\"\"");
+
+    let result = compile_and_run(concat!("\"", "\u{e9}", "\"")).unwrap();
+    assert_eq!(result, concat!("\"", "\u{e9}", "\""));
+
+    let result = compile_and_run(concat!("\"", "\u{1}", "\"")).unwrap();
+    assert_eq!(result, "\"\\x01\"");
+  }
+
+  #[test]
   fn validator_allows_captures_and_valid_loadf() {
     use crate::bytecode::Location;
     let diag = Rc::new(Diagnostic::new());
