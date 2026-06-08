@@ -52,6 +52,7 @@ fn main() {
     .allowlist_function("vm_object_size_for_fields")
     .allowlist_function("vm_status_name")
     .allowlist_type("state")
+    .allowlist_type("fiber_segment")
     .allowlist_type("status_t")
     .allowlist_type("heap")
     .allowlist_type("thunk")
