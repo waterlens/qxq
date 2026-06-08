@@ -1,0 +1,8 @@
+(* RUN: {qxq|cargo run --} --dump - %s | {qxq|cargo run --} --load - *)
+
+let make_adder = fn (x) fn (y) x + y end end;
+make_adder(40)(2)
+
+(* EXPECT:
+   42
+*)

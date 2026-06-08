@@ -1,0 +1,40 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+let r = 0;
+
+(* simple capture *)
+let x = 40;
+let add_x = fn (y) x + y end;
+let r = r + if add_x(2) == 42 then 0 else 1 end;
+
+(* returned closure *)
+let make_adder = fn (x) fn (y) x + y end end;
+let r = r + if make_adder(40)(2) == 42 then 0 else 2 end;
+
+(* compose runs normally, not only under --inspect *)
+let compose = fn (f, g) fn (x) f(g(x)) end end;
+let inc = fn (x) x + 1 end;
+let inc2 = compose(inc, inc);
+let r = r + if inc2(5) == 7 then 0 else 4 end;
+
+(* inner function captures a parent register and a parent freevar *)
+let a = 10;
+let make_nested = fn (b)
+  let c = 1;
+  fn (x) a + b + c + x end
+end;
+let nested = make_nested(20);
+let r = r + if nested(11) == 42 then 0 else 8 end;
+
+(* nested function captures recursive self via the parent ^0 *)
+let rec bounce = fn (n)
+  let again = fn (m) bounce(m) end;
+  if n == 0 then 1 else again(n - 1) + 1 end
+end;
+let r = r + if bounce(4) == 5 then 0 else 16 end;
+
+r
+
+(* EXPECT:
+   0
+*)

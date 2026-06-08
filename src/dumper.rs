@@ -30,8 +30,13 @@ impl Dumper {
 
     // Thunk Table
     for thunk in &self.image.thunks {
+      let ncaptured: u8 = thunk
+        .fvlocs
+        .len()
+        .try_into()
+        .map_err(|_| self.diag.error("too many captured variables to dump"))?;
       thunk_data.clear();
-      thunk_data.extend_from_slice(&[0x00, thunk.nparams, thunk.nregs, thunk.fvlocs.len() as u8]);
+      thunk_data.extend_from_slice(&[0x00, thunk.nparams, thunk.nregs, ncaptured]);
       uleb8::encode_uleb128(thunk.constants.len() as u64, &mut thunk_data);
       uleb8::encode_uleb128(thunk.code.len() as u64, &mut thunk_data);
 
@@ -50,8 +55,12 @@ impl Dumper {
             thunk_data.push(r.0);
           }
           Location::FreeVar(fv) => {
+            let id: u8 = fv
+              .0
+              .try_into()
+              .map_err(|_| self.diag.error("captured free variable index too large to dump"))?;
             thunk_data.push(1);
-            thunk_data.push(fv.0 as u8);
+            thunk_data.push(id);
           }
           Location::Temporary => return self.diag.fail("temporary location in thunk"),
         }
@@ -94,7 +103,7 @@ impl Dumper {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::bytecode::{Bytecode, Thunk};
+  use crate::bytecode::{Bytecode, FreeVarId, RegId, Thunk};
 
   #[test]
   fn test_header() {
@@ -110,5 +119,33 @@ mod tests {
     let data = dumper.dump().unwrap();
     assert_eq!(&data[0..4], b"QXQ\x07");
     assert_eq!(data[4], 0x01); // Version
+  }
+
+  #[test]
+  fn rejects_capture_count_overflow() {
+    let thunk = Thunk {
+      name: "test".to_string(),
+      code: Box::new([Bytecode::nop()]),
+      fvlocs: vec![Location::Slot(RegId(0)); 256].into_boxed_slice(),
+      nparams: 0,
+      nregs: 1,
+      constants: Box::new([]),
+    };
+    let dumper = Dumper::new(BytecodeImage { thunks: vec![thunk] }, Rc::new(Diagnostic::new()));
+    assert!(dumper.dump().is_err());
+  }
+
+  #[test]
+  fn rejects_capture_index_overflow() {
+    let thunk = Thunk {
+      name: "test".to_string(),
+      code: Box::new([Bytecode::nop()]),
+      fvlocs: Box::new([Location::FreeVar(FreeVarId(256))]),
+      nparams: 0,
+      nregs: 0,
+      constants: Box::new([]),
+    };
+    let dumper = Dumper::new(BytecodeImage { thunks: vec![thunk] }, Rc::new(Diagnostic::new()));
+    assert!(dumper.dump().is_err());
   }
 }

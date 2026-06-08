@@ -1,7 +1,7 @@
 use std::{ffi::CStr, ptr::NonNull, rc::Rc};
 
 use crate::{
-  bytecode::{BinaryRepr, Bytecode, BytecodeImage, Operands, Operator, Tag, Thunk},
+  bytecode::{BinaryRepr, Bytecode, BytecodeImage, Location, Operands, Operator, Tag, Thunk},
   diagnostic::{Diagnostic, Result},
   vm,
 };
@@ -71,24 +71,24 @@ impl ImageValidator {
     }
 
     for thunk in &image.thunks {
-      if !thunk.fvlocs.is_empty() {
-        return self.diag.fail("vm execution does not support captured variables (LoadF/SetF)");
+      for loc in thunk.fvlocs.iter() {
+        if matches!(loc, Location::Temporary) {
+          return self.diag.fail("temporary location in thunk capture list");
+        }
       }
       for bc in thunk.code.iter() {
-        self.validate_bytecode(*bc)?;
+        self.validate_bytecode(*bc, thunk.fvlocs.len())?;
       }
     }
 
     Ok(())
   }
 
-  fn validate_bytecode(&self, bytecode: Bytecode) -> Result<()> {
+  fn validate_bytecode(&self, bytecode: Bytecode, nfree: usize) -> Result<()> {
     use Operator::*;
     match bytecode {
-      Bytecode(LoadF, Operands::AB(op)) if u16::from(op.o1) == 0 => Ok(()),
-      Bytecode(LoadF | SetF, _) => {
-        self.diag.fail(format!("illegal instruction: {}", bytecode))
-      }
+      Bytecode(LoadF, Operands::AB(op)) if usize::from(u16::from(op.o1)) <= nfree => Ok(()),
+      Bytecode(LoadF | SetF, _) => self.diag.fail(format!("illegal instruction: {}", bytecode)),
       Bytecode(MObj, Operands::ABC(op)) if u8::from(op.o1) >= u8::from(Tag::INT) => {
         self.diag.fail(format!("illegal instruction: heap-backed mobj: {}", bytecode))
       }
@@ -131,6 +131,7 @@ struct OwnedThunk {
 impl OwnedThunk {
   fn from_thunk(thunk: &Thunk, diag: &Diagnostic) -> Result<Self> {
     let ops = thunk.code.iter().map(|bc| encode_bytecode(*bc)).collect::<Vec<_>>();
+    let fvlocs = encode_capture_locations(&thunk.fvlocs, diag)?;
     let ptr = unsafe {
       vm::vm_thunk_alloc(
         ops.as_ptr(),
@@ -138,6 +139,7 @@ impl OwnedThunk {
         thunk.constants.as_ptr().cast::<vm::val_t>(),
         thunk.constants.len(),
         thunk.nregs,
+        fvlocs.as_ptr(),
         thunk.fvlocs.len(),
       )
     };
@@ -154,6 +156,20 @@ impl OwnedThunk {
   fn as_ptr(&self) -> *mut vm::thunk {
     self.ptr.as_ptr()
   }
+}
+
+fn encode_capture_locations(
+  fvlocs: &[Location],
+  diag: &Diagnostic,
+) -> Result<Vec<vm::capture_loc>> {
+  fvlocs
+    .iter()
+    .map(|loc| match loc {
+      Location::Slot(reg) => Ok(vm::capture_loc { kind: 0, index: reg.0.into() }),
+      Location::FreeVar(fv) => Ok(vm::capture_loc { kind: 1, index: fv.0 }),
+      Location::Temporary => diag.fail("temporary location in thunk capture list"),
+    })
+    .collect()
 }
 
 impl Drop for OwnedThunk {
@@ -224,12 +240,8 @@ mod tests {
     let wrapper = OwnedThunk::wrapper(image.thunks.len() - 1, &diag)?;
     let mut result = 0u64;
     let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
-    let mut rargs = vm::runtime_args {
-      trace_level: 0,
-      base_size: heap_size,
-      align: 8,
-      descspace_size: 4096,
-    };
+    let mut rargs =
+      vm::runtime_args { trace_level: 0, base_size: heap_size, align: 8, descspace_size: 4096 };
     let mut stats: vm::gc_stats = unsafe { std::mem::zeroed() };
     let status = unsafe {
       vm::vm_exec_with_args(
@@ -266,13 +278,31 @@ mod tests {
   }
 
   #[test]
-  fn validator_rejects_loadf() {
+  fn validator_allows_captures_and_valid_loadf() {
+    use crate::bytecode::Location;
     let diag = Rc::new(Diagnostic::new());
     let validator = ImageValidator::new(Rc::clone(&diag));
     let thunk = Thunk {
       name: String::new(),
-      code: vec![Bytecode::loadf(0.into(), 1.into())].into(),
-      fvlocs: vec![].into(),
+      code: vec![Bytecode::loadf(0.into(), 0.into()), Bytecode::loadf(0.into(), 1.into())].into(),
+      fvlocs: vec![Location::Slot(0.into())].into(),
+      nparams: 0,
+      nregs: 1,
+      constants: vec![].into(),
+    };
+    let image = BytecodeImage { thunks: vec![thunk] };
+    assert!(validator.validate(&image).is_ok());
+  }
+
+  #[test]
+  fn validator_rejects_out_of_range_loadf() {
+    use crate::bytecode::Location;
+    let diag = Rc::new(Diagnostic::new());
+    let validator = ImageValidator::new(Rc::clone(&diag));
+    let thunk = Thunk {
+      name: String::new(),
+      code: vec![Bytecode::loadf(0.into(), 2.into())].into(),
+      fvlocs: vec![Location::Slot(0.into())].into(),
       nparams: 0,
       nregs: 1,
       constants: vec![].into(),
@@ -330,7 +360,7 @@ mod tests {
   }
 
   #[test]
-  fn validator_rejects_captures() {
+  fn validator_rejects_temporary_captures() {
     use crate::bytecode::Location;
     let diag = Rc::new(Diagnostic::new());
     let validator = ImageValidator::new(Rc::clone(&diag));
@@ -432,5 +462,4 @@ mod tests {
     let (result, _stats) = execute_with_heap(image, diag, heap_size).unwrap();
     assert_eq!(result, "99");
   }
-
 }
