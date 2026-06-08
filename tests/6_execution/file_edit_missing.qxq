@@ -1,0 +1,15 @@
+(* RUN: rm -f /tmp/qxq_file_edit_missing.bin && {qxq|cargo run --} %s && xxd -p /tmp/qxq_file_edit_missing.bin && rm -f /tmp/qxq_file_edit_missing.bin *)
+
+let path = "/tmp/qxq_file_edit_missing.bin";
+let start = open(path);
+let status = if start == 0 then 0 else 1 end;
+let write_a = edit(0, 65);
+let write_c = edit(2, 67);
+let closed = close(path);
+
+status
+
+(* EXPECT:
+   0
+   410043
+*)

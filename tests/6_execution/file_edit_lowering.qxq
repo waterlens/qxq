@@ -1,0 +1,16 @@
+(* RUN: {qxq|cargo run -- --inspect --no-tree} %s *)
+
+let path = "p";
+let offset = open(path);
+let wrote = edit(offset, 65);
+close(path)
+
+(* EXPECT:
+   thunk::__top_thunk__ params::0 regs::4 captured::[]
+   loadc        r0, @0
+   trap         #9, r0, r1
+   loadi        r3, #65
+   trap         #11, r1, r3
+   trap         #10, r0, r0
+   ret          r3
+*)

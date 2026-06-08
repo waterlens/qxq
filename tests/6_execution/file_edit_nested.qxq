@@ -1,0 +1,13 @@
+(* RUN: rm -f /tmp/qxq_file_edit_nested.bin && {qxq|cargo run --} %s && rm -f /tmp/qxq_file_edit_nested.bin *)
+
+let f = fn (path)
+  let start = open(path);
+  let closed = close(path);
+  start
+end;
+
+f("/tmp/qxq_file_edit_nested.bin")
+
+(* EXPECT:
+   0
+*)

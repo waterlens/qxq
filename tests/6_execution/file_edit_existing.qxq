@@ -1,0 +1,12 @@
+(* RUN: printf 'abcd' > /tmp/qxq_file_edit_existing.bin && {qxq|cargo run --} %s && xxd -p /tmp/qxq_file_edit_existing.bin && rm -f /tmp/qxq_file_edit_existing.bin *)
+
+let path = "/tmp/qxq_file_edit_existing.bin";
+let start = open(path);
+let closed = close(path);
+
+if start == 4 then 0 else start end
+
+(* EXPECT:
+   0
+   61626364
+*)

@@ -249,6 +249,21 @@ impl From<Tag> for Op8 {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TrapId(u8);
+
+impl TrapId {
+  pub const FILE_OPEN: Self = TrapId(9);
+  pub const FILE_CLOSE: Self = TrapId(10);
+  pub const FILE_EDIT: Self = TrapId(11);
+}
+
+impl From<TrapId> for Op8 {
+  fn from(x: TrapId) -> Self {
+    x.0.into()
+  }
+}
+
 impl TryFrom<usize> for Op8 {
   type Error = ();
   fn try_from(value: usize) -> Result<Self, Self::Error> {

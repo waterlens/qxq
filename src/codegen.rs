@@ -7,7 +7,7 @@ use slotmap::SlotMap;
 use crate::{
   bytecode::{
     Bytecode, BytecodeCtx, ConstantId, FloatBits, FreeVarId, Label, Location, RegId,
-    SmallConstantId, Tag,
+    SmallConstantId, Tag, TrapId,
   },
   diagnostic::{Diagnostic, Result},
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, SynTree},
@@ -98,6 +98,47 @@ enum CmpOperand {
 enum ArithOperand {
   Reg(RegId),
   Const(SmallConstantId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SourceBuiltin {
+  Open,
+  Close,
+  Edit,
+}
+
+impl SourceBuiltin {
+  fn from_name(name: &str) -> Option<Self> {
+    match name {
+      "open" => Some(Self::Open),
+      "close" => Some(Self::Close),
+      "edit" => Some(Self::Edit),
+      _ => None,
+    }
+  }
+
+  fn name(self) -> &'static str {
+    match self {
+      Self::Open => "open",
+      Self::Close => "close",
+      Self::Edit => "edit",
+    }
+  }
+
+  fn arity(self) -> usize {
+    match self {
+      Self::Open | Self::Close => 1,
+      Self::Edit => 2,
+    }
+  }
+
+  fn trap_id(self) -> TrapId {
+    match self {
+      Self::Open => TrapId::FILE_OPEN,
+      Self::Close => TrapId::FILE_CLOSE,
+      Self::Edit => TrapId::FILE_EDIT,
+    }
+  }
 }
 
 struct ValInfo<'a> {
@@ -1023,6 +1064,62 @@ impl<'a> CodeGenCtx<'a> {
     })
   }
 
+  fn emit_source_builtin_apply(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    builtin: SourceBuiltin,
+    args: ExprsRef<'a, InfoKey>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let expected = builtin.arity();
+    if args.len() != expected {
+      let plural = if expected == 1 { "" } else { "s" };
+      return self
+        .diagnostic
+        .fatal(&format!("expected {expected} argument{plural} for {}", builtin.name()));
+    }
+
+    let (regs, n_temps) = self.eval_any_loc_args(bc, args)?;
+
+    match builtin {
+      SourceBuiltin::Open => {
+        let path = regs[0];
+        self.clean_any_loc_args(n_temps);
+        match data {
+          DataDest::Loc(Location::Slot(dst)) => {
+            bc.push(Bytecode::trap(builtin.trap_id().into(), path.into(), dst.into()));
+            self.emit_store(bc, Value::Loc(Location::Slot(dst)), data, control, next)?;
+          }
+          DataDest::Effect
+          | DataDest::Loc(Location::Temporary)
+          | DataDest::Loc(Location::FreeVar(_))
+          | DataDest::RetValue => {
+            let dst = self.allocate_temporary()?;
+            bc.push(Bytecode::trap(builtin.trap_id().into(), path.into(), dst.into()));
+            self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
+          }
+        }
+      }
+      SourceBuiltin::Close => {
+        let path = regs[0];
+        self.clean_any_loc_args(n_temps);
+        bc.push(Bytecode::trap(builtin.trap_id().into(), path.into(), 0u8.into()));
+        self.emit_store(bc, Value::Unit, data, control, next)?;
+      }
+      SourceBuiltin::Edit => {
+        let offset = regs[0];
+        let byte = regs[1];
+        self.clean_any_loc_args(n_temps);
+        bc.push(Bytecode::trap(builtin.trap_id().into(), offset.into(), byte.into()));
+        self.emit_store(bc, Value::Unit, data, control, next)?;
+      }
+    }
+
+    Ok(())
+  }
+
   fn emit_op(
     &mut self,
     bc: &mut BytecodeCtx,
@@ -1130,6 +1227,14 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_op(bc, op, *pair, args, data, control, next)?
       }
       Apply { func, pair: _, args, info: _ } => {
+        if let Ident(token_str, _) = func
+          && let Some(builtin) = SourceBuiltin::from_name(token_str.0)
+          && self.scope.get_bound(token_str).is_none()
+        {
+          self.emit_source_builtin_apply(bc, builtin, args, data, control, next)?;
+          return Ok(());
+        }
+
         let func_reg = self.allocate_temporary()?;
         let l = bc.fresh_label();
         let c = Control::Pos(l);
@@ -1184,15 +1289,20 @@ impl<'a> CodeGenCtx<'a> {
       }
       Fn { name, params, body, info } => {
         let freevars = &self.information.get(*info).unwrap().freevars;
+        let mut captured_freevars = vec![];
         let mut fvlocs = vec![];
         for fv in freevars {
+          if self.scope.get_bound(fv).is_none() && SourceBuiltin::from_name(fv.0).is_some() {
+            continue;
+          }
           let loc = self.scope.get_bound(fv).ok_or_else(|| {
             self.diagnostic.error(&format!("unable to find captured variable: {}", fv.0))
           })?;
           assert!(!matches!(loc, Location::Temporary));
+          captured_freevars.push(*fv);
           fvlocs.push(loc);
         }
-        self.scope.enter_function(name, freevars)?;
+        self.scope.enter_function(name, &captured_freevars)?;
         self.enter_new_frame();
         for param in *params {
           let reg = self.allocate_temporary()?;
