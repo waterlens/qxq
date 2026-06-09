@@ -770,19 +770,22 @@ impl<'a> Parser<'a> {
         self.skip_token();
 
         if let PairedOpen(po) = op_token.inner.tag {
-          let expr = self.parse_expr()?;
+          let mut exprs = vec![];
 
-          let mut exprs = vec![expr.inner];
-
-          while self.peek_operator(",", false) {
-            self.skip_token();
-
-            while self.peek_newline() {
-              self.skip_token();
-            }
-
+          if !self.peek_paired_close(po, false) {
             let expr = self.parse_expr()?;
             exprs.push(expr.inner);
+
+            while self.peek_operator(",", false) {
+              self.skip_token();
+
+              while self.peek_newline() {
+                self.skip_token();
+              }
+
+              let expr = self.parse_expr()?;
+              exprs.push(expr.inner);
+            }
           }
 
           let _ = self.expect_paired_close(po, false)?;
@@ -955,6 +958,7 @@ mod tests {
     test_parse_exprs("(`rawop`)(1)", "(rawop 1)");
     test_parse_exprs("(+)(1)", "(+ 1)");
     test_parse_exprs("f @ g @ h", "(@ f (@ g h))");
+    test_parse_exprs("f()", "(f)");
     test_parse_exprs("f{x}[y](z)", "(((f x) y) z)");
     test_parse_exprs("f(x, y)(z)", "((f x y) z)");
     test_parse_exprs("(x, y)", "(tuple x y)");

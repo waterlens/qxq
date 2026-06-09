@@ -253,6 +253,11 @@ impl From<Tag> for Op8 {
 pub struct TrapId(u8);
 
 impl TrapId {
+  pub const PRINT_REGS: Self = TrapId(4);
+  pub const PRINT_REGS_HEX: Self = TrapId(5);
+  pub const ASSERT_EQ: Self = TrapId(6);
+  pub const PRINT_OBJ: Self = TrapId(7);
+  pub const HEAP_STAT: Self = TrapId(8);
   pub const FILE_OPEN: Self = TrapId(9);
   pub const FILE_CLOSE: Self = TrapId(10);
   pub const FILE_EDIT: Self = TrapId(11);

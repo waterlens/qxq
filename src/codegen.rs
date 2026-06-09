@@ -102,6 +102,11 @@ enum ArithOperand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum SourceBuiltin {
+  PrintRaw,
+  PrintRawHex,
+  AssertEq,
+  PrintObject,
+  PrintHeapStat,
   Open,
   Close,
   Edit,
@@ -110,6 +115,11 @@ enum SourceBuiltin {
 impl SourceBuiltin {
   fn from_name(name: &str) -> Option<Self> {
     match name {
+      "print_raw" => Some(Self::PrintRaw),
+      "print_raw_hex" => Some(Self::PrintRawHex),
+      "assert_eq" => Some(Self::AssertEq),
+      "print_object" => Some(Self::PrintObject),
+      "print_heap_stat" => Some(Self::PrintHeapStat),
       "open" => Some(Self::Open),
       "close" => Some(Self::Close),
       "edit" => Some(Self::Edit),
@@ -119,6 +129,11 @@ impl SourceBuiltin {
 
   fn name(self) -> &'static str {
     match self {
+      Self::PrintRaw => "print_raw",
+      Self::PrintRawHex => "print_raw_hex",
+      Self::AssertEq => "assert_eq",
+      Self::PrintObject => "print_object",
+      Self::PrintHeapStat => "print_heap_stat",
       Self::Open => "open",
       Self::Close => "close",
       Self::Edit => "edit",
@@ -127,13 +142,19 @@ impl SourceBuiltin {
 
   fn arity(self) -> usize {
     match self {
-      Self::Open | Self::Close => 1,
-      Self::Edit => 2,
+      Self::PrintHeapStat => 0,
+      Self::PrintRaw | Self::PrintRawHex | Self::PrintObject | Self::Open | Self::Close => 1,
+      Self::AssertEq | Self::Edit => 2,
     }
   }
 
   fn trap_id(self) -> TrapId {
     match self {
+      Self::PrintRaw => TrapId::PRINT_REGS,
+      Self::PrintRawHex => TrapId::PRINT_REGS_HEX,
+      Self::AssertEq => TrapId::ASSERT_EQ,
+      Self::PrintObject => TrapId::PRINT_OBJ,
+      Self::PrintHeapStat => TrapId::HEAP_STAT,
       Self::Open => TrapId::FILE_OPEN,
       Self::Close => TrapId::FILE_CLOSE,
       Self::Edit => TrapId::FILE_EDIT,
@@ -1013,7 +1034,11 @@ impl<'a> CodeGenCtx<'a> {
   fn emit_cmp_operand(op: &str, r: RegId, operand: CmpOperand) -> Test {
     match operand {
       CmpOperand::Imm(imm) => {
-        if op == "==" { Test::EqualImm(r, imm) } else { Test::NotEqImm(r, imm) }
+        if op == "==" {
+          Test::EqualImm(r, imm)
+        } else {
+          Test::NotEqImm(r, imm)
+        }
       }
       CmpOperand::Const(cid) => Self::make_dc_test(op, r, cid),
     }
@@ -1084,6 +1109,32 @@ impl<'a> CodeGenCtx<'a> {
     let (regs, n_temps) = self.eval_any_loc_args(bc, args)?;
 
     match builtin {
+      SourceBuiltin::PrintRaw | SourceBuiltin::PrintRawHex => {
+        let start = regs[0];
+        let end =
+          start.0.checked_add(1).ok_or_else(|| self.diagnostic.error("register range overflow"))?;
+        self.clean_any_loc_args(n_temps);
+        bc.push(Bytecode::trap(builtin.trap_id().into(), start.into(), end.into()));
+        self.emit_store(bc, Value::Unit, data, control, next)?;
+      }
+      SourceBuiltin::AssertEq => {
+        let lhs = regs[0];
+        let rhs = regs[1];
+        self.clean_any_loc_args(n_temps);
+        bc.push(Bytecode::trap(builtin.trap_id().into(), lhs.into(), rhs.into()));
+        self.emit_store(bc, Value::Unit, data, control, next)?;
+      }
+      SourceBuiltin::PrintObject => {
+        let value = regs[0];
+        self.clean_any_loc_args(n_temps);
+        bc.push(Bytecode::trap(builtin.trap_id().into(), value.into(), 0u8.into()));
+        self.emit_store(bc, Value::Unit, data, control, next)?;
+      }
+      SourceBuiltin::PrintHeapStat => {
+        self.clean_any_loc_args(n_temps);
+        bc.push(Bytecode::trap(builtin.trap_id().into(), 0u8.into(), 0u8.into()));
+        self.emit_store(bc, Value::Unit, data, control, next)?;
+      }
       SourceBuiltin::Open => {
         let path = regs[0];
         self.clean_any_loc_args(n_temps);

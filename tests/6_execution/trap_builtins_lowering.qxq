@@ -1,0 +1,16 @@
+(* RUN: {qxq|cargo run -- --inspect --no-tree} %s *)
+
+let v = 42;
+let raw = print_raw(v);
+let raw_hex = print_raw_hex(v);
+let eq = assert_eq(v, 42);
+let obj = print_object("hi");
+print_heap_stat()
+
+(* EXPECT:
+   trap         #4
+   trap         #5
+   trap         #6
+   trap         #7
+   trap         #8
+*)

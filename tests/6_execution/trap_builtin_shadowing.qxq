@@ -1,0 +1,8 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+let print_raw = fn (x) x + 1 end;
+print_raw(41)
+
+(* EXPECT:
+   42
+*)
