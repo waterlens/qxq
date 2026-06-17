@@ -278,6 +278,24 @@ mod tests {
   }
 
   #[test]
+  fn execution_unit_literal() {
+    let result = compile_and_run("()").unwrap();
+    assert_eq!(result, "()");
+  }
+
+  #[test]
+  fn execution_unit_binding() {
+    let result = compile_and_run("let x = (); x").unwrap();
+    assert_eq!(result, "()");
+  }
+
+  #[test]
+  fn execution_unit_is_falsy() {
+    let result = compile_and_run("if () then 1 else 2 end").unwrap();
+    assert_eq!(result, "2");
+  }
+
+  #[test]
   fn execution_string_result_uses_escaped_display() {
     let result = compile_and_run("\"hello\"").unwrap();
     assert_eq!(result, "\"hello\"");

@@ -1,0 +1,16 @@
+(* RUN: {qxq|cargo run -- --inspect --no-tree} %s *)
+
+(32767, 32768, 65535, 65536)
+
+(* EXPECT:
+   thunk::__top_thunk__ params::0 regs::4 captured::[]
+   constants::[
+     @0: 65536
+   ]
+   loadi        r0, #32767
+   loadui       r1, #32768
+   loadui       r2, #65535
+   loadc        r3, @0
+   wrap         r0, k1, #4
+   ret          r0
+*)

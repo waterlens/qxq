@@ -84,6 +84,7 @@ pub type ExprsRef<'a, I> = &'a [ExprRef<'a, I>];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr<'a, I> {
+  Unit(I),
   BoolLiteral(bool, I),
   IntLiteral(i64, I),
   FloatLiteral(FloatBits, I),
@@ -105,6 +106,7 @@ impl<I> ToSexp for Expr<'_, I> {
   fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
     use Expr::*;
     match self {
+      Unit(_) => pool.atom("()"),
       BoolLiteral(b, _) => pool.atom(if *b { "true" } else { "false" }),
       IntLiteral(n, _) => pool.atom(n.to_string()),
       FloatLiteral(n, _) => pool.atom(n.to_string()),
@@ -158,7 +160,8 @@ impl<I> Expr<'_, I> {
   pub fn get_info(&self) -> &I {
     use Expr::*;
     match self {
-      BoolLiteral(_, i)
+      Unit(i)
+      | BoolLiteral(_, i)
       | IntLiteral(_, i)
       | FloatLiteral(_, i)
       | StrLiteral(_, i)
@@ -185,6 +188,10 @@ impl<'a> ToSexp for InfoExpr<'a> {
     use Expr::*;
     let mut parts = Vec::new();
     let is_atom = match &self.expr {
+      Unit(_) => {
+        parts.push(pool.atom("()"));
+        true
+      }
       BoolLiteral(b, _) => {
         parts.push(pool.atom(if *b { "true" } else { "false" }));
         true
@@ -620,6 +627,18 @@ impl<'a> Parser<'a> {
       PairedOpen(po) => {
         let inner_token = self.peek_token()?;
         match inner_token.inner.tag {
+          PairedClose(pc) if pc == po => match po {
+            Paired::Parenthesis => {
+              self.skip_token();
+              arena.alloc(ExprCon::Unit(self.new_empty_info()))
+            }
+            Paired::Bracket => return self.diag.fail("empty array has not been supported yet"),
+            Paired::Brace => return self.diag.fail("empty object has not been supported yet"),
+          },
+          PairedClose(_) => {
+            let _ = self.expect_paired_close(po, false)?;
+            unreachable!("expect_paired_close should reject mismatched or unsupported empty pairs")
+          }
           Op(op) | RawOp(op) => {
             self.skip_token();
 
@@ -961,6 +980,8 @@ mod tests {
     test_parse_exprs("f()", "(f)");
     test_parse_exprs("f{x}[y](z)", "(((f x) y) z)");
     test_parse_exprs("f(x, y)(z)", "((f x y) z)");
+    test_parse_exprs("()", "()");
+    test_parse_exprs("let x = (); x", "(block (let x ()) x)");
     test_parse_exprs("(x, y)", "(tuple x y)");
   }
 
@@ -987,6 +1008,7 @@ mod tests {
   #[test]
   fn test_functions() {
     test_parse_exprs("fn () unit end", "(fn () unit)");
+    test_parse_exprs("fn () () end", "(fn () ())");
     test_parse_exprs("fn (x) x end", "(fn (x) x)");
     test_parse_exprs("fn (x, y) x end", "(fn (x y) x)");
     test_parse_exprs("fn (x, y) x + y end", "(fn (x y) (+ x y))");

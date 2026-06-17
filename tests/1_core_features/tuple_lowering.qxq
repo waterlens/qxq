@@ -1,0 +1,13 @@
+(* RUN: {qxq|cargo run -- --inspect --no-tree} %s *)
+
+let f = 1;
+(1, f)
+
+(* EXPECT:
+   thunk::__top_thunk__ params::0 regs::3 captured::[]
+   loadi        r0, #1
+   loadi        r1, #1
+   move         r2, r0
+   wrap         r1, k1, #2
+   ret          r1
+*)

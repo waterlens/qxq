@@ -1222,6 +1222,7 @@ impl<'a> CodeGenCtx<'a> {
   ) -> Result<Option<Value<'a>>> {
     use Expr::*;
     let v = match expr {
+      Unit(_) => Some(Value::Unit),
       BoolLiteral(b, _) => Some(Value::BoolLiteral(*b)),
       IntLiteral(i, _) => Some(Value::IntLiteral(*i)),
       FloatLiteral(f, _) => Some(Value::FloatLiteral(*f)),
@@ -1250,6 +1251,9 @@ impl<'a> CodeGenCtx<'a> {
   ) -> Result<()> {
     use Expr::*;
     match expr {
+      Unit(_) => {
+        self.emit_store(bc, Value::Unit, data, control, next)?;
+      }
       BoolLiteral(b, _) => {
         self.emit_store(bc, Value::BoolLiteral(*b), data, control, next)?;
       }
@@ -1474,45 +1478,5 @@ impl<'a> CodeGenCtx<'a> {
     self.scope.leave();
     bc.set_nregs(frame_top!(self).max_regs as u8);
     Ok(())
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use std::rc::Rc;
-
-  use super::*;
-  use crate::parser::Parser;
-  #[allow(unused)]
-  fn test_codegen(source: &str, expected_bytecode_str: &str) {
-    let arena = Bump::new();
-    let diag = Rc::new(Diagnostic::new());
-    let mut parser = Parser::new(&arena, diag, source);
-    let tree = parser.parse().unwrap();
-    let diag = Rc::new(Diagnostic::new());
-    let mut ctx = CodeGenCtx::new(&arena, diag, tree);
-    let mut bc = BytecodeCtx::new();
-    ctx.emit_tree(&mut bc).unwrap();
-    let image = bc.finalize();
-    let output = image.thunks.into_iter().map(|t| t.to_string()).collect::<Vec<_>>().join("\n");
-    assert_eq!(output, expected_bytecode_str);
-  }
-
-  #[test]
-  fn test1() {
-    test_codegen(
-      r#"
-    let f = 1; (1, f)
-    "#,
-      "thunk::__top_thunk__ params::0 regs::3 captured::[]\nloadi        r0, #1\nloadi        r1, #1\nmove         r2, r0\nwrap         r1, k1, #2\nret          r1\n",
-    );
-  }
-
-  #[test]
-  fn int_literal_immediate_ranges() {
-    test_codegen(
-      "(32767, 32768, 65535, 65536)",
-      "thunk::__top_thunk__ params::0 regs::4 captured::[]\nconstants::[\n  @0: 65536\n]\nloadi        r0, #32767\nloadui       r1, #32768\nloadui       r2, #65535\nloadc        r3, @0\nwrap         r0, k1, #4\nret          r0\n",
-    );
   }
 }
