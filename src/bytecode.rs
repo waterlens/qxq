@@ -1,4 +1,5 @@
 use crate::diagnostic::Result as DResult;
+use crate::runtime::OwnedHeap;
 use crate::val::Val;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
@@ -17,6 +18,8 @@ impl Tag {
   pub const INT: Self = Tag(4);
   pub const STR: Self = Tag(5);
   pub const FLOAT: Self = Tag(6);
+  pub const ARRAY: Self = Tag(7);
+  pub const MAP: Self = Tag(8);
 }
 
 impl From<u8> for Tag {
@@ -122,7 +125,7 @@ impl ConstantPool {
     *self.spool.entry(s).or_insert(next_id)
   }
 
-  pub fn to_vec(&self) -> Box<[Val]> {
+  pub fn to_vec(&self, heap: &mut OwnedHeap) -> Box<[Val]> {
     let total = self.ipool.len() + self.fpool.len() + self.spool.len();
     let mut v = vec![Val::empty(); total];
     for (val, idx) in self.ipool.iter() {
@@ -137,7 +140,7 @@ impl ConstantPool {
       v[idx.0 as usize] = Val::from_f64(f64::from_bits(*bits));
     }
     for (s, idx) in self.spool.iter() {
-      v[idx.0 as usize] = Val::from_rust_str(s);
+      v[idx.0 as usize] = heap.alloc_str(s).expect("failed to allocate string constant");
     }
     v.into_boxed_slice()
   }
@@ -253,6 +256,7 @@ impl From<Tag> for Op8 {
 pub struct TrapId(u8);
 
 impl TrapId {
+  pub const HALT: Self = TrapId(2);
   pub const PRINT_REGS: Self = TrapId(4);
   pub const PRINT_REGS_HEX: Self = TrapId(5);
   pub const ASSERT_EQ: Self = TrapId(6);
@@ -764,7 +768,7 @@ impl ThunkCtx {
     true
   }
 
-  pub fn relocate_all(mut self) -> Thunk {
+  pub fn relocate_all(mut self, heap: &mut OwnedHeap) -> Thunk {
     let mut edit_list = vec![];
     for (pc, label) in self.relocate.iter() {
       debug_assert!(label.is_valid());
@@ -790,7 +794,7 @@ impl ThunkCtx {
       fvlocs: self.fvlocs,
       nparams: self.nparams,
       nregs: self.nregs,
-      constants: self.constants.to_vec(),
+      constants: self.constants.to_vec(heap),
     }
   }
 }
@@ -828,24 +832,36 @@ pub struct BytecodeCtx {
   buffer: Vec<ThunkCtx>,
   current: ThunkCtx,
   finished: Vec<Thunk>,
+  heap: OwnedHeap,
 }
 
+/// Bytecode together with the exclusive VM heap backing its pointer-valued constants.
 pub struct BytecodeImage {
-  pub thunks: Vec<Thunk>,
+  thunks: Vec<Thunk>,
+  heap: OwnedHeap,
 }
 
-impl Default for BytecodeCtx {
-  fn default() -> Self {
-    Self::new()
+impl BytecodeImage {
+  pub(crate) fn new(thunks: Vec<Thunk>, heap: OwnedHeap) -> Self {
+    Self { thunks, heap }
+  }
+
+  pub fn thunks(&self) -> &[Thunk] {
+    &self.thunks
+  }
+
+  pub(crate) fn into_parts(self) -> (Vec<Thunk>, OwnedHeap) {
+    (self.thunks, self.heap)
   }
 }
 
 impl BytecodeCtx {
-  pub fn new() -> Self {
+  pub fn new(heap: OwnedHeap) -> Self {
     Self {
       buffer: Vec::new(),
       current: ThunkCtx::new("__top_thunk__", Box::new([]), 0),
       finished: Vec::new(),
+      heap,
     }
   }
 
@@ -855,9 +871,8 @@ impl BytecodeCtx {
 
   pub fn pop_thunk(&mut self) -> usize {
     let len = self.finished.len();
-    self
-      .finished
-      .push(std::mem::replace(&mut self.current, self.buffer.pop().unwrap()).relocate_all());
+    let thunk = std::mem::replace(&mut self.current, self.buffer.pop().unwrap());
+    self.finished.push(thunk.relocate_all(&mut self.heap));
     len
   }
 
@@ -910,9 +925,9 @@ impl BytecodeCtx {
   }
 
   pub fn finalize(self) -> BytecodeImage {
-    assert!(self.buffer.is_empty());
-    let mut thunks = self.finished;
-    thunks.push(self.current.relocate_all());
-    BytecodeImage { thunks }
+    let Self { buffer, current, mut finished, mut heap } = self;
+    assert!(buffer.is_empty());
+    finished.push(current.relocate_all(&mut heap));
+    BytecodeImage::new(finished, heap)
   }
 }

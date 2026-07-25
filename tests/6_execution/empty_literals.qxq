@@ -1,0 +1,7 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+if [] then {} else [] end
+
+(* EXPECT:
+   {}
+*)

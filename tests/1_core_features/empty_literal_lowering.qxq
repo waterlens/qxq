@@ -1,0 +1,12 @@
+(* RUN: {qxq|cargo run -- --inspect --no-tree} %s *)
+
+let array = [];
+let map = {};
+map
+
+(* EXPECT:
+   thunk::__top_thunk__ params::0 regs::2 captured::[]
+   wrap         r0, k7, #0
+   wrap         r1, k8, #0
+   ret          r1
+*)

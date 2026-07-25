@@ -1,33 +1,86 @@
 use std::{ffi::CStr, ptr::NonNull, rc::Rc};
 
 use crate::{
-  bytecode::{BinaryRepr, Bytecode, BytecodeImage, Location, Operands, Operator, Tag, Thunk},
+  bytecode::{
+    BinaryRepr, Bytecode, BytecodeImage, Location, Operands, Operator, Tag, Thunk, TrapId,
+  },
   diagnostic::{Diagnostic, Result},
+  val::Val,
   vm,
 };
 
 const STACK_HEADROOM_SLOTS: usize = 256;
 const RESULT_BUF_LEN: usize = 64;
 
+pub struct OwnedHeap {
+  ptr: NonNull<vm::heap>,
+}
+
+impl OwnedHeap {
+  pub fn new(diag: &Diagnostic) -> Result<Self> {
+    Self::with_args(
+      vm::runtime_args {
+        trace_level: 0,
+        base_size: 1024 * 1024,
+        align: 8,
+        descspace_size: 4 * 4 * 4096,
+      },
+      diag,
+    )
+  }
+
+  fn with_args(args: vm::runtime_args, diag: &Diagnostic) -> Result<Self> {
+    let ptr = unsafe { vm::vm_heap_alloc(&args) };
+    let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to initialize vm heap"))?;
+    Ok(Self { ptr })
+  }
+
+  pub(crate) fn alloc_str(&mut self, value: &str) -> Option<Val> {
+    let len = u32::try_from(value.len()).ok()?;
+    let mut out = 0;
+    if unsafe { vm::vm_const_from_str(value.as_ptr().cast(), len, self.ptr.as_ptr(), &mut out) } {
+      Some(Val::from_raw(out))
+    } else {
+      None
+    }
+  }
+
+  fn as_ptr(&self) -> *mut vm::heap {
+    self.ptr.as_ptr()
+  }
+}
+
+impl Drop for OwnedHeap {
+  fn drop(&mut self) {
+    unsafe {
+      vm::vm_heap_free(self.ptr.as_ptr());
+    }
+  }
+}
+
+/// Executes `image`, consuming both its bytecode and its associated heap.
 pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
   let validator = ImageValidator::new(Rc::clone(&diag));
-  validator.validate(&image)?;
+  validator.validate(image.thunks())?;
 
-  let max_nregs = image.thunks.iter().map(|t| t.nregs as usize).max().unwrap_or(0);
-  let numobject = compute_numobject(&image);
+  let max_nregs = image.thunks().iter().map(|t| t.nregs as usize).max().unwrap_or(0);
+  let numobject = compute_numobject(image.thunks());
+  let (mut thunks, heap) = image.into_parts();
+  append_entry_thunk(&mut thunks, &diag)?;
 
-  let mut native_thunks = NativeThunkSet::new(&image.thunks, &diag)?;
-  let wrapper = OwnedThunk::wrapper(image.thunks.len() - 1, &diag)?;
-  let mut result = 0u64;
+  let mut native_thunks = NativeThunkSet::new(&thunks, &diag)?;
+  let mut result = 0;
   let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
   let status = unsafe {
-    vm::vm_exec(
-      wrapper.as_ptr(),
+    vm::vm_exec_with(
+      heap.as_ptr(),
+      native_thunks.entry_ptr(),
       native_thunks.thunk_ptrs_mut(),
-      image.thunks.len(),
+      thunks.len(),
       numobject,
       stack_slots,
       &mut result,
+      std::ptr::null_mut(),
     )
   };
 
@@ -38,9 +91,27 @@ pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
   format_result(result, &diag)
 }
 
-fn compute_numobject(image: &BytecodeImage) -> usize {
+fn append_entry_thunk(thunks: &mut Vec<Thunk>, diag: &Diagnostic) -> Result<()> {
+  let top_idx: u16 =
+    (thunks.len() - 1).try_into().map_err(|_| diag.error("too many functions to execute"))?;
+  thunks.push(Thunk {
+    name: "__entry__".to_string(),
+    code: vec![
+      Bytecode::call(0u8.into(), top_idx.into()),
+      Bytecode::trap(TrapId::HALT.into(), 0u8.into(), 0u8.into()),
+    ]
+    .into(),
+    fvlocs: Box::new([]),
+    nparams: 0,
+    nregs: 0,
+    constants: Box::new([]),
+  });
+  Ok(())
+}
+
+fn compute_numobject(thunks: &[Thunk]) -> usize {
   let mut max_tag: usize = 0;
-  for thunk in &image.thunks {
+  for thunk in thunks {
     for bc in thunk.code.iter() {
       match *bc {
         Bytecode(Operator::WObj, Operands::ABC(op)) => {
@@ -65,12 +136,12 @@ impl ImageValidator {
     Self { diag }
   }
 
-  fn validate(&self, image: &BytecodeImage) -> Result<()> {
-    if image.thunks.is_empty() {
+  fn validate(&self, thunks: &[Thunk]) -> Result<()> {
+    if thunks.is_empty() {
       return self.diag.fail("cannot execute an empty bytecode image");
     }
 
-    for thunk in &image.thunks {
+    for thunk in thunks {
       for loc in thunk.fvlocs.iter() {
         if matches!(loc, Location::Temporary) {
           return self.diag.fail("temporary location in thunk capture list");
@@ -117,6 +188,10 @@ impl NativeThunkSet {
     // which has the same layout as *mut vm::thunk.
     self.thunks.as_mut_ptr().cast()
   }
+
+  fn entry_ptr(&self) -> *mut vm::thunk {
+    self.thunks.last().unwrap().as_ptr()
+  }
 }
 
 /// SAFETY: This type is `#[repr(transparent)]` over `NonNull<vm::thunk>`,
@@ -144,12 +219,6 @@ impl OwnedThunk {
       )
     };
     let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm thunk"))?;
-    Ok(Self { ptr })
-  }
-
-  fn wrapper(top_idx: usize, diag: &Diagnostic) -> Result<Self> {
-    let ptr = unsafe { vm::vm_thunk_make_wrapper(top_idx) };
-    let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm wrapper"))?;
     Ok(Self { ptr })
   }
 
@@ -220,38 +289,37 @@ mod tests {
     let tree = parser.parse()?;
     let diag = Rc::new(Diagnostic::new());
     let mut codegen = CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
-    let mut bc = BytecodeCtx::new();
+    let heap = OwnedHeap::new(&diag)?;
+    let mut bc = BytecodeCtx::new(heap);
     codegen.emit_tree(&mut bc)?;
     let image = bc.finalize();
     execute(image, Rc::clone(&diag))
   }
 
-  fn execute_with_heap(
+  fn execute_with_stats(
     image: BytecodeImage,
     diag: Rc<Diagnostic>,
-    heap_size: usize,
   ) -> Result<(String, vm::gc_stats)> {
     let _guard = VM_LOCK.lock().unwrap();
     let validator = ImageValidator::new(Rc::clone(&diag));
-    validator.validate(&image)?;
-    let max_nregs = image.thunks.iter().map(|t| t.nregs as usize).max().unwrap_or(0);
-    let numobject = compute_numobject(&image);
-    let mut native_thunks = NativeThunkSet::new(&image.thunks, &diag)?;
-    let wrapper = OwnedThunk::wrapper(image.thunks.len() - 1, &diag)?;
-    let mut result = 0u64;
+    validator.validate(image.thunks())?;
+    let max_nregs = image.thunks().iter().map(|t| t.nregs as usize).max().unwrap_or(0);
+    let numobject = compute_numobject(image.thunks());
+    let (mut thunks, heap) = image.into_parts();
+    append_entry_thunk(&mut thunks, &diag)?;
+    let mut native_thunks = NativeThunkSet::new(&thunks, &diag)?;
+    let mut result = 0;
     let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
-    let mut rargs =
-      vm::runtime_args { trace_level: 0, base_size: heap_size, align: 8, descspace_size: 4096 };
     let mut stats: vm::gc_stats = unsafe { std::mem::zeroed() };
     let status = unsafe {
-      vm::vm_exec_with_args(
-        wrapper.as_ptr(),
+      vm::vm_exec_with(
+        heap.as_ptr(),
+        native_thunks.entry_ptr(),
         native_thunks.thunk_ptrs_mut(),
-        image.thunks.len(),
+        thunks.len(),
         numobject,
         stack_slots,
         &mut result,
-        &mut rargs,
         &mut stats,
       )
     };
@@ -296,6 +364,18 @@ mod tests {
   }
 
   #[test]
+  fn execution_empty_array_literal() {
+    let result = compile_and_run("[]").unwrap();
+    assert_eq!(result, "[]");
+  }
+
+  #[test]
+  fn execution_empty_map_literal() {
+    let result = compile_and_run("{}").unwrap();
+    assert_eq!(result, "{}");
+  }
+
+  #[test]
   fn execution_string_result_uses_escaped_display() {
     let result = compile_and_run("\"hello\"").unwrap();
     assert_eq!(result, "\"hello\"");
@@ -323,8 +403,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    let image = BytecodeImage { thunks: vec![thunk] };
-    assert!(validator.validate(&image).is_ok());
+    assert!(validator.validate(&[thunk]).is_ok());
   }
 
   #[test]
@@ -340,8 +419,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    let image = BytecodeImage { thunks: vec![thunk] };
-    assert!(validator.validate(&image).is_err());
+    assert!(validator.validate(&[thunk]).is_err());
   }
 
   #[test]
@@ -356,8 +434,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    let image = BytecodeImage { thunks: vec![thunk] };
-    assert!(validator.validate(&image).is_err());
+    assert!(validator.validate(&[thunk]).is_err());
   }
 
   #[test]
@@ -372,8 +449,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    let image = BytecodeImage { thunks: vec![thunk] };
-    assert!(validator.validate(&image).is_err());
+    assert!(validator.validate(&[thunk]).is_err());
   }
 
   #[test]
@@ -388,8 +464,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    let image = BytecodeImage { thunks: vec![thunk] };
-    assert!(validator.validate(&image).is_ok());
+    assert!(validator.validate(&[thunk]).is_ok());
   }
 
   #[test]
@@ -405,8 +480,7 @@ mod tests {
       nregs: 0,
       constants: vec![].into(),
     };
-    let image = BytecodeImage { thunks: vec![thunk] };
-    assert!(validator.validate(&image).is_err());
+    assert!(validator.validate(&[thunk]).is_err());
   }
 
   #[test]
@@ -441,8 +515,13 @@ mod tests {
       constants: vec![].into(),
     };
     let diag = Rc::new(Diagnostic::new());
-    let image = BytecodeImage { thunks: vec![thunk] };
-    let (result, stats) = execute_with_heap(image, diag, heap_size).unwrap();
+    let heap = OwnedHeap::with_args(
+      vm::runtime_args { trace_level: 0, base_size: heap_size, align: 8, descspace_size: 4096 },
+      &diag,
+    )
+    .unwrap();
+    let image = BytecodeImage::new(vec![thunk], heap);
+    let (result, stats) = execute_with_stats(image, diag).unwrap();
     assert_eq!(result, "42");
     assert_eq!(stats.mark_to_sweep_transitions, 1);
     assert!(
@@ -491,8 +570,13 @@ mod tests {
       constants: vec![].into(),
     };
     let diag = Rc::new(Diagnostic::new());
-    let image = BytecodeImage { thunks: vec![thunk] };
-    let (result, _stats) = execute_with_heap(image, diag, heap_size).unwrap();
+    let heap = OwnedHeap::with_args(
+      vm::runtime_args { trace_level: 0, base_size: heap_size, align: 8, descspace_size: 4096 },
+      &diag,
+    )
+    .unwrap();
+    let image = BytecodeImage::new(vec![thunk], heap);
+    let (result, _stats) = execute_with_stats(image, diag).unwrap();
     assert_eq!(result, "99");
   }
 }

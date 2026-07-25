@@ -93,7 +93,7 @@ fn print_thunks(image: &bytecode::BytecodeImage) {
   println!("--- Thunk ---");
   print!(
     "{}",
-    image.thunks.iter().map(|t| t.to_string()).collect::<Vec<_>>().join("\n--- Thunk ---\n")
+    image.thunks().iter().map(|t| t.to_string()).collect::<Vec<_>>().join("\n--- Thunk ---\n")
   );
 }
 
@@ -308,7 +308,8 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
             }
             let codegen_start = Instant::now();
             let mut codegen = codegen::CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
-            let mut bc = bytecode::BytecodeCtx::new();
+            let heap = runtime::OwnedHeap::new(&diag)?;
+            let mut bc = bytecode::BytecodeCtx::new(heap);
             match codegen.emit_tree(&mut bc) {
               Ok(()) => {
                 let codegen_dur = codegen_start.elapsed();
@@ -391,14 +392,15 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
   if !cli.input_files.is_empty() {
     for file_path in cli.input_files {
       if cli.load {
+        let heap = runtime::OwnedHeap::new(&diag)?;
         let image = if file_path == "-" {
           let mut loader = loader::Loader::new(io::stdin().lock(), Rc::clone(&diag));
-          loader.load()?
+          loader.load(heap)?
         } else {
           let file =
             diag.context(fs::File::open(&file_path), format!("failed to open {}", file_path))?;
           let mut loader = loader::Loader::new(file, Rc::clone(&diag));
-          loader.load()?
+          loader.load(heap)?
         };
         if cli.inspect {
           print_thunks(&image);
@@ -418,7 +420,8 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
       }
 
       let mut codegen = codegen::CodeGenCtx::new(&arena, Rc::clone(&diag), tree);
-      let mut bc = bytecode::BytecodeCtx::new();
+      let heap = runtime::OwnedHeap::new(&diag)?;
+      let mut bc = bytecode::BytecodeCtx::new(heap);
       codegen.emit_tree(&mut bc)?;
       let image = bc.finalize();
 

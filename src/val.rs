@@ -1,9 +1,5 @@
 use std::fmt::{self, Display};
 
-unsafe extern "C" {
-  fn vm_alloc_str(data: *const u8, len: u32) -> *mut u8;
-}
-
 const VAL_NUN_BIAS: u64 = 0x0002_0000_0000_0000;
 const VAL_FLOAT_TAG: u64 = 0xfffe_0000_0000_0000;
 const VAL_OTHER_TAG: u64 = 0x2;
@@ -93,13 +89,9 @@ impl Val {
     Val(n.to_bits() + VAL_NUN_BIAS)
   }
 
-  /// Allocates an immutable string constant via the C VM allocator.
-  pub fn from_rust_str(s: &str) -> Self {
-    unsafe {
-      let ptr = vm_alloc_str(s.as_ptr(), s.len() as u32);
-      assert!(!ptr.is_null(), "vm_alloc_str failed");
-      Val(ptr as u64)
-    }
+  #[inline]
+  pub(crate) const fn from_raw(raw: u64) -> Self {
+    Val(raw)
   }
 
   #[inline]
@@ -132,7 +124,7 @@ impl Val {
     (self.0 & VAL_NOT_CELL_MASK) == 0
   }
 
-  /// Returns true if this is a non-empty cell pointer (e.g. a string object).
+  /// Returns true if this is a non-empty cell pointer.
   #[inline]
   pub fn is_ptr(self) -> bool {
     self.is_cell() && !self.is_empty()

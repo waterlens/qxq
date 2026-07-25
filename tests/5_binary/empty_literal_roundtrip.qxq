@@ -1,0 +1,7 @@
+(* RUN: {qxq|cargo run --} --dump - %s | {qxq|cargo run --} --load - *)
+
+if [] then {} else [] end
+
+(* EXPECT:
+   {}
+*)

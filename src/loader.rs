@@ -1,6 +1,7 @@
 use crate::bytecode::{BinaryRepr, BytecodeImage, FreeVarId, Location, RegId, Tag, Thunk};
 use crate::checksum;
 use crate::diagnostic::{Diagnostic, Result};
+use crate::runtime::OwnedHeap;
 use crate::uleb8;
 use crate::val::Val;
 use std::io::Read;
@@ -16,7 +17,7 @@ impl<R: Read> Loader<R> {
     Self { reader, diag }
   }
 
-  pub fn load(&mut self) -> Result<BytecodeImage> {
+  pub fn load(&mut self, mut heap: OwnedHeap) -> Result<BytecodeImage> {
     let mut header = [0u8; 8];
     self.diag.context(self.reader.read_exact(&mut header), "failed to read header")?;
 
@@ -52,13 +53,13 @@ impl<R: Read> Loader<R> {
       let thunk_data = &thunk_table_data[cursor..cursor + tsize as usize];
       cursor += tsize as usize;
 
-      thunks.push(self.load_thunk(thunk_data)?);
+      thunks.push(self.load_thunk(thunk_data, &mut heap)?);
     }
 
-    Ok(BytecodeImage { thunks })
+    Ok(BytecodeImage::new(thunks, heap))
   }
 
-  fn load_thunk(&self, data: &[u8]) -> Result<Thunk> {
+  fn load_thunk(&self, data: &[u8], heap: &mut OwnedHeap) -> Result<Thunk> {
     let mut cursor = 0;
 
     // Flags (reserved)
@@ -128,7 +129,10 @@ impl<R: Read> Loader<R> {
           let s = std::str::from_utf8(&data[cursor..cursor + len as usize]);
           let s = self.diag.context(s, "invalid UTF-8 string")?;
           cursor += len as usize;
-          constants.push(Val::from_rust_str(s));
+          let value = heap
+            .alloc_str(s)
+            .ok_or_else(|| self.diag.error("failed to allocate string constant"))?;
+          constants.push(value);
         }
         _ => return self.diag.fail("unsupported constant tag"),
       }

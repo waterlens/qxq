@@ -29,7 +29,7 @@ impl Dumper {
     debug_assert_eq!(data.len(), Self::BYTECODE_IMAGE_HEADER);
 
     // Thunk Table
-    for thunk in &self.image.thunks {
+    for thunk in self.image.thunks() {
       let ncaptured: u8 = thunk
         .fvlocs
         .len()
@@ -104,6 +104,7 @@ impl Dumper {
 mod tests {
   use super::*;
   use crate::bytecode::{Bytecode, FreeVarId, RegId, Thunk};
+  use crate::runtime::OwnedHeap;
 
   #[test]
   fn test_header() {
@@ -115,7 +116,9 @@ mod tests {
       nregs: 0,
       constants: Box::new([]),
     };
-    let dumper = Dumper::new(BytecodeImage { thunks: vec![thunk] }, Rc::new(Diagnostic::new()));
+    let diag = Rc::new(Diagnostic::new());
+    let image = BytecodeImage::new(vec![thunk], OwnedHeap::new(&diag).unwrap());
+    let dumper = Dumper::new(image, diag);
     let data = dumper.dump().unwrap();
     assert_eq!(&data[0..4], b"QXQ\x07");
     assert_eq!(data[4], 0x01); // Version
@@ -131,7 +134,9 @@ mod tests {
       nregs: 1,
       constants: Box::new([]),
     };
-    let dumper = Dumper::new(BytecodeImage { thunks: vec![thunk] }, Rc::new(Diagnostic::new()));
+    let diag = Rc::new(Diagnostic::new());
+    let image = BytecodeImage::new(vec![thunk], OwnedHeap::new(&diag).unwrap());
+    let dumper = Dumper::new(image, diag);
     assert!(dumper.dump().is_err());
   }
 
@@ -145,7 +150,9 @@ mod tests {
       nregs: 0,
       constants: Box::new([]),
     };
-    let dumper = Dumper::new(BytecodeImage { thunks: vec![thunk] }, Rc::new(Diagnostic::new()));
+    let diag = Rc::new(Diagnostic::new());
+    let image = BytecodeImage::new(vec![thunk], OwnedHeap::new(&diag).unwrap());
+    let dumper = Dumper::new(image, diag);
     assert!(dumper.dump().is_err());
   }
 }

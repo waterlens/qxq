@@ -435,6 +435,31 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::mobj(dst.into(), tag.into(), src.into()));
   }
 
+  fn emit_empty_object(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    tag: Tag,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    match data {
+      DataDest::Loc(slot @ Location::Slot(r)) => {
+        self.wrap_object(bc, tag, r, 0)?;
+        self.emit_store(bc, Value::Loc(slot), data, control, next)?;
+      }
+      DataDest::Effect
+      | DataDest::Loc(Location::Temporary)
+      | DataDest::Loc(Location::FreeVar(_))
+      | DataDest::RetValue => {
+        let r = self.allocate_temporary()?;
+        self.wrap_object(bc, tag, r, 0)?;
+        self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
+      }
+    }
+    Ok(())
+  }
+
   fn get_value_may_have_effect(&mut self, bc: &mut BytecodeCtx, opr: Value) -> Result<()> {
     use Location::*;
     use Value::*;
@@ -1253,6 +1278,12 @@ impl<'a> CodeGenCtx<'a> {
     match expr {
       Unit(_) => {
         self.emit_store(bc, Value::Unit, data, control, next)?;
+      }
+      EmptyArray(_) => {
+        self.emit_empty_object(bc, Tag::ARRAY, data, control, next)?;
+      }
+      EmptyMap(_) => {
+        self.emit_empty_object(bc, Tag::MAP, data, control, next)?;
       }
       BoolLiteral(b, _) => {
         self.emit_store(bc, Value::BoolLiteral(*b), data, control, next)?;

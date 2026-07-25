@@ -85,6 +85,8 @@ pub type ExprsRef<'a, I> = &'a [ExprRef<'a, I>];
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr<'a, I> {
   Unit(I),
+  EmptyArray(I),
+  EmptyMap(I),
   BoolLiteral(bool, I),
   IntLiteral(i64, I),
   FloatLiteral(FloatBits, I),
@@ -107,6 +109,8 @@ impl<I> ToSexp for Expr<'_, I> {
     use Expr::*;
     match self {
       Unit(_) => pool.atom("()"),
+      EmptyArray(_) => pool.atom("[]"),
+      EmptyMap(_) => pool.atom("{}"),
       BoolLiteral(b, _) => pool.atom(if *b { "true" } else { "false" }),
       IntLiteral(n, _) => pool.atom(n.to_string()),
       FloatLiteral(n, _) => pool.atom(n.to_string()),
@@ -161,6 +165,8 @@ impl<I> Expr<'_, I> {
     use Expr::*;
     match self {
       Unit(i)
+      | EmptyArray(i)
+      | EmptyMap(i)
       | BoolLiteral(_, i)
       | IntLiteral(_, i)
       | FloatLiteral(_, i)
@@ -190,6 +196,14 @@ impl<'a> ToSexp for InfoExpr<'a> {
     let is_atom = match &self.expr {
       Unit(_) => {
         parts.push(pool.atom("()"));
+        true
+      }
+      EmptyArray(_) => {
+        parts.push(pool.atom("[]"));
+        true
+      }
+      EmptyMap(_) => {
+        parts.push(pool.atom("{}"));
         true
       }
       BoolLiteral(b, _) => {
@@ -632,12 +646,24 @@ impl<'a> Parser<'a> {
               self.skip_token();
               arena.alloc(ExprCon::Unit(self.new_empty_info()))
             }
-            Paired::Bracket => return self.diag.fail("empty array has not been supported yet"),
-            Paired::Brace => return self.diag.fail("empty object has not been supported yet"),
+            Paired::Bracket => {
+              self.skip_token();
+              arena.alloc(ExprCon::EmptyArray(self.new_empty_info()))
+            }
+            Paired::Brace => {
+              self.skip_token();
+              arena.alloc(ExprCon::EmptyMap(self.new_empty_info()))
+            }
           },
           PairedClose(_) => {
             let _ = self.expect_paired_close(po, false)?;
             unreachable!("expect_paired_close should reject mismatched or unsupported empty pairs")
+          }
+          _ if po == Paired::Bracket => {
+            return self.diag.fail("non-empty arrays have not been supported yet");
+          }
+          _ if po == Paired::Brace => {
+            return self.diag.fail("non-empty maps have not been supported yet");
           }
           Op(op) | RawOp(op) => {
             self.skip_token();
@@ -978,9 +1004,13 @@ mod tests {
     test_parse_exprs("(+)(1)", "(+ 1)");
     test_parse_exprs("f @ g @ h", "(@ f (@ g h))");
     test_parse_exprs("f()", "(f)");
+    test_parse_exprs("f[]", "(f)");
+    test_parse_exprs("f{}", "(f)");
     test_parse_exprs("f{x}[y](z)", "(((f x) y) z)");
     test_parse_exprs("f(x, y)(z)", "((f x y) z)");
     test_parse_exprs("()", "()");
+    test_parse_exprs("[]", "[]");
+    test_parse_exprs("{}", "{}");
     test_parse_exprs("let x = (); x", "(block (let x ()) x)");
     test_parse_exprs("(x, y)", "(tuple x y)");
   }

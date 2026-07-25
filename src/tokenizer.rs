@@ -44,7 +44,8 @@ impl<'a> TokenStr<'a> {
     TokenStr(s)
   }
   pub fn from_span<'arena>(arena: &'arena bumpalo::Bump, span: TokenSpan<'a>) -> TokenStr<'arena> {
-    TokenStr::new(arena.alloc(span.to_string()))
+    let text = span.to_string();
+    TokenStr::new(arena.alloc_str(&text))
   }
 }
 
@@ -281,13 +282,11 @@ where
     I: AsRef<str>,
   {
     let i = input.as_ref();
-    let buffer = arena.alloc({
-      let mut buffer = i.chars().collect::<Vec<_>>();
-      if buffer.last() != Some(&'\0') {
-        buffer.push('\0');
-      }
-      buffer.into_boxed_slice()
-    });
+    let mut buffer = i.chars().collect::<Vec<_>>();
+    if buffer.last() != Some(&'\0') {
+      buffer.push('\0');
+    }
+    let buffer = arena.alloc_slice_copy(&buffer);
     Tokenizer { arena, buffer, index: 0, colstart: 0, line: 1, diag }
   }
 
