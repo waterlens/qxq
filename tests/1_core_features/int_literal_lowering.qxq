@@ -11,6 +11,6 @@
    loadui       r1, #32768
    loadui       r2, #65535
    loadc        r3, @0
-   wrap         r0, k1, #4
+   wrap         r0, tag::tuple, #4
    ret          r0
 *)

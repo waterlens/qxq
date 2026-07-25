@@ -8,6 +8,6 @@ let f = 1;
    loadi        r0, #1
    loadi        r1, #1
    move         r2, r0
-   wrap         r1, k1, #2
+   wrap         r1, tag::tuple, #2
    ret          r1
 *)

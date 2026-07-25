@@ -66,11 +66,11 @@ if choose(false, 0) then 30 else 40 end
    move         r2, r0
    loadi        r4, #1
    apply        r2, #1
-   mobj         r3, k2, r0
+   mobj         r3, tag::false, r0
    setc         r2, #0
    cmp.eq.dd    r2, r3
    move         r2, r1
-   mobj         r4, k2, r0
+   mobj         r4, tag::false, r0
    loadi        r5, #0
    apply        r2, #2
    cmp.not.f    r2, #0

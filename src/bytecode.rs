@@ -47,6 +47,24 @@ impl From<Tag> for u8 {
   }
 }
 
+impl Display for Tag {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let name = match *self {
+      Self::UNIT => "unit",
+      Self::TUPLE => "tuple",
+      Self::FALSE => "false",
+      Self::TRUE => "true",
+      Self::INT => "int",
+      Self::STR => "str",
+      Self::FLOAT => "float",
+      Self::ARRAY => "array",
+      Self::MAP => "map",
+      _ => return write!(f, "tag::{}", self.0),
+    };
+    write!(f, "tag::{name}")
+  }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct FloatBits(pub f64);
 
@@ -629,8 +647,8 @@ define_bytecode! {
   Ret    (ABC, OpABC, op)   fn ret(src: Op8)                      { dst: src, o1: 0.into(), o2: 0.into() } => ("{:<12} r{}", "ret", op.dst),
   Retn   (AB, OpAB, op)     fn retn(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, #{}", "retn", op.dst, op.o1),
   Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("{:<12} r{}, fn{}", "clos", op.dst, op.o1),
-  WObj   (ABC, OpABC, op)   fn wobj(dst: Op8, tag: Op8, n: Op8)   { dst, o1: tag, o2: n } => ("{:<12} r{}, k{}, #{}", "wrap", op.dst, op.o1, op.o2),
-  MObj   (ABC, OpABC, op)   fn mobj(dst: Op8, tag: Op8, src: Op8) { dst, o1: tag, o2: src } => ("{:<12} r{}, k{}, r{}", "mobj", op.dst, op.o1, op.o2),
+  WObj   (ABC, OpABC, op)   fn wobj(dst: Op8, tag: Op8, n: Op8)   { dst, o1: tag, o2: n } => ("{:<12} r{}, {}, #{}", "wrap", op.dst, Tag::from(u8::from(op.o1)), op.o2),
+  MObj   (ABC, OpABC, op)   fn mobj(dst: Op8, tag: Op8, src: Op8) { dst, o1: tag, o2: src } => ("{:<12} r{}, {}, r{}", "mobj", op.dst, Tag::from(u8::from(op.o1)), op.o2),
   Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("{:<12} #{}", "jmp", op.dst),
   Goto   (AB, OpAB, op)     fn goto(addr: Op8)                    { dst: addr, o1: 0.into() } => ("{:<12} #{}", "goto", op.dst),
 

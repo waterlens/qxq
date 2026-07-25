@@ -4,6 +4,6 @@
 
 (* EXPECT:
    thunk::__top_thunk__ params::0 regs::1 captured::[]
-   mobj         r0, k0, r0
+   mobj         r0, tag::unit, r0
    ret          r0
 *)
