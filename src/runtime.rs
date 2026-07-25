@@ -163,6 +163,14 @@ impl ImageValidator {
       Bytecode(MObj, Operands::ABC(op)) if u8::from(op.o1) >= u8::from(Tag::INT) => {
         self.diag.fail(format!("illegal instruction: heap-backed mobj: {}", bytecode))
       }
+      Bytecode(LoadR, Operands::AB(op)) => {
+        let value = Val::from_raw(u64::from(u16::from(op.o1)));
+        if value.is_empty() || value.is_null() || value.is_bool() {
+          Ok(())
+        } else {
+          self.diag.fail(format!("illegal instruction: noncanonical raw value: {}", bytecode))
+        }
+      }
       _ => Ok(()),
     }
   }
@@ -346,6 +354,12 @@ mod tests {
   }
 
   #[test]
+  fn execution_boolean_literals() {
+    assert_eq!(compile_and_run("false").unwrap(), "false");
+    assert_eq!(compile_and_run("true").unwrap(), "true");
+  }
+
+  #[test]
   fn execution_unit_literal() {
     let result = compile_and_run("()").unwrap();
     assert_eq!(result, "()");
@@ -438,6 +452,21 @@ mod tests {
   }
 
   #[test]
+  fn validator_rejects_noncanonical_loadr() {
+    let diag = Rc::new(Diagnostic::new());
+    let validator = ImageValidator::new(Rc::clone(&diag));
+    let thunk = Thunk {
+      name: String::new(),
+      code: vec![Bytecode::loadr(0.into(), 1.into())].into(),
+      fvlocs: vec![].into(),
+      nparams: 0,
+      nregs: 1,
+      constants: vec![].into(),
+    };
+    assert!(validator.validate(&[thunk]).is_err());
+  }
+
+  #[test]
   fn validator_rejects_heap_mobj() {
     let diag = Rc::new(Diagnostic::new());
     let validator = ImageValidator::new(Rc::clone(&diag));
@@ -459,6 +488,27 @@ mod tests {
     let thunk = Thunk {
       name: String::new(),
       code: vec![Bytecode::mobj(0.into(), Tag::UNIT.into(), 0.into())].into(),
+      fvlocs: vec![].into(),
+      nparams: 0,
+      nregs: 1,
+      constants: vec![].into(),
+    };
+    assert!(validator.validate(&[thunk]).is_ok());
+  }
+
+  #[test]
+  fn validator_allows_canonical_loadr() {
+    let diag = Rc::new(Diagnostic::new());
+    let validator = ImageValidator::new(Rc::clone(&diag));
+    let thunk = Thunk {
+      name: String::new(),
+      code: vec![
+        Bytecode::loadr(0.into(), u16::try_from(Val::empty().raw()).unwrap().into()),
+        Bytecode::loadr(0.into(), u16::try_from(Val::null().raw()).unwrap().into()),
+        Bytecode::loadr(0.into(), u16::try_from(Val::from_bool(false).raw()).unwrap().into()),
+        Bytecode::loadr(0.into(), u16::try_from(Val::from_bool(true).raw()).unwrap().into()),
+      ]
+      .into(),
       fvlocs: vec![].into(),
       nparams: 0,
       nregs: 1,

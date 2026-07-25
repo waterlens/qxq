@@ -431,8 +431,9 @@ impl<'a> CodeGenCtx<'a> {
     Ok(())
   }
 
-  fn make_object(&mut self, bc: &mut BytecodeCtx, dst: RegId, tag: Tag, src: RegId) {
-    bc.push(Bytecode::mobj(dst.into(), tag.into(), src.into()));
+  fn reify_raw_value(&mut self, bc: &mut BytecodeCtx, dst: RegId, value: val::Val) {
+    let raw = u16::try_from(value.raw()).expect("raw immediate value should fit in 16 bits");
+    bc.push(Bytecode::loadr(dst.into(), raw.into()));
   }
 
   fn emit_empty_object(
@@ -491,12 +492,12 @@ impl<'a> CodeGenCtx<'a> {
       Loc(Temporary) => Ok(self.get_temporary()),
       Unit => {
         let r = self.allocate_temporary()?;
-        self.make_object(bc, r, Tag::UNIT, 0.into());
+        self.reify_raw_value(bc, r, val::Val::null());
         Ok(self.get_temporary())
       }
       BoolLiteral(b) => {
         let r = self.allocate_temporary()?;
-        self.make_object(bc, r, if b { Tag::TRUE } else { Tag::FALSE }, 0.into());
+        self.reify_raw_value(bc, r, val::Val::from_bool(b));
         Ok(self.get_temporary())
       }
       IntLiteral(i) => {
@@ -563,9 +564,9 @@ impl<'a> CodeGenCtx<'a> {
               bc.push(Bytecode::mov(r.into(), r2.into()));
             }
             Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
-            Value::Unit => self.make_object(bc, r, Tag::UNIT, 0.into()),
+            Value::Unit => self.reify_raw_value(bc, r, val::Val::null()),
             Value::BoolLiteral(b) => {
-              self.make_object(bc, r, if b { Tag::TRUE } else { Tag::FALSE }, 0.into())
+              self.reify_raw_value(bc, r, val::Val::from_bool(b))
             }
             Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
             Value::FloatLiteral(f) => self.reify_float_literal(bc, r, f.0),

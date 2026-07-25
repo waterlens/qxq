@@ -637,6 +637,7 @@ define_bytecode! {
   Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("{:<12} #{}", "exta", op.o1),
   LoadI  (ABS, OpABS, op)   fn loadi(dst: Op8, o1: OpS16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadi", op.dst, op.o1),
   LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadui", op.dst, op.o1),
+  LoadR  (AB, OpAB, op)     fn loadr(dst: Op8, raw: Op16)         { dst, o1: raw } => ("{:<12} r{}, #{:#x}", "loadr", op.dst, u16::from(op.o1)),
   LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, @{}", "loadc", op.dst, op.o1),
   LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, ^{}", "loadf", op.dst, op.o1),
   SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("{:<12} r{}, ^{}", "setf", op.dst, op.o1),
