@@ -1,4 +1,4 @@
-use crate::bytecode::{BinaryRepr, BytecodeImage, Location, Tag};
+use crate::bytecode::{BinaryRepr, BytecodeImage, Location, Tag, TypeDesc};
 use crate::checksum;
 use crate::diagnostic::{Diagnostic, Result};
 use crate::uleb8;
@@ -91,12 +91,30 @@ impl Dumper {
     // End of thunk table
     uleb8::encode_uleb128(0, &mut data);
 
+    // Type table
+    let types = self.image.types();
+    uleb8::encode_uleb128(types.len() as u64, &mut data);
+    for ty in types {
+      Self::dump_type(ty, &mut data);
+    }
+
     // Calculate Checksum of the thunk table
     let checksum = checksum::crc16(&data[Self::BYTECODE_IMAGE_HEADER..]);
     data[Self::BYTECODE_IMAGE_HEADER_SLICE_BEGIN..Self::BYTECODE_IMAGE_HEADER_SLICE_END]
       .copy_from_slice(&checksum.to_le_bytes());
 
     Ok(data)
+  }
+
+  fn dump_type(ty: &TypeDesc, data: &mut Vec<u8>) {
+    uleb8::encode_uleb128(ty.nfields.into(), data);
+    uleb8::encode_uleb128(ty.nslots.into(), data);
+    uleb8::encode_uleb128(ty.members.len() as u64, data);
+    for (name, slot) in ty.members.iter() {
+      uleb8::encode_uleb128((*slot).into(), data);
+      uleb8::encode_uleb128(name.len() as u64, data);
+      data.extend_from_slice(name.as_bytes());
+    }
   }
 }
 
@@ -117,7 +135,7 @@ mod tests {
       constants: Box::new([]),
     };
     let diag = Rc::new(Diagnostic::new());
-    let image = BytecodeImage::new(vec![thunk], OwnedHeap::new(&diag).unwrap());
+    let image = BytecodeImage::new(vec![thunk], vec![], OwnedHeap::new(&diag).unwrap());
     let dumper = Dumper::new(image, diag);
     let data = dumper.dump().unwrap();
     assert_eq!(&data[0..4], b"QXQ\x07");
@@ -135,7 +153,7 @@ mod tests {
       constants: Box::new([]),
     };
     let diag = Rc::new(Diagnostic::new());
-    let image = BytecodeImage::new(vec![thunk], OwnedHeap::new(&diag).unwrap());
+    let image = BytecodeImage::new(vec![thunk], vec![], OwnedHeap::new(&diag).unwrap());
     let dumper = Dumper::new(image, diag);
     assert!(dumper.dump().is_err());
   }
@@ -151,7 +169,7 @@ mod tests {
       constants: Box::new([]),
     };
     let diag = Rc::new(Diagnostic::new());
-    let image = BytecodeImage::new(vec![thunk], OwnedHeap::new(&diag).unwrap());
+    let image = BytecodeImage::new(vec![thunk], vec![], OwnedHeap::new(&diag).unwrap());
     let dumper = Dumper::new(image, diag);
     assert!(dumper.dump().is_err());
   }

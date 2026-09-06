@@ -20,6 +20,8 @@ impl Tag {
   pub const FLOAT: Self = Tag(6);
   pub const ARRAY: Self = Tag(7);
   pub const MAP: Self = Tag(8);
+  pub const TYPE: Self = Tag(9);
+  pub const STRUCT: Self = Tag(10);
 }
 
 impl From<u8> for Tag {
@@ -59,6 +61,8 @@ impl Display for Tag {
       Self::FLOAT => "float",
       Self::ARRAY => "array",
       Self::MAP => "map",
+      Self::TYPE => "type",
+      Self::STRUCT => "struct",
       _ => return write!(f, "tag::{}", self.0),
     };
     write!(f, "tag::{name}")
@@ -264,6 +268,12 @@ impl From<Op8> for u8 {
   }
 }
 
+impl From<Op8> for usize {
+  fn from(x: Op8) -> Self {
+    x.0.into()
+  }
+}
+
 impl From<Tag> for Op8 {
   fn from(x: Tag) -> Self {
     x.0.into()
@@ -316,6 +326,12 @@ impl From<u16> for Op16 {
 impl From<Op16> for u16 {
   fn from(x: Op16) -> Self {
     x.0
+  }
+}
+
+impl From<Op16> for usize {
+  fn from(x: Op16) -> Self {
+    x.0.into()
   }
 }
 
@@ -639,10 +655,13 @@ define_bytecode! {
   LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadui", op.dst, op.o1),
   LoadR  (AB, OpAB, op)     fn loadr(dst: Op8, raw: Op16)         { dst, o1: raw } => ("{:<12} r{}, #{:#x}", "loadr", op.dst, u16::from(op.o1)),
   LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, @{}", "loadc", op.dst, op.o1),
-  LoadF  (AB, OpAB, op)     fn loadf(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, ^{}", "loadf", op.dst, op.o1),
-  SetF   (AB, OpAB, op)     fn setf(dst: Op16, src: Op8)          { dst: src, o1: dst }     => ("{:<12} r{}, ^{}", "setf", op.dst, op.o1),
+  LoadType (AB, OpAB, op)   fn loadtype(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "loadtype", op.dst, op.o1),
+  LoadFree (AB, OpAB, op)   fn loadfree(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, ^{}", "loadfree", op.dst, op.o1),
+  LoadField (ABC, OpABC, op) fn loadfield(dst: Op8, o1: Op8, o2: Op8) { dst, o1, o2 } => ("{:<12} r{}, r{}, @{}", "load.field", op.dst, op.o1, op.o2),
+  SetField (ABC, OpABC, op) fn setfield(src: Op8, o1: Op8, o2: Op8) { dst: src, o1, o2 } => ("{:<12} r{}, r{}, @{}", "set.field", op.dst, op.o1, op.o2),
   Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<12} r{}, r{}", "move", op.dst, op.o1),
   Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "apply", op.dst, op.o1),
+  Invoke (ABC, OpABC, op)   fn invoke(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, @{}", "invoke", op.dst, op.o1, op.o2),
   Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, fn{}", "call", op.dst, op.o1),
   Retu   (N)                fn retu()                             {}              => ("{:<12}", "retu"),
   Ret    (ABC, OpABC, op)   fn ret(src: Op8)                      { dst: src, o1: 0.into(), o2: 0.into() } => ("{:<12} r{}", "ret", op.dst),
@@ -726,6 +745,44 @@ pub struct Thunk {
   pub nparams: u8,
   pub nregs: u8,
   pub constants: Box<[Val]>,
+}
+
+/// Image-owned description of a struct type. Member names map to slots of one
+/// array: the declared fields first, positional aliases (`a`, `b`, ...) sharing
+/// those slots, then the methods in declaration order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeDesc {
+  pub nfields: u16,
+  pub nslots: u16,
+  pub members: Box<[(String, u16)]>,
+}
+
+impl TypeDesc {
+  pub fn new(fields: &[&str], methods: &[&str]) -> Result<Self, String> {
+    let mut members: IndexMap<String, u16> = IndexMap::new();
+    for (slot, name) in fields.iter().chain(methods).enumerate() {
+      if members.insert(name.to_string(), slot as u16).is_some() {
+        return Err(format!("duplicate member `{name}`"));
+      }
+    }
+    for (slot, alias) in (b'a'..=b'z').enumerate().take(fields.len()) {
+      members.entry(String::from(alias as char)).or_insert(slot as u16);
+    }
+    Ok(Self {
+      nfields: fields.len() as u16,
+      nslots: (fields.len() + methods.len()) as u16,
+      members: members.into_iter().collect(),
+    })
+  }
+
+  pub fn slot(&self, name: &str) -> Option<u16> {
+    self.members.iter().find(|m| m.0 == name).map(|m| m.1)
+  }
+
+  /// The declared name of a slot.
+  pub fn name(&self, slot: u16) -> &str {
+    self.members.iter().find(|m| m.1 == slot).map_or("?", |m| m.0.as_str())
+  }
 }
 
 impl ThunkCtx {
@@ -851,26 +908,32 @@ pub struct BytecodeCtx {
   buffer: Vec<ThunkCtx>,
   current: ThunkCtx,
   finished: Vec<Thunk>,
+  types: Vec<TypeDesc>,
   heap: OwnedHeap,
 }
 
 /// Bytecode together with the exclusive VM heap backing its pointer-valued constants.
 pub struct BytecodeImage {
   thunks: Vec<Thunk>,
+  types: Vec<TypeDesc>,
   heap: OwnedHeap,
 }
 
 impl BytecodeImage {
-  pub(crate) fn new(thunks: Vec<Thunk>, heap: OwnedHeap) -> Self {
-    Self { thunks, heap }
+  pub(crate) fn new(thunks: Vec<Thunk>, types: Vec<TypeDesc>, heap: OwnedHeap) -> Self {
+    Self { thunks, types, heap }
   }
 
   pub fn thunks(&self) -> &[Thunk] {
     &self.thunks
   }
 
-  pub(crate) fn into_parts(self) -> (Vec<Thunk>, OwnedHeap) {
-    (self.thunks, self.heap)
+  pub fn types(&self) -> &[TypeDesc] {
+    &self.types
+  }
+
+  pub(crate) fn into_parts(self) -> (Vec<Thunk>, Vec<TypeDesc>, OwnedHeap) {
+    (self.thunks, self.types, self.heap)
   }
 }
 
@@ -880,8 +943,19 @@ impl BytecodeCtx {
       buffer: Vec::new(),
       current: ThunkCtx::new("__top_thunk__", Box::new([]), 0),
       finished: Vec::new(),
+      types: Vec::new(),
       heap,
     }
+  }
+
+  pub fn add_type(&mut self, desc: TypeDesc) -> Option<u16> {
+    let id = u16::try_from(self.types.len()).ok()?;
+    self.types.push(desc);
+    Some(id)
+  }
+
+  pub fn type_desc(&self, id: u16) -> &TypeDesc {
+    &self.types[id as usize]
   }
 
   pub fn push_thunk(&mut self, name: &str, fvlocs: Box<[Location]>, nparams: u8) {
@@ -944,9 +1018,9 @@ impl BytecodeCtx {
   }
 
   pub fn finalize(self) -> BytecodeImage {
-    let Self { buffer, current, mut finished, mut heap } = self;
+    let Self { buffer, current, mut finished, types, mut heap } = self;
     assert!(buffer.is_empty());
     finished.push(current.relocate_all(&mut heap));
-    BytecodeImage::new(finished, heap)
+    BytecodeImage::new(finished, types, heap)
   }
 }

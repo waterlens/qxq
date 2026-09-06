@@ -2,7 +2,7 @@ use std::{ffi::CStr, ptr::NonNull, rc::Rc};
 
 use crate::{
   bytecode::{
-    BinaryRepr, Bytecode, BytecodeImage, Location, Operands, Operator, Tag, Thunk, TrapId,
+    BinaryRepr, Bytecode, BytecodeImage, Location, Operands, Operator, Tag, Thunk, TrapId, TypeDesc,
   },
   diagnostic::{Diagnostic, Result},
   val::Val,
@@ -10,6 +10,8 @@ use crate::{
 };
 
 const STACK_HEADROOM_SLOTS: usize = 256;
+/// Return-value and return-address slots between frames, as in vm.h.
+const FRAME_HEADER_SIZE: usize = 2;
 const RESULT_BUF_LEN: usize = 64;
 
 pub struct OwnedHeap {
@@ -61,14 +63,15 @@ impl Drop for OwnedHeap {
 /// Executes `image`, consuming both its bytecode and its associated heap.
 pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
   let validator = ImageValidator::new(Rc::clone(&diag));
-  validator.validate(image.thunks())?;
+  validator.validate(image.thunks(), image.types())?;
 
   let max_nregs = image.thunks().iter().map(|t| t.nregs as usize).max().unwrap_or(0);
   let numobject = compute_numobject(image.thunks());
-  let (mut thunks, heap) = image.into_parts();
+  let (mut thunks, types, heap) = image.into_parts();
   append_entry_thunk(&mut thunks, &diag)?;
 
   let mut native_thunks = NativeThunkSet::new(&thunks, &diag)?;
+  let mut native_types = OwnedType::from_descs(&types, &diag)?;
   let mut result = 0;
   let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
   let status = unsafe {
@@ -76,8 +79,10 @@ pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
       heap.as_ptr(),
       native_thunks.entry_ptr(),
       native_thunks.thunk_ptrs_mut(),
+      native_types.as_mut_ptr().cast(),
       thunks.len(),
       numobject,
+      native_types.len(),
       stack_slots,
       &mut result,
       std::ptr::null_mut(),
@@ -136,7 +141,7 @@ impl ImageValidator {
     Self { diag }
   }
 
-  fn validate(&self, thunks: &[Thunk]) -> Result<()> {
+  fn validate(&self, thunks: &[Thunk], types: &[TypeDesc]) -> Result<()> {
     if thunks.is_empty() {
       return self.diag.fail("cannot execute an empty bytecode image");
     }
@@ -148,29 +153,31 @@ impl ImageValidator {
         }
       }
       for bc in thunk.code.iter() {
-        self.validate_bytecode(*bc, thunk.fvlocs.len())?;
+        self.validate_bytecode(*bc, thunk, types)?;
       }
     }
 
     Ok(())
   }
 
-  fn validate_bytecode(&self, bytecode: Bytecode, nfree: usize) -> Result<()> {
+  fn validate_bytecode(&self, bytecode: Bytecode, thunk: &Thunk, types: &[TypeDesc]) -> Result<()> {
     use Operator::*;
-    match bytecode {
-      Bytecode(LoadF, Operands::AB(op)) if usize::from(u16::from(op.o1)) <= nfree => Ok(()),
-      Bytecode(LoadF | SetF, _) => self.diag.fail(format!("illegal instruction: {}", bytecode)),
-      Bytecode(MObj, Operands::ABC(op)) if u8::from(op.o1) >= u8::from(Tag::INT) => {
-        self.diag.fail(format!("illegal instruction: heap-backed mobj: {}", bytecode))
-      }
-      Bytecode(LoadR, Operands::AB(op)) => {
-        let value = Val::from_raw(u64::from(u16::from(op.o1)));
-        if value.is_empty() || value.is_null() || value.is_bool() {
-          Ok(())
-        } else {
-          self.diag.fail(format!("illegal instruction: noncanonical raw value: {}", bytecode))
-        }
-      }
+    // Operands as the VM decodes them: A, B and C in encoding order.
+    let Bytecode(operator, operands) = bytecode;
+    let (a, b, c) = match operands {
+      Operands::AB(op) => (usize::from(op.dst), usize::from(op.o1), 0),
+      Operands::ABC(op) => (usize::from(op.dst), usize::from(op.o1), usize::from(op.o2)),
+      _ => (0, 0, 0),
+    };
+    let string = |i: usize| thunk.constants.get(i).is_some_and(|v| v.is_ptr());
+    let illegal = |what: &str| self.diag.fail(format!("illegal instruction: {what}: {bytecode}"));
+    match operator {
+      LoadFree if b > thunk.fvlocs.len() => illegal("free variable out of range"),
+      LoadType if b >= types.len() => illegal("type out of range"),
+      LoadField | SetField | Invoke if !string(c) => illegal("member is not a string constant"),
+      Invoke if b != a + FRAME_HEADER_SIZE => illegal("call region not after destination"),
+      MObj if Tag::from(b as u8) >= Tag::INT => illegal("heap-backed mobj"),
+      LoadR if !Val::from_raw(b as u64).is_trivial() => illegal("nontrivial raw value"),
       _ => Ok(()),
     }
   }
@@ -257,6 +264,44 @@ impl Drop for OwnedThunk {
   }
 }
 
+/// SAFETY: `#[repr(transparent)]` over `NonNull<vm::type_desc>`, so a
+/// `Vec<OwnedType>` is handed to the VM as `*mut *mut vm::type_desc`.
+#[repr(transparent)]
+struct OwnedType {
+  ptr: NonNull<vm::type_desc>,
+}
+
+impl OwnedType {
+  fn from_descs(descs: &[TypeDesc], diag: &Diagnostic) -> Result<Vec<Self>> {
+    descs.iter().map(|desc| Self::from_desc(desc, diag)).collect()
+  }
+
+  fn from_desc(desc: &TypeDesc, diag: &Diagnostic) -> Result<Self> {
+    let members: Vec<vm::member_desc> = desc
+      .members
+      .iter()
+      .map(|(name, slot)| vm::member_desc {
+        name: name.as_ptr().cast(),
+        len: name.len() as u32,
+        slot: u32::from(*slot),
+      })
+      .collect();
+    let ptr = unsafe {
+      vm::vm_type_alloc(desc.nfields.into(), desc.nslots.into(), members.as_ptr(), members.len())
+    };
+    let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm type"))?;
+    Ok(Self { ptr })
+  }
+}
+
+impl Drop for OwnedType {
+  fn drop(&mut self) {
+    unsafe {
+      vm::vm_type_free(self.ptr.as_ptr());
+    }
+  }
+}
+
 fn encode_bytecode(bytecode: Bytecode) -> vm::bc_t {
   let mut buf = [0u8; 4];
   bytecode.dump(&mut buf);
@@ -310,12 +355,13 @@ mod tests {
   ) -> Result<(String, vm::gc_stats)> {
     let _guard = VM_LOCK.lock().unwrap();
     let validator = ImageValidator::new(Rc::clone(&diag));
-    validator.validate(image.thunks())?;
+    validator.validate(image.thunks(), image.types())?;
     let max_nregs = image.thunks().iter().map(|t| t.nregs as usize).max().unwrap_or(0);
     let numobject = compute_numobject(image.thunks());
-    let (mut thunks, heap) = image.into_parts();
+    let (mut thunks, types, heap) = image.into_parts();
     append_entry_thunk(&mut thunks, &diag)?;
     let mut native_thunks = NativeThunkSet::new(&thunks, &diag)?;
+    let mut native_types = OwnedType::from_descs(&types, &diag)?;
     let mut result = 0;
     let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
     let mut stats: vm::gc_stats = unsafe { std::mem::zeroed() };
@@ -324,8 +370,10 @@ mod tests {
         heap.as_ptr(),
         native_thunks.entry_ptr(),
         native_thunks.thunk_ptrs_mut(),
+        native_types.as_mut_ptr().cast(),
         thunks.len(),
         numobject,
+        native_types.len(),
         stack_slots,
         &mut result,
         &mut stats,
@@ -411,13 +459,14 @@ mod tests {
     let validator = ImageValidator::new(Rc::clone(&diag));
     let thunk = Thunk {
       name: String::new(),
-      code: vec![Bytecode::loadf(0.into(), 0.into()), Bytecode::loadf(0.into(), 1.into())].into(),
+      code: vec![Bytecode::loadfree(0.into(), 0.into()), Bytecode::loadfree(0.into(), 1.into())]
+        .into(),
       fvlocs: vec![Location::Slot(0.into())].into(),
       nparams: 0,
       nregs: 1,
       constants: vec![].into(),
     };
-    assert!(validator.validate(&[thunk]).is_ok());
+    assert!(validator.validate(&[thunk], &[]).is_ok());
   }
 
   #[test]
@@ -427,28 +476,43 @@ mod tests {
     let validator = ImageValidator::new(Rc::clone(&diag));
     let thunk = Thunk {
       name: String::new(),
-      code: vec![Bytecode::loadf(0.into(), 2.into())].into(),
+      code: vec![Bytecode::loadfree(0.into(), 2.into())].into(),
       fvlocs: vec![Location::Slot(0.into())].into(),
       nparams: 0,
       nregs: 1,
       constants: vec![].into(),
     };
-    assert!(validator.validate(&[thunk]).is_err());
+    assert!(validator.validate(&[thunk], &[]).is_err());
   }
 
   #[test]
-  fn validator_rejects_setf() {
+  fn validator_rejects_bad_member_operands() {
     let diag = Rc::new(Diagnostic::new());
     let validator = ImageValidator::new(Rc::clone(&diag));
-    let thunk = Thunk {
+    let thunk = |code: Vec<Bytecode>, constants: Vec<Val>| Thunk {
       name: String::new(),
-      code: vec![Bytecode::setf(0.into(), 0.into())].into(),
+      code: code.into(),
       fvlocs: vec![].into(),
       nparams: 0,
-      nregs: 1,
-      constants: vec![].into(),
+      nregs: 4,
+      constants: constants.into(),
     };
-    assert!(validator.validate(&[thunk]).is_err());
+    let string = OwnedHeap::new(&diag).unwrap().alloc_str("x").unwrap();
+    let setfield = Bytecode::setfield(0.into(), 1.into(), 0.into());
+    assert!(validator.validate(&[thunk(vec![setfield], vec![])], &[]).is_err());
+    assert!(validator.validate(&[thunk(vec![setfield], vec![Val::from_i32(1)])], &[]).is_err());
+    assert!(validator.validate(&[thunk(vec![setfield], vec![string])], &[]).is_ok());
+    let invoke = Bytecode::invoke(0.into(), 2.into(), 0.into());
+    assert!(validator.validate(&[thunk(vec![invoke], vec![string])], &[]).is_ok());
+    let invoke = Bytecode::invoke(0.into(), 1.into(), 0.into());
+    assert!(validator.validate(&[thunk(vec![invoke], vec![string])], &[]).is_err());
+    let loadtype = Bytecode::loadtype(0.into(), 0.into());
+    assert!(validator.validate(&[thunk(vec![loadtype], vec![])], &[]).is_err());
+    assert!(
+      validator
+        .validate(&[thunk(vec![loadtype], vec![])], &[TypeDesc::new(&[], &[]).unwrap()])
+        .is_ok()
+    );
   }
 
   #[test]
@@ -463,7 +527,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    assert!(validator.validate(&[thunk]).is_err());
+    assert!(validator.validate(&[thunk], &[]).is_err());
   }
 
   #[test]
@@ -478,7 +542,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    assert!(validator.validate(&[thunk]).is_err());
+    assert!(validator.validate(&[thunk], &[]).is_err());
   }
 
   #[test]
@@ -493,7 +557,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    assert!(validator.validate(&[thunk]).is_ok());
+    assert!(validator.validate(&[thunk], &[]).is_ok());
   }
 
   #[test]
@@ -514,7 +578,7 @@ mod tests {
       nregs: 1,
       constants: vec![].into(),
     };
-    assert!(validator.validate(&[thunk]).is_ok());
+    assert!(validator.validate(&[thunk], &[]).is_ok());
   }
 
   #[test]
@@ -530,7 +594,7 @@ mod tests {
       nregs: 0,
       constants: vec![].into(),
     };
-    assert!(validator.validate(&[thunk]).is_err());
+    assert!(validator.validate(&[thunk], &[]).is_err());
   }
 
   #[test]
@@ -570,7 +634,7 @@ mod tests {
       &diag,
     )
     .unwrap();
-    let image = BytecodeImage::new(vec![thunk], heap);
+    let image = BytecodeImage::new(vec![thunk], vec![], heap);
     let (result, stats) = execute_with_stats(image, diag).unwrap();
     assert_eq!(result, "42");
     assert_eq!(stats.mark_to_sweep_transitions, 1);
@@ -625,7 +689,7 @@ mod tests {
       &diag,
     )
     .unwrap();
-    let image = BytecodeImage::new(vec![thunk], heap);
+    let image = BytecodeImage::new(vec![thunk], vec![], heap);
     let (result, _stats) = execute_with_stats(image, diag).unwrap();
     assert_eq!(result, "99");
   }

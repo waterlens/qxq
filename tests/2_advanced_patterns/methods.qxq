@@ -1,0 +1,64 @@
+(* RUN: {qxq|cargo run -- --inspect} %s *)
+
+type Date = struct {year, month, day}
+  with fn get_year(self) self.a end
+  with fn get_month(self) self.b end
+  with fn get_day(self) self.c end
+end;
+let day = Date{year = 2026, 1, day = 2};
+day.get_year() + day.get_month() + day.get_day()
+
+(* EXPECT:
+   --- Syntax Tree ---
+   (block (type Date (struct (fields year month day) (method get_year (self) (member self a)) (method get_month (self) (member self b)) (method get_day (self) (member self c)))) (let day (construct Date (init year 2026) (init _ 1) (init day 2))) (+ (+ (member-apply day get_year) (member-apply day get_month)) (member-apply day get_day)))
+   --- Thunk ---
+   thunk::fn params::1 regs::2 captured::[]
+   constants::[
+     @0: "a"
+   ]
+   load.field   r1, r0, @0
+   ret          r1
+
+   --- Thunk ---
+   thunk::fn params::1 regs::2 captured::[]
+   constants::[
+     @0: "b"
+   ]
+   load.field   r1, r0, @0
+   ret          r1
+
+   --- Thunk ---
+   thunk::fn params::1 regs::2 captured::[]
+   constants::[
+     @0: "c"
+   ]
+   load.field   r1, r0, @0
+   ret          r1
+
+   --- Thunk ---
+   thunk::__top_thunk__ params::0 regs::6 captured::[]
+   constants::[
+     @0: "get_year"
+     @1: "get_month"
+     @2: "get_day"
+   ]
+   loadtype     r0, @0
+   clos         r1, fn0
+   clos         r2, fn1
+   clos         r3, fn2
+   wrap         r0, tag::type, #4
+   move         r1, r0
+   loadi        r2, #2026
+   loadi        r3, #1
+   loadi        r4, #2
+   wrap         r1, tag::struct, #4
+   move         r4, r1
+   invoke       r2, r4, @0
+   move         r5, r1
+   invoke       r3, r5, @1
+   add.dd       r2, r2, r3
+   move         r5, r1
+   invoke       r3, r5, @2
+   add.dd       r2, r2, r3
+   ret          r2
+*)

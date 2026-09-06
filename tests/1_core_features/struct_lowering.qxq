@@ -1,0 +1,74 @@
+(* RUN: {qxq|cargo run -- --inspect} %s *)
+type Counter = struct {n}
+  with fn add(self, k) self.n + k end
+  with fn twice(self, k) add(k) + self.add(k) end
+  with fn later(self) fn (k) add(k) end end
+end;
+let c = Counter{n = 1};
+c.twice(2) + c.later()(3)
+(* EXPECT:
+   --- Syntax Tree ---
+   (block (type Counter (struct (fields n) (method add (self k) (+ (member self n) k)) (method twice (self k) (+ (add k) (member-apply self add k))) (method later (self) (fn (k) (add k))))) (let c (construct Counter (init n 1))) (+ (member-apply c twice 2) ((member-apply c later) 3)))
+   --- Thunk ---
+   thunk::fn params::2 regs::3 captured::[]
+   constants::[
+     @0: "n"
+   ]
+   load.field   r2, r0, @0
+   add.dd       r2, r2, r1
+   ret          r2
+   
+   --- Thunk ---
+   thunk::fn params::2 regs::7 captured::[]
+   constants::[
+     @0: "add"
+   ]
+   move         r4, r0
+   move         r5, r1
+   invoke       r2, r4, @0
+   move         r5, r0
+   move         r6, r1
+   invoke       r3, r5, @0
+   add.dd       r2, r2, r3
+   ret          r2
+   
+   --- Thunk ---
+   thunk::fn params::1 regs::5 captured::[r0 as ^1]
+   constants::[
+     @0: "add"
+   ]
+   loadfree     r3, ^1
+   move         r4, r0
+   invoke       r1, r3, @0
+   ret          r1
+   
+   --- Thunk ---
+   thunk::fn params::1 regs::2 captured::[]
+   clos         r1, fn2
+   ret          r1
+   
+   --- Thunk ---
+   thunk::__top_thunk__ params::0 regs::7 captured::[]
+   constants::[
+     @0: "twice"
+     @1: "later"
+   ]
+   loadtype     r0, @0
+   clos         r1, fn0
+   clos         r2, fn1
+   clos         r3, fn3
+   wrap         r0, tag::type, #4
+   move         r1, r0
+   loadi        r2, #1
+   wrap         r1, tag::struct, #2
+   move         r4, r1
+   loadi        r5, #2
+   invoke       r2, r4, @0
+   move         r6, r1
+   invoke       r4, r6, @1
+   move         r3, r4
+   loadi        r5, #3
+   apply        r3, #1
+   add.dd       r2, r2, r3
+   ret          r2
+*)

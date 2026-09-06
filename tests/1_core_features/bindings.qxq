@@ -26,7 +26,7 @@ factorial(5)
    jmp          #2
    loadi        r1, #1
    ret          r1
-   loadf        r1, ^0
+   loadfree     r1, ^0
    sub.dc       r3, r0, @1
    apply        r1, #1
    mul.dd       r1, r0, r1

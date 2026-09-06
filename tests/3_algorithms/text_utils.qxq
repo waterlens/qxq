@@ -28,7 +28,7 @@ repeat("ha", 3)
      @0: ", "
      @1: "!"
    ]
-   loadf        r1, ^1
+   loadfree     r1, ^1
    loadc        r2, @0
    add.dd       r1, r1, r2
    add.dd       r1, r1, r0
@@ -41,13 +41,13 @@ repeat("ha", 3)
    constants::[
      @0: 1
    ]
-   loadf        r2, ^1
+   loadfree     r2, ^1
    cmp.ge.dd    r0, r2
    jmp          #1
    ret          r1
-   loadf        r2, ^0
+   loadfree     r2, ^0
    add.dc       r4, r0, @0
-   loadf        r6, ^2
+   loadfree     r6, ^2
    add.dd       r5, r1, r6
    apply        r2, #2
    ret          r2

@@ -61,3 +61,24 @@ ULEB128.
 | Constants | | (2 * nconstants) | | |
 
 The thunk table always ends with a partial thunk header with size = 0.
+
+## Type Table
+
+The **Type Table** follows the thunk table and describes every struct type
+declared in the image. `LoadType` addresses it by index.
+
+| Name | Content | Length (Byte) | Field Name in Source Code | Comment |
+| --------------- | --------------- | --------------- | --------------- | --------------- |
+| \#Type | | | ntypes | # of type descriptions encoded by ULEB128 |
+
+Each type description lists its member names and the slots they resolve to.
+The declared fields occupy slots `0..nfields`, positional aliases `a`, `b`, ...
+share those slots, and the methods occupy `nfields..nslots` in declaration
+order.
+
+| Name | Content | Length (Byte) | Field Name in Source Code | Comment |
+| --------------- | --------------- | --------------- | --------------- | --------------- |
+| \#Field | | | nfields | # of declared fields encoded by ULEB128 |
+| \#Slot | | | nslots | # of member slots encoded by ULEB128 |
+| \#Member | | | nmembers | # of member entries encoded by ULEB128 |
+| Members | | | | (slot, length, UTF-8 name) with slot and length encoded by ULEB128 |

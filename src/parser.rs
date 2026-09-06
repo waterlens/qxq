@@ -49,6 +49,7 @@ impl Affinity {
     "-" => (Self::NONE, Self::PREFIX_START + 1),
   };
   const POSTFIX: phf::Map<&'static str, (u32, u32)> = phf::phf_map! {
+    "." => (Self::POSTFIX_START + 1, Self::NONE),
     "(" => (Self::POSTFIX_START + 1, Self::NONE),
     "[" => (Self::POSTFIX_START + 1, Self::NONE),
     "{" => (Self::POSTFIX_START + 1, Self::NONE),
@@ -93,13 +94,83 @@ pub enum Expr<'a, I> {
   StrLiteral(&'a str, I),
   Ident(TokenStr<'a>, I),
   Op(TokenStr<'a>, I),
-  OpApply { op: ExprRef<'a, I>, pair: Option<Paired>, args: ExprsRef<'a, I>, info: I },
-  Apply { func: ExprRef<'a, I>, pair: Option<Paired>, args: ExprsRef<'a, I>, info: I },
-  Bind { rec: bool, name: TokenStr<'a>, expr: ExprRef<'a, I>, info: I },
-  Fn { name: Option<TokenStr<'a>>, params: &'a [TokenStr<'a>], body: ExprRef<'a, I>, info: I },
+  OpApply {
+    op: ExprRef<'a, I>,
+    pair: Option<Paired>,
+    args: ExprsRef<'a, I>,
+    info: I,
+  },
+  Apply {
+    func: ExprRef<'a, I>,
+    pair: Option<Paired>,
+    args: ExprsRef<'a, I>,
+    info: I,
+  },
+  Bind {
+    rec: bool,
+    name: TokenStr<'a>,
+    expr: ExprRef<'a, I>,
+    info: I,
+  },
+  Fn {
+    name: Option<TokenStr<'a>>,
+    params: &'a [TokenStr<'a>],
+    body: ExprRef<'a, I>,
+    info: I,
+  },
   Block(ExprsRef<'a, I>, I),
   If(ExprRef<'a, I>, ExprRef<'a, I>, ExprRef<'a, I>, I),
   Tuple(ExprsRef<'a, I>, I),
+  /// `type name = struct {fields} with fn ... end ... end`; every method is a
+  /// named `Fn` whose first parameter is `self`.
+  StructDecl {
+    name: TokenStr<'a>,
+    fields: &'a [TokenStr<'a>],
+    methods: ExprsRef<'a, I>,
+    info: I,
+  },
+  Construct {
+    ty: ExprRef<'a, I>,
+    inits: &'a [Init<'a, I>],
+    info: I,
+  },
+  Member {
+    receiver: ExprRef<'a, I>,
+    member: TokenStr<'a>,
+    info: I,
+  },
+  MemberApply {
+    receiver: ExprRef<'a, I>,
+    member: TokenStr<'a>,
+    args: ExprsRef<'a, I>,
+    info: I,
+  },
+}
+
+/// One constructor initializer: `label = expr`, or a positional `expr`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Init<'a, I> {
+  pub label: Option<TokenStr<'a>>,
+  pub expr: ExprRef<'a, I>,
+}
+
+impl<I> ToSexp for Init<'_, I> {
+  fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
+    let label = self.label.map_or("_", |l| l.0);
+    pool.list(&[pool.atom("init"), pool.atom(label), self.expr.to_sexp(pool)])
+  }
+}
+
+fn method_to_sexp<'pool, I>(method: &Expr<'_, I>, pool: &'pool SexpPool) -> Sexp<'pool> {
+  match method {
+    Expr::Fn { name: Some(name), params, body, info: _ } => pool.list(&[
+      pool.atom("method"),
+      pool.atom(name.as_ref()),
+      pool.list(params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>()),
+      body.to_sexp(pool),
+    ]),
+    _ => method.to_sexp(pool),
+  }
 }
 
 type ExprCon<'a, I> = Expr<'a, I>;
@@ -148,6 +219,26 @@ impl<I> ToSexp for Expr<'_, I> {
       }
       Tuple(xs, _) => pool
         .non_empty_list(pool.atom("tuple"), xs.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>()),
+      StructDecl { name, fields, methods, info: _ } => {
+        let fields = fields.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>();
+        let mut parts = vec![pool.atom("struct"), pool.non_empty_list(pool.atom("fields"), fields)];
+        parts.extend(methods.iter().map(|m| method_to_sexp(m, pool)));
+        pool.list(&[pool.atom("type"), pool.atom(name.as_ref()), pool.list(parts)])
+      }
+      Construct { ty, inits, info: _ } => {
+        let mut parts = vec![pool.atom("construct"), ty.to_sexp(pool)];
+        parts.extend(inits.iter().map(|x| x.to_sexp(pool)));
+        pool.list(parts)
+      }
+      Member { receiver, member, info: _ } => {
+        pool.list(&[pool.atom("member"), receiver.to_sexp(pool), pool.atom(member.as_ref())])
+      }
+      MemberApply { receiver, member, args, info: _ } => {
+        let mut parts =
+          vec![pool.atom("member-apply"), receiver.to_sexp(pool), pool.atom(member.as_ref())];
+        parts.extend(args.iter().map(|x| x.to_sexp(pool)));
+        pool.list(parts)
+      }
     }
   }
 }
@@ -179,7 +270,11 @@ impl<I> Expr<'_, I> {
       | Fn { info: i, .. }
       | Block(_, i)
       | If(.., i)
-      | Tuple(_, i) => i,
+      | Tuple(_, i)
+      | StructDecl { info: i, .. }
+      | Construct { info: i, .. }
+      | Member { info: i, .. }
+      | MemberApply { info: i, .. } => i,
     }
   }
 }
@@ -272,6 +367,38 @@ impl<'a> ToSexp for InfoExpr<'a> {
         parts.extend(xs.iter().map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool)));
         false
       }
+      StructDecl { name, fields, methods, info: _ } => {
+        parts.push(pool.atom("type"));
+        parts.push(pool.atom(name.as_ref()));
+        let fields = fields.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>();
+        let mut body = vec![pool.atom("struct"), pool.non_empty_list(pool.atom("fields"), fields)];
+        body.extend(methods.iter().map(|m| InfoExpr { expr: m, map: self.map }.to_sexp(pool)));
+        parts.push(pool.list(body));
+        false
+      }
+      Construct { ty, inits, info: _ } => {
+        parts.push(pool.atom("construct"));
+        parts.push(InfoExpr { expr: ty, map: self.map }.to_sexp(pool));
+        parts.extend(inits.iter().map(|x| {
+          let label = x.label.map_or("_", |l| l.0);
+          let expr = InfoExpr { expr: x.expr, map: self.map }.to_sexp(pool);
+          pool.list(&[pool.atom("init"), pool.atom(label), expr])
+        }));
+        false
+      }
+      Member { receiver, member, info: _ } => {
+        parts.push(pool.atom("member"));
+        parts.push(InfoExpr { expr: receiver, map: self.map }.to_sexp(pool));
+        parts.push(pool.atom(member.as_ref()));
+        false
+      }
+      MemberApply { receiver, member, args, info: _ } => {
+        parts.push(pool.atom("member-apply"));
+        parts.push(InfoExpr { expr: receiver, map: self.map }.to_sexp(pool));
+        parts.push(pool.atom(member.as_ref()));
+        parts.extend(args.iter().map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool)));
+        false
+      }
     };
 
     let info_key = self.expr.get_info();
@@ -357,19 +484,20 @@ impl<'a> Parser<'a> {
     });
   }
 
-  fn leave_function(&mut self) -> Vec<TokenStr<'a>> {
+  fn pop_function(&mut self) -> Vec<TokenStr<'a>> {
     let ctx = self.func_stack.pop().expect("function stack underflow");
     let mut free_vec: Vec<_> = ctx.freevars.iter().cloned().collect();
     free_vec.sort();
+    free_vec
+  }
 
-    // Propagate free vars to the parent function (if any) as usages
+  // Free variables of a nested function are usages in its parent.
+  fn propagate_freevars(&mut self, freevars: &[TokenStr<'a>]) {
     if let Some(parent) = self.func_stack.last_mut() {
-      for fv in &ctx.freevars {
+      for fv in freevars {
         Self::use_var_in_ctx(parent, *fv);
       }
     }
-
-    free_vec
   }
 
   fn enter_scope(&mut self) {
@@ -452,9 +580,7 @@ impl<'a> Parser<'a> {
   }
 
   fn expect_paired_open(&mut self, po: Paired) -> PeekToken<'a> {
-    while self.peek_newline() {
-      self.skip_token();
-    }
+    self.skip_newlines();
     let tok = self.next_token()?;
     if tok.inner.tag != TokenTag::PairedOpen(po) {
       return self.diag.fail(format!("expected paired open {}", po));
@@ -464,9 +590,7 @@ impl<'a> Parser<'a> {
 
   fn expect_paired_close(&mut self, po: Paired, allow_newline: bool) -> PeekToken<'a> {
     if allow_newline {
-      while self.peek_newline() {
-        self.skip_token();
-      }
+      self.skip_newlines();
     }
     let tok = self.next_token()?;
     if tok.inner.tag != TokenTag::PairedClose(po) {
@@ -477,9 +601,7 @@ impl<'a> Parser<'a> {
 
   fn peek_keyword(&mut self, kw: Keyword, allow_newline: bool) -> bool {
     if allow_newline {
-      while self.peek_newline() {
-        self.skip_token();
-      }
+      self.skip_newlines();
     }
     match self.peek_token() {
       Ok(x) => x.inner.tag == TokenTag::Kw(kw),
@@ -489,9 +611,7 @@ impl<'a> Parser<'a> {
 
   fn peek_operator(&mut self, op: &str, allow_newline: bool) -> bool {
     if allow_newline {
-      while self.peek_newline() {
-        self.skip_token();
-      }
+      self.skip_newlines();
     }
     match self.peek_token() {
       Ok(x) => matches!(x.inner.tag, TokenTag::Op(op2) | TokenTag::RawOp(op2) if op == op2),
@@ -499,11 +619,13 @@ impl<'a> Parser<'a> {
     }
   }
 
+  fn peek_paired_open(&mut self, po: Paired) -> bool {
+    matches!(self.peek_token(), Ok(x) if x.inner.tag == TokenTag::PairedOpen(po))
+  }
+
   fn peek_paired_close(&mut self, po: Paired, allow_newline: bool) -> bool {
     if allow_newline {
-      while self.peek_newline() {
-        self.skip_token();
-      }
+      self.skip_newlines();
     }
     match self.peek_token() {
       Ok(x) => matches!(x.inner.tag, TokenTag::PairedClose(po2) if po == po2),
@@ -513,9 +635,7 @@ impl<'a> Parser<'a> {
 
   fn next_ident(&mut self, allow_newline: bool) -> PeekToken<'a> {
     if allow_newline {
-      while self.peek_newline() {
-        self.skip_token();
-      }
+      self.skip_newlines();
     }
     let tok = self.next_token()?;
     if !matches!(tok.inner.tag, TokenTag::Identifer) {
@@ -531,11 +651,15 @@ impl<'a> Parser<'a> {
     }
   }
 
+  fn skip_newlines(&mut self) {
+    while self.peek_newline() {
+      self.skip_token()
+    }
+  }
+
   fn expect_keyword(&mut self, kw: Keyword, allow_newline: bool) -> PeekToken<'a> {
     if allow_newline {
-      while self.peek_newline() {
-        self.skip_token();
-      }
+      self.skip_newlines();
     }
     let tok = self.next_token()?;
     if tok.inner.tag != TokenTag::Kw(kw) {
@@ -546,9 +670,7 @@ impl<'a> Parser<'a> {
 
   fn expect_operator(&mut self, op: &str, allow_newline: bool) -> PeekToken<'a> {
     if allow_newline {
-      while self.peek_newline() {
-        self.skip_token();
-      }
+      self.skip_newlines();
     }
     let tok = self.next_token()?;
     if !matches!(tok.inner.tag, TokenTag::Op(op2) | TokenTag::RawOp(op2) if op == op2) {
@@ -573,55 +695,153 @@ impl<'a> Parser<'a> {
   }
 
   fn parse_function<'t>(&'t mut self, name: Option<TokenStr<'a>>) -> PeekExpr<'a> {
+    let (params, body, freevars) = self.parse_function_parts(name)?;
+    self.propagate_freevars(&freevars);
+    let info = self.new_info(freevars);
+    Ok(PeekResult { inner: self.arena.alloc(ExprCon::Fn { name, params, body, info }) })
+  }
+
+  /// Parses `(params) body end` in a fresh function context and returns the
+  /// sorted free variables without propagating them to the parent.
+  fn parse_function_parts<'t>(
+    &'t mut self,
+    name: Option<TokenStr<'a>>,
+  ) -> Result<(&'a [TokenStr<'a>], ExprRef<'a, InfoKey>, Vec<TokenStr<'a>>)> {
     self.enter_function(name);
     let _ = self.expect_paired_open(Paired::Parenthesis)?;
 
     let mut params = vec![];
-
     if !self.peek_paired_close(Paired::Parenthesis, false) {
-      let param_name = self.parse_ident(true)?;
-      params.push(param_name);
-
-      if self.peek_operator(",", false) {
-        while self.peek_operator(",", false) {
-          self.skip_token();
-
-          while self.peek_newline() {
-            self.skip_token();
-          }
-
-          let param_name = self.parse_ident(true)?;
-          params.push(param_name);
+      loop {
+        params.push(self.parse_ident(true)?);
+        if !self.peek_operator(",", false) {
+          break;
         }
+        self.skip_token();
+        self.skip_newlines();
       }
     }
-
     let _ = self.expect_paired_close(Paired::Parenthesis, false)?;
-
-    while self.peek_newline() {
-      self.skip_token();
-    }
+    self.skip_newlines();
 
     let body = self.parse_exprs()?;
+    let _ = self.expect_keyword(Keyword::End, true)?;
+    let freevars = self.pop_function();
+    Ok((self.arena.alloc_slice_copy(&params), body.inner, freevars))
+  }
 
+  fn parse_struct_decl<'t>(&'t mut self) -> PeekExpr<'a> {
+    let arena = self.arena;
+    let name_tok = self.next_ident(false)?;
+    let name = TokenStr::from_span(arena, name_tok.inner.span);
+    let _ = self.expect_operator("=", false)?;
+    let _ = self.expect_keyword(Keyword::Struct, false)?;
+    let _ = self.expect_paired_open(Paired::Brace)?;
+
+    let mut fields = vec![];
+    if !self.peek_paired_close(Paired::Brace, true) {
+      loop {
+        let tok = self.next_ident(true)?;
+        fields.push(TokenStr::from_span(arena, tok.inner.span));
+        if !self.peek_operator(",", true) {
+          break;
+        }
+        self.skip_token();
+      }
+    }
+    let _ = self.expect_paired_close(Paired::Brace, true)?;
+
+    // A method body may name a binder of its recursion group declared later,
+    // so free variables are settled only once every method has been parsed.
+    let mut methods = vec![];
+    while self.peek_keyword(Keyword::With, true) {
+      self.skip_token();
+      let _ = self.expect_keyword(Keyword::Fn, false)?;
+      let tok = self.next_ident(false)?;
+      let mname = TokenStr::from_span(arena, tok.inner.span);
+      let (params, body, freevars) = self.parse_function_parts(None)?;
+      if params.first().map(|p| p.0) != Some("self") {
+        return self.diag.fail(format!("the first parameter of method {mname} must be `self`"));
+      }
+      methods.push((mname, params, body, freevars));
+    }
     let _ = self.expect_keyword(Keyword::End, true)?;
 
-    let freevars = self.leave_function();
+    let rec_group: Vec<_> = methods.iter().map(|m| m.0).collect();
+    let mut method_exprs = Vec::with_capacity(methods.len());
+    for (mname, params, body, mut freevars) in methods {
+      freevars.retain(|v| !rec_group.contains(v));
+      self.propagate_freevars(&freevars);
+      let info = self.new_info(freevars);
+      method_exprs.push(&*arena.alloc(ExprCon::Fn { name: Some(mname), params, body, info }));
+    }
 
-    let func = self.arena.alloc(ExprCon::Fn {
+    self.declare_local(name);
+    let decl = arena.alloc(ExprCon::StructDecl {
       name,
-      params: self.arena.alloc_slice_copy(&params),
-      body: body.inner,
-      info: self.new_info(freevars),
+      fields: arena.alloc_slice_copy(&fields),
+      methods: arena.alloc_slice_clone(&method_exprs),
+      info: self.new_empty_info(),
     });
+    Ok(PeekResult { inner: decl })
+  }
 
-    Ok(PeekResult { inner: func })
+  /// Parses `expr, expr, ...` up to and including the closing token of `po`.
+  fn parse_args<'t>(&'t mut self, po: Paired) -> Result<Vec<ExprRef<'a, InfoKey>>> {
+    let mut exprs = vec![];
+    if !self.peek_paired_close(po, false) {
+      loop {
+        exprs.push(self.parse_expr()?.inner);
+        if !self.peek_operator(",", false) {
+          break;
+        }
+        self.skip_token();
+        self.skip_newlines();
+      }
+    }
+    let _ = self.expect_paired_close(po, false)?;
+    Ok(exprs)
+  }
+
+  fn parse_inits<'t>(&'t mut self) -> Result<Vec<Init<'a, InfoKey>>> {
+    let mut inits = vec![];
+    if !self.peek_paired_close(Paired::Brace, true) {
+      loop {
+        inits.push(self.parse_init()?);
+        if !self.peek_operator(",", true) {
+          break;
+        }
+        self.skip_token();
+      }
+    }
+    let _ = self.expect_paired_close(Paired::Brace, true)?;
+    Ok(inits)
+  }
+
+  // `label = expr` names a field rather than using `label` as a variable.
+  fn parse_init<'t>(&'t mut self) -> Result<Init<'a, InfoKey>> {
+    self.skip_newlines();
+    let tok = self.next_token()?;
+    if tok.inner.tag == TokenTag::Identifer && self.peek_operator("=", false) {
+      self.skip_token();
+      let label = Some(TokenStr::from_span(self.arena, tok.inner.span));
+      return Ok(Init { label, expr: self.parse_expr()?.inner });
+    }
+    Ok(Init { label: None, expr: self.parse_expr_from(tok, 0)?.inner })
   }
 
   fn parse_expr_with_affinity<'t>(&'t mut self, minaff: u32) -> PeekExpr<'a> {
+    let lhs_token = self.next_token()?;
+    self.parse_expr_from(lhs_token, minaff)
+  }
+
+  fn parse_expr_from<'t>(
+    &'t mut self,
+    lhs_token: PeekResult<'a, Token<'a>>,
+    minaff: u32,
+  ) -> PeekExpr<'a> {
     use TokenTag::*;
     let arena = self.arena;
-    let lhs_token = self.next_token()?;
     let mut lhs_op = None;
     let mut lhs: ExprRef<'_, InfoKey> = match lhs_token.inner.tag {
       IntLiteral(n) => arena.alloc(ExprCon::IntLiteral(n.try_into()?, self.new_empty_info())),
@@ -683,9 +903,7 @@ impl<'a> Parser<'a> {
               while self.peek_operator(",", false) {
                 self.skip_token();
 
-                while self.peek_newline() {
-                  self.skip_token();
-                }
+                self.skip_newlines();
 
                 let expr = self.parse_expr()?;
                 exprs.push(expr.inner);
@@ -719,6 +937,7 @@ impl<'a> Parser<'a> {
       }
       Kw(kw) => match kw {
         Keyword::Fn => self.parse_function(None)?.inner,
+        Keyword::Type => self.parse_struct_decl()?.inner,
         Keyword::Let => {
           let is_rec = self.peek_keyword(Keyword::Rec, false);
           if is_rec {
@@ -760,21 +979,15 @@ impl<'a> Parser<'a> {
 
           let _ = self.expect_keyword(Keyword::Then, true)?;
 
-          while self.peek_newline() {
-            self.skip_token();
-          }
+          self.skip_newlines();
 
           let then_branch = self.parse_expr()?;
 
-          while self.peek_newline() {
-            self.skip_token();
-          }
+          self.skip_newlines();
 
           let _ = self.expect_keyword(Keyword::Else, true)?;
 
-          while self.peek_newline() {
-            self.skip_token();
-          }
+          self.skip_newlines();
 
           let else_branch = self.parse_expr()?;
 
@@ -814,26 +1027,22 @@ impl<'a> Parser<'a> {
 
         self.skip_token();
 
-        if let PairedOpen(po) = op_token.inner.tag {
-          let mut exprs = vec![];
-
-          if !self.peek_paired_close(po, false) {
-            let expr = self.parse_expr()?;
-            exprs.push(expr.inner);
-
-            while self.peek_operator(",", false) {
-              self.skip_token();
-
-              while self.peek_newline() {
-                self.skip_token();
-              }
-
-              let expr = self.parse_expr()?;
-              exprs.push(expr.inner);
-            }
-          }
-
-          let _ = self.expect_paired_close(po, false)?;
+        if op_str == "." {
+          let tok = self.next_ident(false)?;
+          let member = TokenStr::from_span(arena, tok.inner.span);
+          let info = self.new_empty_info();
+          lhs = if self.peek_paired_open(Paired::Parenthesis) {
+            self.skip_token();
+            let args = arena.alloc_slice_clone(&self.parse_args(Paired::Parenthesis)?);
+            arena.alloc(ExprCon::MemberApply { receiver: lhs, member, args, info })
+          } else {
+            arena.alloc(ExprCon::Member { receiver: lhs, member, info })
+          };
+        } else if op_token.inner.tag == PairedOpen(Paired::Brace) {
+          let inits = arena.alloc_slice_clone(&self.parse_inits()?);
+          lhs = arena.alloc(ExprCon::Construct { ty: lhs, inits, info: self.new_empty_info() });
+        } else if let PairedOpen(po) = op_token.inner.tag {
+          let exprs = self.parse_args(po)?;
 
           if let Some(op) = lhs_op {
             lhs = arena.alloc(ExprCon::OpApply {
@@ -896,9 +1105,7 @@ impl<'a> Parser<'a> {
   fn parse_exprs<'t>(&'t mut self) -> PeekExpr<'a> {
     let arena = self.arena;
     self.enter_scope();
-    while self.peek_newline() {
-      self.skip_token();
-    }
+    self.skip_newlines();
 
     let first_expr = self.parse_expr();
     if let Err(e) = first_expr {
@@ -912,18 +1119,14 @@ impl<'a> Parser<'a> {
       return Ok(first_expr);
     }
 
-    while self.peek_newline() {
-      self.skip_token();
-    }
+    self.skip_newlines();
 
     let mut exprs = vec![first_expr.inner];
 
     while self.peek_operator(";", false) {
       self.skip_token();
 
-      while self.peek_newline() {
-        self.skip_token();
-      }
+      self.skip_newlines();
 
       let next_expr = self.parse_expr();
       if let Err(e) = next_expr {
@@ -933,9 +1136,7 @@ impl<'a> Parser<'a> {
       exprs.push(next_expr?.inner);
     }
 
-    while self.peek_newline() {
-      self.skip_token();
-    }
+    self.skip_newlines();
 
     self.leave_scope();
 
@@ -946,9 +1147,7 @@ impl<'a> Parser<'a> {
 
   pub fn parse(mut self) -> Result<SynTree<'a, InfoKey>> {
     let root = self.parse_exprs()?;
-    while self.peek_newline() {
-      self.skip_token();
-    }
+    self.skip_newlines();
     self.expect_reach_eof()?;
     let information = self.information;
     Ok(SynTree { root: root.inner, information })
@@ -967,6 +1166,12 @@ mod tests {
     let parser = Parser::new(&arena, diag, source);
     let tree = parser.parse().unwrap();
     assert_eq!(tree.root.to_sexp(&SexpPool::new()).to_string(), expected_sexp_str);
+  }
+
+  fn parse_fails(source: &str) {
+    let arena = Bump::new();
+    let diag = Rc::new(Diagnostic::new());
+    assert!(Parser::new(&arena, diag, source).parse().is_err(), "{source}");
   }
 
   fn test_parse_with_info(source: &str, expected_sexp_str: &str) {
@@ -1005,8 +1210,8 @@ mod tests {
     test_parse_exprs("f @ g @ h", "(@ f (@ g h))");
     test_parse_exprs("f()", "(f)");
     test_parse_exprs("f[]", "(f)");
-    test_parse_exprs("f{}", "(f)");
-    test_parse_exprs("f{x}[y](z)", "(((f x) y) z)");
+    test_parse_exprs("f{}", "(construct f)");
+    test_parse_exprs("f{x}[y](z)", "(((construct f (init _ x)) y) z)");
     test_parse_exprs("f(x, y)(z)", "((f x y) z)");
     test_parse_exprs("()", "()");
     test_parse_exprs("[]", "[]");
@@ -1058,6 +1263,47 @@ mod tests {
       end;
       x(1, 2)"#,
       "(block (let x (fn (x y) (if (== x 0) (+ y 1) (- y 1)))) (x 1 2))",
+    );
+  }
+
+  #[test]
+  fn test_structs() {
+    test_parse_exprs("type P = struct {x, y} end", "(type P (struct (fields x y)))");
+    test_parse_exprs(
+      "type P = struct {} with fn f(self) 1 end with fn g(self, n) n end end",
+      "(type P (struct (fields) (method f (self) 1) (method g (self n) n)))",
+    );
+    test_parse_exprs(
+      "type P = struct {\n  x,\n  y\n}\n  with fn f(self) self.x end\nend",
+      "(type P (struct (fields x y) (method f (self) (member self x))))",
+    );
+    test_parse_exprs("p.x", "(member p x)");
+    test_parse_exprs("p.x.y", "(member (member p x) y)");
+    test_parse_exprs("p.f(1, 2).g", "(member (member-apply p f 1 2) g)");
+    test_parse_exprs("p.x + 1 * p.f()", "(+ (member p x) (* 1 (member-apply p f)))");
+    test_parse_exprs("-p.x", "(- (member p x))");
+    test_parse_exprs("P{1, y = 2}", "(construct P (init _ 1) (init y 2))");
+    test_parse_exprs("P{}", "(construct P)");
+    test_parse_exprs("P{\n  x = 1,\n  y = 2\n}", "(construct P (init x 1) (init y 2))");
+    test_parse_exprs("P{x = 1}.x", "(member (construct P (init x 1)) x)");
+    parse_fails("type P = struct {x} with fn f() 1 end end");
+    parse_fails("type P = struct {x} with fn f(this) 1 end end");
+  }
+
+  #[test]
+  fn test_method_freevars() {
+    // Method names of the recursion group resolve through `self`, so they are not free.
+    test_parse_with_info(
+      "type P = struct {x} with fn f(self) g(k) + self.g(1) end with fn g(self, n) n end end",
+      "(type P (struct (fields x) (fn f (self) (+ (g k) (member-apply self g 1)) (freevars k)) (fn g (self n) n)))",
+    );
+    test_parse_with_info(
+      "type P = struct {} with fn f(self) fn () g() end end with fn g(self) 1 end end",
+      "(type P (struct (fields) (fn f (self) (fn () (g) (freevars g))) (fn g (self) 1)))",
+    );
+    test_parse_with_info(
+      "fn (k) type P = struct {} with fn f(self) g() + k end with fn g(self) 1 end end end",
+      "(fn (k) (type P (struct (fields) (fn f (self) (+ (g) k) (freevars k)) (fn g (self) 1))))",
     );
   }
 

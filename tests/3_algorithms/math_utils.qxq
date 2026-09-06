@@ -41,13 +41,13 @@ is_even(pow(2, 10))
    constants::[
      @0: 1
    ]
-   loadf        r2, ^2
+   loadfree     r2, ^2
    cmp.ge.dd    r0, r2
    jmp          #1
    ret          r1
-   loadf        r2, ^0
+   loadfree     r2, ^0
    add.dc       r4, r0, @0
-   loadf        r6, ^1
+   loadfree     r6, ^1
    mul.dd       r5, r1, r6
    apply        r2, #2
    ret          r2
@@ -79,7 +79,7 @@ is_even(pow(2, 10))
    
    --- Thunk ---
    thunk::fn params::1 regs::5 captured::[r3 as ^1]
-   loadf        r1, ^1
+   loadfree     r1, ^1
    move         r3, r0
    loadi        r4, #2
    apply        r1, #2
@@ -89,8 +89,8 @@ is_even(pow(2, 10))
    
    --- Thunk ---
    thunk::fn params::1 regs::7 captured::[r4 as ^1, r2 as ^2]
-   loadf        r1, ^2
-   loadf        r4, ^1
+   loadfree     r1, ^2
+   loadfree     r4, ^1
    move         r6, r0
    apply        r4, #1
    move         r3, r4

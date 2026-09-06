@@ -1,0 +1,13 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+type Date = struct {year, month, day}
+  with fn get_year(self) self.a end
+  with fn get_month(self) self.b end
+  with fn get_day(self) self.c end
+end;
+let day = Date{year = 2026, 1, day = 2};
+day.get_year() + day.get_month() + day.get_day()
+
+(* EXPECT:
+   2029
+*)

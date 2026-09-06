@@ -171,6 +171,8 @@ pub enum Keyword {
   Else,
   Then,
   End,
+  Type,
+  Struct,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -205,6 +207,8 @@ impl std::fmt::Display for Keyword {
       Else => write!(f, "else"),
       Then => write!(f, "then"),
       End => write!(f, "end"),
+      Type => write!(f, "type"),
+      Struct => write!(f, "struct"),
     }
   }
 }
@@ -270,6 +274,8 @@ static KEYWORDS: Lazy<RapidSmallMap<16, &'static [char], Keyword>> = Lazy::new(|
   map.insert(&['e', 'l', 's', 'e'], Keyword::Else);
   map.insert(&['t', 'h', 'e', 'n'], Keyword::Then);
   map.insert(&['e', 'n', 'd'], Keyword::End);
+  map.insert(&['t', 'y', 'p', 'e'], Keyword::Type);
+  map.insert(&['s', 't', 'r', 'u', 'c', 't'], Keyword::Struct);
   map
 });
 

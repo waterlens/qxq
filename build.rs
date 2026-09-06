@@ -27,7 +27,7 @@ fn main() {
         if ext == "c" {
           build.file(&path);
           println!("cargo:rerun-if-changed={}", path.display());
-        } else if ext == "h" {
+        } else if ext == "h" || ext == "def" {
           println!("cargo:rerun-if-changed={}", path.display());
         }
       }
@@ -46,6 +46,8 @@ fn main() {
     .allowlist_function("vm_exec_with_args")
     .allowlist_function("vm_thunk_alloc")
     .allowlist_function("vm_thunk_free")
+    .allowlist_function("vm_type_alloc")
+    .allowlist_function("vm_type_free")
     .allowlist_function("vm_const_from_i64")
     .allowlist_function("vm_const_from_f64")
     .allowlist_function("vm_heap_alloc")
@@ -59,6 +61,8 @@ fn main() {
     .allowlist_type("status_t")
     .allowlist_type("heap")
     .allowlist_type("thunk")
+    .allowlist_type("type_desc")
+    .allowlist_type("member_desc")
     .allowlist_var("dispatch")
     .rust_target(bindgen::RustTarget::stable(82, 0).unwrap())
     .raw_line("#![allow(non_upper_case_globals)]")

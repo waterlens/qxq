@@ -9,8 +9,8 @@ inc2(5)
    (block (let compose (fn (f g) (fn (x) (f (g x))))) (let inc (fn (x) (+ x 1))) (let inc2 (compose inc inc)) (inc2 5))
    --- Thunk ---
    thunk::fn params::1 regs::7 captured::[r0 as ^1, r1 as ^2]
-   loadf        r1, ^1
-   loadf        r4, ^2
+   loadfree     r1, ^1
+   loadfree     r4, ^2
    move         r6, r0
    apply        r4, #1
    move         r3, r4

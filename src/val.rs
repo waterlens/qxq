@@ -124,6 +124,12 @@ impl Val {
     (self.0 & VAL_NOT_CELL_MASK) == 0
   }
 
+  /// Empty, null or a boolean: the values `loadr` materializes directly.
+  #[inline]
+  pub fn is_trivial(self) -> bool {
+    self.is_empty() || self.is_null() || self.is_bool()
+  }
+
   /// Returns true if this is a non-empty cell pointer.
   #[inline]
   pub fn is_ptr(self) -> bool {

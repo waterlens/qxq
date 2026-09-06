@@ -6,11 +6,11 @@ use slotmap::SlotMap;
 
 use crate::{
   bytecode::{
-    Bytecode, BytecodeCtx, ConstantId, FloatBits, FreeVarId, Label, Location, RegId,
-    SmallConstantId, Tag, TrapId,
+    Bytecode, BytecodeCtx, ConstantId, FloatBits, FreeVarId, Label, Location, Op8, RegId,
+    SmallConstantId, Tag, TrapId, TypeDesc,
   },
   diagnostic::{Diagnostic, Result},
-  parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, SynTree},
+  parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, Init, SynTree},
   tokenizer::{Paired, TokenStr},
   val,
 };
@@ -37,6 +37,37 @@ pub struct CodeGenCtx<'a> {
   scope: Scope<'a>,
   tree: ExprRef<'a, InfoKey>,
   information: SlotMap<InfoKey, Info<'a>>,
+  /// Binders of the recursion group whose bodies are being compiled: the
+  /// methods of one struct type.
+  rec_group: Vec<TokenStr<'a>>,
+  /// The receiver through which method references are lowered.
+  self_expr: ExprRef<'a, InfoKey>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Binding {
+  Var(Location),
+  /// A struct type: its runtime value and the image description it constructs.
+  Type(Location, u16),
+  /// A method of the recursion group, reached through the current `self`.
+  Method,
+}
+
+impl Binding {
+  fn loc(self) -> Option<Location> {
+    match self {
+      Binding::Var(loc) | Binding::Type(loc, _) => Some(loc),
+      Binding::Method => None,
+    }
+  }
+
+  fn captured(self, id: FreeVarId) -> Self {
+    match self {
+      Binding::Var(_) => Binding::Var(Location::FreeVar(id)),
+      Binding::Type(_, t) => Binding::Type(Location::FreeVar(id), t),
+      Binding::Method => Binding::Method,
+    }
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -188,9 +219,11 @@ impl<'a> Stack<'a> {
   }
 }
 
+/// Lexical bindings. Each function owns one layer; anything from an enclosing
+/// function is visible only when captured into that layer.
 struct Scope<'a> {
   diagnostic: Rc<Diagnostic>,
-  symbols: IndexMap<TokenStr<'a>, Vec<Location>>,
+  symbols: IndexMap<TokenStr<'a>, Vec<Binding>>,
   bound: Vec<IndexSet<TokenStr<'a>>>,
 }
 
@@ -206,50 +239,45 @@ impl<'a> Scope<'a> {
   fn enter_function(
     &mut self,
     self_name: &Option<TokenStr<'a>>,
-    freevars: &[TokenStr<'a>],
+    captured: &[(TokenStr<'a>, Binding)],
+    rec_group: &[TokenStr<'a>],
   ) -> Result<()> {
-    let mut bound = indexmap::indexset! {};
+    self.enter();
     if let Some(self_name) = self_name {
-      self.symbols.entry(*self_name).or_insert(vec![]).push(Location::FreeVar(FreeVarId(0)));
-      bound.insert(*self_name);
+      self.insert(self_name, Binding::Var(Location::FreeVar(FreeVarId(0))));
     }
-    for (i, name) in freevars.iter().enumerate() {
+    for (i, (name, binding)) in captured.iter().enumerate() {
       let i: u16 = i.try_into().map_err(|_| self.diagnostic.error("free variable id overflow"))?;
-      self.symbols.entry(*name).or_insert(vec![]).push(Location::FreeVar(FreeVarId(i + 1)));
-      bound.insert(*name);
+      self.insert(name, binding.captured(FreeVarId(i + 1)));
     }
-    self.bound.push(bound);
+    for name in rec_group {
+      self.insert(name, Binding::Method);
+    }
     Ok(())
   }
 
   fn leave(&mut self) {
-    let bound_vars = self.bound.pop().expect("bound stack underflow: check if enter was called");
-    for var in bound_vars {
-      self
-        .symbols
-        .get_mut(&var)
-        .expect("bound variable not found in the map")
-        .pop()
-        .expect("bound variable has no bindings");
+    for name in self.bound.pop().expect("bound stack underflow: check if enter was called") {
+      self.symbols.get_mut(&name).and_then(Vec::pop).expect("bound variable has no bindings");
     }
   }
 
-  fn insert_slot(&mut self, name: &TokenStr<'a>, reg: RegId) {
-    self.symbols.entry(*name).or_insert(vec![]).push(Location::Slot(reg));
-    self.bound.last_mut().unwrap().insert(*name);
+  fn insert(&mut self, name: &TokenStr<'a>, binding: Binding) {
+    let bindings = self.symbols.entry(*name).or_default();
+    // A name bound twice in one layer keeps only the later binding: the earlier
+    // one is unreachable, and `leave` pops one binding per name.
+    if !self.bound.last_mut().unwrap().insert(*name) {
+      bindings.pop();
+    }
+    bindings.push(binding);
   }
 
-  fn get_bound_in_nth_nested_scope(&self, name: &TokenStr<'a>, n: usize) -> Option<Location> {
-    let i = self.bound.len() as isize - n as isize - 1;
-    if i >= 0 && self.bound[i as usize].contains(name) {
-      self.symbols.get(name).and_then(|locs| locs.last().copied())
+  fn get_bound(&self, name: &TokenStr<'a>) -> Option<Binding> {
+    if self.bound.last()?.contains(name) {
+      self.symbols.get(name).and_then(|bindings| bindings.last().copied())
     } else {
       None
     }
-  }
-
-  fn get_bound(&self, name: &TokenStr<'a>) -> Option<Location> {
-    self.get_bound_in_nth_nested_scope(name, 0)
   }
 }
 
@@ -311,12 +339,14 @@ macro_rules! reg_pop {
 }
 
 impl<'a> CodeGenCtx<'a> {
-  pub fn new(_arena: &'a Bump, diagnostic: Rc<Diagnostic>, tree: SynTree<'a, InfoKey>) -> Self {
+  pub fn new(arena: &'a Bump, diagnostic: Rc<Diagnostic>, tree: SynTree<'a, InfoKey>) -> Self {
     let stack_frame = Stack::new();
     let scope = Scope::new(Rc::clone(&diagnostic));
-    let information = tree.information;
+    let mut information = tree.information;
+    let self_expr =
+      &*arena.alloc(Expr::Ident(TokenStr::new("self"), information.insert(Info::default())));
     let tree = tree.root;
-    Self { diagnostic, stack_frame, scope, tree, information }
+    Self { diagnostic, stack_frame, scope, tree, information, rec_group: vec![], self_expr }
   }
 
   fn allocate_temporary(&mut self) -> Result<RegId> {
@@ -337,7 +367,7 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn update_symbols(&mut self, name: &TokenStr<'a>, reg: RegId) {
-    self.scope.insert_slot(name, reg);
+    self.scope.insert(name, Binding::Var(Location::Slot(reg)));
   }
 
   fn allocate_named(&mut self, name: &'a str) -> Result<RegId> {
@@ -396,7 +426,7 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   fn reify_freevar(&mut self, bc: &mut BytecodeCtx, r: RegId, i: FreeVarId) {
-    bc.push(Bytecode::loadf(r.into(), i.into()));
+    bc.push(Bytecode::loadfree(r.into(), i.into()));
   }
 
   fn reify_closure(&mut self, bc: &mut BytecodeCtx, r: RegId, id: usize) -> Result<()> {
@@ -444,20 +474,43 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
+    self.emit_with_dest(bc, data, control, next, |s, bc, r| s.wrap_object(bc, tag, r, 0))
+  }
+
+  /// Emits a value-producing instruction into the destination register, or into
+  /// a fresh temporary when the destination is not a register.
+  fn emit_with_dest(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+    emit: impl FnOnce(&mut Self, &mut BytecodeCtx, RegId) -> Result<()>,
+  ) -> Result<()> {
     match data {
       DataDest::Loc(slot @ Location::Slot(r)) => {
-        self.wrap_object(bc, tag, r, 0)?;
-        self.emit_store(bc, Value::Loc(slot), data, control, next)?;
+        emit(self, bc, r)?;
+        self.emit_store(bc, Value::Loc(slot), data, control, next)
       }
-      DataDest::Effect
-      | DataDest::Loc(Location::Temporary)
-      | DataDest::Loc(Location::FreeVar(_))
-      | DataDest::RetValue => {
+      _ => {
         let r = self.allocate_temporary()?;
-        self.wrap_object(bc, tag, r, 0)?;
-        self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
+        emit(self, bc, r)?;
+        self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
       }
     }
+  }
+
+  /// Emits `expr` into register `r`, falling through to the next instruction.
+  fn emit_expr_to(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    expr: ExprRef<'a, InfoKey>,
+    r: RegId,
+  ) -> Result<()> {
+    let l = bc.fresh_label();
+    let c = Control::Pos(l);
+    self.emit_expr(bc, expr, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(c), c)?;
+    bc.push_label(l);
     Ok(())
   }
 
@@ -550,11 +603,7 @@ impl<'a> CodeGenCtx<'a> {
       (Temporary, Value::Loc(Temporary)) => Ok(Some(self.peek_temporary())),
       (Slot(r), Value::Loc(Slot(r2))) if r == r2 => Ok(Some(r)),
       (FreeVar(i), Value::Loc(FreeVar(j))) if i == j => Ok(None),
-      (FreeVar(i), _) => {
-        let r = self.get_value(bc, opr, &mut Fusion::disabled())?;
-        bc.push(Bytecode::setf(i.into(), r.into()));
-        Ok(Some(r))
-      }
+      (FreeVar(_), _) => self.diagnostic.fatal("storing into a captured variable is not supported"),
       (_, _) => match self.is_register_destination(loc)? {
         Some(r) => {
           match opr {
@@ -565,9 +614,7 @@ impl<'a> CodeGenCtx<'a> {
             }
             Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
             Value::Unit => self.reify_raw_value(bc, r, val::Val::null()),
-            Value::BoolLiteral(b) => {
-              self.reify_raw_value(bc, r, val::Val::from_bool(b))
-            }
+            Value::BoolLiteral(b) => self.reify_raw_value(bc, r, val::Val::from_bool(b)),
             Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
             Value::FloatLiteral(f) => self.reify_float_literal(bc, r, f.0),
             Value::StrLiteral(s) => self.reify_string_literal(bc, r, s),
@@ -870,21 +917,10 @@ impl<'a> CodeGenCtx<'a> {
       }
     };
 
-    match data {
-      DataDest::Loc(Location::Slot(r)) => {
-        bc.push(make_bc(op, r, opr1, opr2));
-        self.emit_store(bc, Value::Loc(Location::Slot(r)), data, control, next)?;
-      }
-      DataDest::Effect
-      | DataDest::Loc(Location::Temporary)
-      | DataDest::Loc(Location::FreeVar(_))
-      | DataDest::RetValue => {
-        let r = self.allocate_temporary()?;
-        bc.push(make_bc(op, r, opr1, opr2));
-        self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
-      }
-    }
-    Ok(())
+    self.emit_with_dest(bc, data, control, next, |_, bc, r| {
+      bc.push(make_bc(op, r, opr1, opr2));
+      Ok(())
+    })
   }
 
   fn emit_unary_op_with_slots(
@@ -905,27 +941,16 @@ impl<'a> CodeGenCtx<'a> {
       }
     };
 
-    match data {
-      DataDest::Loc(Location::Slot(r)) => {
-        bc.push(make_bc(op, r, opr1));
-        self.emit_store(bc, Value::Loc(Location::Slot(r)), data, control, next)?;
-      }
-      DataDest::Effect
-      | DataDest::Loc(Location::Temporary)
-      | DataDest::Loc(Location::FreeVar(_))
-      | DataDest::RetValue => {
-        let r = self.allocate_temporary()?;
-        bc.push(make_bc(op, r, opr1));
-        self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
-      }
-    }
-    Ok(())
+    self.emit_with_dest(bc, data, control, next, |_, bc, r| {
+      bc.push(make_bc(op, r, opr1));
+      Ok(())
+    })
   }
 
   fn eval_any_loc_args(
     &mut self,
     bc: &mut BytecodeCtx,
-    args: ExprsRef<'a, InfoKey>,
+    args: &[ExprRef<'a, InfoKey>],
   ) -> Result<(Box<[RegId]>, usize)> {
     let len = args.len();
     let mut res_regs = vec![RegId::new(0); len];
@@ -1164,20 +1189,10 @@ impl<'a> CodeGenCtx<'a> {
       SourceBuiltin::Open => {
         let path = regs[0];
         self.clean_any_loc_args(n_temps);
-        match data {
-          DataDest::Loc(Location::Slot(dst)) => {
-            bc.push(Bytecode::trap(builtin.trap_id().into(), path.into(), dst.into()));
-            self.emit_store(bc, Value::Loc(Location::Slot(dst)), data, control, next)?;
-          }
-          DataDest::Effect
-          | DataDest::Loc(Location::Temporary)
-          | DataDest::Loc(Location::FreeVar(_))
-          | DataDest::RetValue => {
-            let dst = self.allocate_temporary()?;
-            bc.push(Bytecode::trap(builtin.trap_id().into(), path.into(), dst.into()));
-            self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
-          }
-        }
+        self.emit_with_dest(bc, data, control, next, |_, bc, dst| {
+          bc.push(Bytecode::trap(builtin.trap_id().into(), path.into(), dst.into()));
+          Ok(())
+        })?;
       }
       SourceBuiltin::Close => {
         let path = regs[0];
@@ -1253,12 +1268,14 @@ impl<'a> CodeGenCtx<'a> {
       IntLiteral(i, _) => Some(Value::IntLiteral(*i)),
       FloatLiteral(f, _) => Some(Value::FloatLiteral(*f)),
       StrLiteral(s, _) => Some(Value::StrLiteral(s)),
-      Ident(token_str, _) => {
-        let loc = self.scope.get_bound(token_str).ok_or_else(|| {
-          self.diagnostic.error(format!("undeclared identifier: {}", token_str.0))
-        })?;
-        Some(Value::Loc(loc))
-      }
+      Ident(token_str, _) => match self.scope.get_bound(token_str) {
+        Some(Binding::Var(loc) | Binding::Type(loc, _)) => Some(Value::Loc(loc)),
+        Some(Binding::Method) => {
+          self.emit_expr(bc, expr, data, control, next)?;
+          None
+        }
+        None => return self.diagnostic.fail(format!("undeclared identifier: {}", token_str.0)),
+      },
       _ => {
         self.emit_expr(bc, expr, data, control, next)?;
         None
@@ -1298,12 +1315,15 @@ impl<'a> CodeGenCtx<'a> {
       StrLiteral(s, _) => {
         self.emit_store(bc, Value::StrLiteral(s), data, control, next)?;
       }
-      Ident(token_str, _) => {
-        let loc = self.scope.get_bound(token_str).ok_or_else(|| {
-          self.diagnostic.error(&format!("undeclared identifier: {}", token_str.0))
-        })?;
-        self.emit_store(bc, Value::Loc(loc), data, control, next)?;
-      }
+      Ident(token_str, _) => match self.scope.get_bound(token_str) {
+        Some(Binding::Var(loc) | Binding::Type(loc, _)) => {
+          self.emit_store(bc, Value::Loc(loc), data, control, next)?;
+        }
+        Some(Binding::Method) => {
+          self.emit_member(bc, self.self_expr, token_str, data, control, next)?;
+        }
+        None => return self.diagnostic.fail(format!("undeclared identifier: {}", token_str.0)),
+      },
       Op(op_str, _) => {
         return self.diagnostic.fatal(&format!(
           "use operator `{}` as a first-class value is not supported yet",
@@ -1314,25 +1334,21 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_op(bc, op, *pair, args, data, control, next)?
       }
       Apply { func, pair: _, args, info: _ } => {
-        if let Ident(token_str, _) = func
-          && let Some(builtin) = SourceBuiltin::from_name(token_str.0)
-          && self.scope.get_bound(token_str).is_none()
-        {
-          self.emit_source_builtin_apply(bc, builtin, args, data, control, next)?;
-          return Ok(());
+        if let Ident(token_str, _) = func {
+          let bound = self.scope.get_bound(token_str);
+          if bound == Some(Binding::Method) {
+            let recv = self.self_expr;
+            return self.emit_member_apply(bc, recv, token_str, args, data, control, next);
+          }
+          if bound.is_none()
+            && let Some(builtin) = SourceBuiltin::from_name(token_str.0)
+          {
+            return self.emit_source_builtin_apply(bc, builtin, args, data, control, next);
+          }
         }
 
         let func_reg = self.allocate_temporary()?;
-        let l = bc.fresh_label();
-        let c = Control::Pos(l);
-        self.emit_expr(
-          bc,
-          func,
-          DataDest::Loc(Location::Slot(func_reg)),
-          ControlDest::Uncond(c),
-          c,
-        )?;
-        bc.push_label(l);
+        self.emit_expr_to(bc, func, func_reg)?;
         let _frame_ra = self.allocate_temporary()?;
         // don't explicity set the value of frame return address
         let mut args_regs = Vec::with_capacity(args.len());
@@ -1340,16 +1356,7 @@ impl<'a> CodeGenCtx<'a> {
           args_regs.push(self.allocate_temporary()?);
         }
         for (elem, r) in (*args).iter().zip(args_regs.into_iter()) {
-          let l = bc.fresh_label();
-          let c = Control::Pos(l);
-          self.emit_expr(
-            bc,
-            elem,
-            DataDest::Loc(Location::Slot(r)),
-            ControlDest::Uncond(c),
-            Control::Pos(l),
-          )?;
-          bc.push_label(l);
+          self.emit_expr_to(bc, elem, r)?;
         }
         let args_len: u16 =
           args.len().try_into().map_err(|_| self.diagnostic.error("argument length overflow"))?;
@@ -1365,62 +1372,15 @@ impl<'a> CodeGenCtx<'a> {
         if *rec {
           self.update_symbols(name, r);
         }
-        let l = bc.fresh_label();
-        let c = Control::Pos(l);
-        self.emit_expr(bc, expr, DataDest::Loc(Location::Slot(r)), ControlDest::Uncond(c), c)?;
+        self.emit_expr_to(bc, expr, r)?;
         if !*rec {
           self.update_symbols(name, r);
         }
-        bc.push_label(l);
         self.emit_store(bc, Value::Unit, data, control, next)?;
       }
       Fn { name, params, body, info } => {
-        let freevars = &self.information.get(*info).unwrap().freevars;
-        let mut captured_freevars = vec![];
-        let mut fvlocs = vec![];
-        for fv in freevars {
-          if self.scope.get_bound(fv).is_none() && SourceBuiltin::from_name(fv.0).is_some() {
-            continue;
-          }
-          let loc = self.scope.get_bound(fv).ok_or_else(|| {
-            self.diagnostic.error(&format!("unable to find captured variable: {}", fv.0))
-          })?;
-          assert!(!matches!(loc, Location::Temporary));
-          captured_freevars.push(*fv);
-          fvlocs.push(loc);
-        }
-        self.scope.enter_function(name, &captured_freevars)?;
-        self.enter_new_frame();
-        for param in *params {
-          let reg = self.allocate_temporary()?;
-          self.update_symbols(param, reg);
-        }
-        bc.push_thunk("fn", fvlocs.into_boxed_slice(), params.len() as u8);
-        self.emit_expr(
-          bc,
-          body,
-          DataDest::RetValue,
-          ControlDest::Uncond(Control::Return),
-          Control::End,
-        )?;
-        bc.set_nregs(frame_top!(self).max_regs as u8);
-        let id = bc.pop_thunk();
-        self.leave_frame();
-        self.scope.leave();
-        match data {
-          DataDest::Loc(slot @ Location::Slot(r)) => {
-            self.reify_closure(bc, r, id)?;
-            self.emit_store(bc, Value::Loc(slot), data, control, next)?;
-          }
-          DataDest::Effect
-          | DataDest::Loc(Location::Temporary)
-          | DataDest::Loc(Location::FreeVar(_))
-          | DataDest::RetValue => {
-            let r = self.allocate_temporary()?;
-            self.reify_closure(bc, r, id)?;
-            self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
-          }
-        }
+        let id = self.emit_function(bc, name, params, body, *info)?;
+        self.emit_with_dest(bc, data, control, next, |s, bc, r| s.reify_closure(bc, r, id))?;
       }
       Block(exprs, _) => match exprs {
         [] => self.emit_store(bc, Value::Unit, data, control, next)?,
@@ -1462,16 +1422,7 @@ impl<'a> CodeGenCtx<'a> {
         }
         if let Some(&tuple_reg) = elems_regs.first() {
           for (elem, r) in (*exprs).iter().zip(elems_regs.into_iter()) {
-            let l = bc.fresh_label();
-            let c = Control::Pos(l);
-            self.emit_expr(
-              bc,
-              elem,
-              DataDest::Loc(Location::Slot(r)),
-              ControlDest::Uncond(c),
-              Control::Pos(l),
-            )?;
-            bc.push_label(l);
+            self.emit_expr_to(bc, elem, r)?;
           }
           for _ in 1..len {
             reg_pop!(self);
@@ -1494,8 +1445,259 @@ impl<'a> CodeGenCtx<'a> {
           self.emit_store(bc, Value::Unit, data, control, next)?;
         };
       }
+      StructDecl { name, fields, methods, info: _ } => {
+        self.emit_struct_decl(bc, name, fields, methods, data, control, next)?;
+      }
+      Construct { ty, inits, info: _ } => {
+        self.emit_construct(bc, ty, inits, data, control, next)?;
+      }
+      Member { receiver, member, info: _ } => {
+        self.emit_member(bc, receiver, member, data, control, next)?;
+      }
+      MemberApply { receiver, member, args, info: _ } => {
+        self.emit_member_apply(bc, receiver, member, args, data, control, next)?;
+      }
     }
     Ok(())
+  }
+
+  /// Compiles a function body as a new thunk and returns its index.
+  fn emit_function(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    name: &Option<TokenStr<'a>>,
+    params: &[TokenStr<'a>],
+    body: ExprRef<'a, InfoKey>,
+    info: InfoKey,
+  ) -> Result<usize> {
+    let freevars = &self.information.get(info).unwrap().freevars;
+    let mut captured = vec![];
+    let mut through_self = false;
+    for fv in freevars {
+      match self.scope.get_bound(fv) {
+        Some(Binding::Method) => through_self = true,
+        Some(binding) => captured.push((*fv, binding)),
+        None if SourceBuiltin::from_name(fv.0).is_some() => {}
+        None => {
+          return self.diagnostic.fail(format!("unable to find captured variable: {}", fv.0));
+        }
+      }
+    }
+    // A method named inside a nested closure needs the enclosing `self`.
+    let self_name = TokenStr::new("self");
+    if through_self && !captured.iter().any(|(n, _)| *n == self_name) {
+      let binding = self
+        .scope
+        .get_bound(&self_name)
+        .ok_or_else(|| self.diagnostic.error("no `self` to reach a method through"))?;
+      captured.push((self_name, binding));
+    }
+    let fvlocs: Vec<Location> =
+      captured.iter().map(|(_, b)| b.loc().expect("captured binding has a location")).collect();
+    debug_assert!(!fvlocs.contains(&Location::Temporary));
+
+    self.scope.enter_function(name, &captured, &self.rec_group)?;
+    self.enter_new_frame();
+    for param in params {
+      let reg = self.allocate_temporary()?;
+      self.update_symbols(param, reg);
+    }
+    bc.push_thunk("fn", fvlocs.into_boxed_slice(), params.len() as u8);
+    self.emit_expr(
+      bc,
+      body,
+      DataDest::RetValue,
+      ControlDest::Uncond(Control::Return),
+      Control::End,
+    )?;
+    bc.set_nregs(frame_top!(self).max_regs as u8);
+    let id = bc.pop_thunk();
+    self.leave_frame();
+    self.scope.leave();
+    Ok(id)
+  }
+
+  fn emit_struct_decl(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    name: &TokenStr<'a>,
+    fields: &[TokenStr<'a>],
+    methods: ExprsRef<'a, InfoKey>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let mut decls = Vec::with_capacity(methods.len());
+    for method in methods {
+      match method {
+        Expr::Fn { name: Some(mname), params, body, info } => {
+          decls.push((*mname, *params, *body, *info))
+        }
+        _ => self.diagnostic.ice("struct method is not a named function"),
+      }
+    }
+    let field_names: Vec<&str> = fields.iter().map(|f| f.0).collect();
+    let method_names: Vec<&str> = decls.iter().map(|d| d.0.0).collect();
+    let desc = TypeDesc::new(&field_names, &method_names).map_err(|e| self.diagnostic.error(e))?;
+    let id =
+      bc.add_type(desc).ok_or_else(|| self.diagnostic.error("too many type declarations"))?;
+
+    // The runtime type value is built in place: the description handle, then
+    // one closure per method, wrapped together.
+    let r = self.allocate_named(name.0)?;
+    bc.push(Bytecode::loadtype(r.into(), id.into()));
+    let outer = std::mem::replace(&mut self.rec_group, decls.iter().map(|d| d.0).collect());
+    for (_, params, body, info) in decls.iter() {
+      let reg = self.allocate_temporary()?;
+      let fid = self.emit_function(bc, &None, params, body, *info)?;
+      self.reify_closure(bc, reg, fid)?;
+    }
+    self.rec_group = outer;
+    for _ in decls.iter() {
+      reg_pop!(self);
+    }
+    self.wrap_object(bc, Tag::TYPE, r, 1 + decls.len())?;
+    self.scope.insert(name, Binding::Type(Location::Slot(r), id));
+    self.emit_store(bc, Value::Unit, data, control, next)
+  }
+
+  // Labels select their field; positional initializers take the first field
+  // still unassigned. The result keeps source order for evaluation.
+  fn resolve_inits(
+    &self,
+    tname: &str,
+    desc: &TypeDesc,
+    inits: &[Init<'a, InfoKey>],
+  ) -> Result<Vec<(usize, ExprRef<'a, InfoKey>)>> {
+    let nfields = usize::from(desc.nfields);
+    let mut assigned = vec![false; nfields];
+    let mut order = Vec::with_capacity(inits.len());
+    for init in inits {
+      let slot = match init.label {
+        Some(label) => match desc.slot(label.0) {
+          Some(slot) if usize::from(slot) < nfields => usize::from(slot),
+          _ => return self.diagnostic.fail(format!("`{tname}` has no field `{}`", label.0)),
+        },
+        None => match assigned.iter().position(|a| !a) {
+          Some(slot) => slot,
+          None => return self.diagnostic.fail(format!("too many initializers for `{tname}`")),
+        },
+      };
+      if std::mem::replace(&mut assigned[slot], true) {
+        let field = desc.name(slot as u16);
+        return self.diagnostic.fail(format!("field `{field}` of `{tname}` is initialized twice"));
+      }
+      order.push((slot, init.expr));
+    }
+    if let Some(slot) = assigned.iter().position(|a| !a) {
+      let field = desc.name(slot as u16);
+      return self.diagnostic.fail(format!("missing field `{field}` of `{tname}`"));
+    }
+    Ok(order)
+  }
+
+  fn emit_construct(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    ty: ExprRef<'a, InfoKey>,
+    inits: &[Init<'a, InfoKey>],
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let Expr::Ident(tname, _) = ty else {
+      return self.diagnostic.fail("a constructor needs a type name");
+    };
+    let Some(Binding::Type(tloc, id)) = self.scope.get_bound(tname) else {
+      return self.diagnostic.fail(format!("`{}` is not a struct type", tname.0));
+    };
+    let desc = bc.type_desc(id);
+    let nfields = usize::from(desc.nfields);
+    let order = self.resolve_inits(tname.0, desc, inits)?;
+
+    // The instance is built in place when the destination is the register on
+    // top of the frame, otherwise in fresh temporaries.
+    let base = match data {
+      DataDest::Loc(Location::Slot(r)) if free_reg!(self) == usize::from(r.0) + 1 => r,
+      _ => self.allocate_temporary()?,
+    };
+    let mut regs = Vec::with_capacity(nfields);
+    for _ in 0..nfields {
+      regs.push(self.allocate_temporary()?);
+    }
+    self.set_location(bc, Location::Slot(base), Value::Loc(tloc), &mut Fusion::disabled())?;
+    for (slot, expr) in order {
+      self.emit_expr_to(bc, expr, regs[slot])?;
+    }
+    for _ in 0..nfields {
+      reg_pop!(self);
+    }
+    self.wrap_object(bc, Tag::STRUCT, base, 1 + nfields)?;
+    let value = if data == DataDest::Loc(Location::Slot(base)) {
+      Value::Loc(Location::Slot(base))
+    } else {
+      Value::Loc(Location::Temporary)
+    };
+    self.emit_store(bc, value, data, control, next)
+  }
+
+  /// Member operands are 8-bit indices into the thunk's constant table.
+  fn member_constant(&self, bc: &mut BytecodeCtx, member: &TokenStr<'a>) -> Result<Op8> {
+    let id = bc.add_str(member.0.to_string());
+    let small = id.try_small().ok_or_else(|| {
+      self.diagnostic.error(format!("too many constants to address member `{}`", member.0))
+    })?;
+    Ok(small.into())
+  }
+
+  fn emit_member(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    member: &TokenStr<'a>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let (regs, n_temps) = self.eval_any_loc_args(bc, std::slice::from_ref(&receiver))?;
+    let recv = regs[0];
+    self.clean_any_loc_args(n_temps);
+    let m = self.member_constant(bc, member)?;
+    self.emit_with_dest(bc, data, control, next, |_, bc, r| {
+      bc.push(Bytecode::loadfield(r.into(), recv.into(), m));
+      Ok(())
+    })
+  }
+
+  // The call region is laid out like an ordinary application: the closure
+  // slot, the return address, then the receiver as the first argument.
+  fn emit_member_apply(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    member: &TokenStr<'a>,
+    args: ExprsRef<'a, InfoKey>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let dst = self.allocate_temporary()?;
+    let _frame_ra = self.allocate_temporary()?;
+    let recv = self.allocate_temporary()?;
+    self.emit_expr_to(bc, receiver, recv)?;
+    let mut args_regs = Vec::with_capacity(args.len());
+    for _ in 0..args.len() {
+      args_regs.push(self.allocate_temporary()?);
+    }
+    for (arg, r) in args.iter().zip(args_regs.into_iter()) {
+      self.emit_expr_to(bc, arg, r)?;
+    }
+    for _ in 0..args.len() + 2 {
+      reg_pop!(self);
+    }
+    let m = self.member_constant(bc, member)?;
+    bc.push(Bytecode::invoke(dst.into(), recv.into(), m));
+    self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
   }
 
   pub fn emit_tree(&mut self, bc: &mut BytecodeCtx) -> Result<()> {

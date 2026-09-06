@@ -1,4 +1,6 @@
-use crate::bytecode::{BinaryRepr, BytecodeImage, FreeVarId, Location, RegId, Tag, Thunk};
+use crate::bytecode::{
+  BinaryRepr, BytecodeImage, FreeVarId, Location, RegId, Tag, Thunk, TypeDesc,
+};
 use crate::checksum;
 use crate::diagnostic::{Diagnostic, Result};
 use crate::runtime::OwnedHeap;
@@ -56,7 +58,38 @@ impl<R: Read> Loader<R> {
       thunks.push(self.load_thunk(thunk_data, &mut heap)?);
     }
 
-    Ok(BytecodeImage::new(thunks, heap))
+    let (ntypes, n) = uleb8::decode_uleb128(&thunk_table_data[cursor..]);
+    cursor += n;
+    let mut types = Vec::with_capacity(ntypes as usize);
+    for _ in 0..ntypes {
+      let (ty, n) = self.load_type(&thunk_table_data[cursor..])?;
+      cursor += n;
+      types.push(ty);
+    }
+
+    Ok(BytecodeImage::new(thunks, types, heap))
+  }
+
+  fn load_type(&self, data: &[u8]) -> Result<(TypeDesc, usize)> {
+    let mut cursor = 0;
+    let read = |cursor: &mut usize| {
+      let (value, n) = uleb8::decode_uleb128(&data[*cursor..]);
+      *cursor += n;
+      value
+    };
+    let nfields = read(&mut cursor) as u16;
+    let nslots = read(&mut cursor) as u16;
+    let nmembers = read(&mut cursor);
+    let mut members = Vec::with_capacity(nmembers as usize);
+    for _ in 0..nmembers {
+      let slot = read(&mut cursor) as u16;
+      let len = read(&mut cursor) as usize;
+      let name = std::str::from_utf8(&data[cursor..cursor + len]);
+      let name = self.diag.context(name, "invalid UTF-8 member name")?;
+      cursor += len;
+      members.push((name.to_string(), slot));
+    }
+    Ok((TypeDesc { nfields, nslots, members: members.into_boxed_slice() }, cursor))
   }
 
   fn load_thunk(&self, data: &[u8], heap: &mut OwnedHeap) -> Result<Thunk> {

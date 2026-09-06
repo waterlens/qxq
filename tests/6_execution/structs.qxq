@@ -1,0 +1,57 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+let r = 0;
+
+(* explicit arguments follow self *)
+type Acc = struct {base}
+  with fn add(self, x, y) self.base + x * 10 + y end
+end;
+let acc = Acc{100};
+let r = r + if acc.add(2, 3) == 123 then 0 else 1 end;
+
+(* labeled, positional and reordered initializers *)
+type P = struct {x, y, z}
+  with fn sum(self) self.x * 100 + self.y * 10 + self.z end
+end;
+let r = r + if P{1, 2, 3}.sum() == 123 then 0 else 2 end;
+let r = r + if P{z = 3, 1, y = 2}.sum() == 123 then 0 else 4 end;
+let r = r + if P{y = 2, z = 3, x = 1}.a == 1 then 0 else 8 end;
+
+(* mutual recursion between siblings, also from a nested closure *)
+type Parity = struct {}
+  with fn even(self, n) if n == 0 then true else odd(n - 1) end end
+  with fn odd(self, n) if n == 0 then false else even(n - 1) end end
+  with fn nested(self, n) let f = fn (k) even(k) end; f(n) end
+end;
+let p = Parity{};
+let r = r + if p.even(10) then 0 else 16 end;
+let r = r + if p.odd(7) then 0 else 32 end;
+let r = r + if p.nested(4) then 0 else 64 end;
+
+(* a nested call restores the caller's constant table *)
+type Pair = struct {left, right}
+  with fn both(self) self.left + self.helper() + self.right end
+  with fn helper(self) self.right * 1000 end
+end;
+let r = r + if Pair{1, 2}.both() == 2003 then 0 else 128 end;
+
+(* every execution of a declaration makes a type value with its own closures
+   over one shared description; instances share their type's closures *)
+type Two = struct {p, q} end;
+let make = fn (k)
+  type T = struct {v} with fn get(self) self.v + k end end;
+  Two{T{1}, T{2}}
+end;
+let r = r + if make(10).p.get() + make(20).q.get() == 11 + 22 then 0 else 256 end;
+let two = make(0);
+assert_eq(two.p.get, two.q.get);
+
+(* a captured type constructs inside a closure *)
+let build = fn (n) P{n, n, n} end;
+let r = r + if build(4).sum() == 444 then 0 else 512 end;
+
+r
+
+(* EXPECT:
+   0
+*)

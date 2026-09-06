@@ -29,11 +29,11 @@ fib(10)
    constants::[
      @0: 1
    ]
-   loadf        r2, ^1
+   loadfree     r2, ^1
    cmp.gt.dd    r0, r2
    jmp          #1
    ret          r1
-   loadf        r2, ^0
+   loadfree     r2, ^0
    add.dc       r4, r0, @0
    mul.dd       r5, r1, r0
    apply        r2, #2
@@ -57,10 +57,10 @@ fib(10)
    cmp.le.dc    r0, @0
    jmp          #1
    ret          r0
-   loadf        r1, ^0
+   loadfree     r1, ^0
    sub.dc       r3, r0, @0
    apply        r1, #1
-   loadf        r2, ^0
+   loadfree     r2, ^0
    sub.dc       r4, r0, @1
    apply        r2, #1
    add.dd       r1, r1, r2
