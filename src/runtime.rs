@@ -12,7 +12,6 @@ use crate::{
 const STACK_HEADROOM_SLOTS: usize = 256;
 /// Return-value and return-address slots between frames, as in vm.h.
 const FRAME_HEADER_SIZE: usize = 2;
-const RESULT_BUF_LEN: usize = 64;
 
 pub struct OwnedHeap {
   ptr: NonNull<vm::heap>,
@@ -312,14 +311,13 @@ fn status_name(status: vm::status_t) -> String {
 }
 
 fn format_result(value: vm::val_t, diag: &Diagnostic) -> Result<String> {
-  let mut buf = [0u8; RESULT_BUF_LEN];
-  let ok = unsafe { vm::vm_format_result(value, buf.as_mut_ptr().cast(), buf.len()) };
-  if ok {
-    let cstr = unsafe { CStr::from_ptr(buf.as_ptr().cast()) };
-    Ok(cstr.to_string_lossy().into_owned())
-  } else {
-    diag.fail("vm produced an unsupported result")
+  let text = unsafe { vm::vm_format_result(value) };
+  if text.is_null() {
+    return diag.fail("out of memory while formatting the result");
   }
+  let result = unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned();
+  unsafe { vm::vm_result_free(text) };
+  Ok(result)
 }
 
 #[cfg(test)]
@@ -423,6 +421,58 @@ mod tests {
 
     let result = compile_and_run(concat!("\"", "\u{1}", "\"")).unwrap();
     assert_eq!(result, "\"\\x01\"");
+  }
+
+  #[test]
+  fn execution_struct_result_names_its_fields() {
+    let source = "type P = struct {x, y} with fn sum(self) self.x + self.y end end; P{1, 2}";
+    assert_eq!(compile_and_run(source).unwrap(), "P{x = 1, y = 2}");
+  }
+
+  #[test]
+  fn execution_shared_result_prints_without_labels() {
+    let result = compile_and_run("let p = (1, 2); (p, p)").unwrap();
+    assert_eq!(result, "((1, 2), (1, 2))");
+  }
+
+  fn run_bytecode(code: Vec<Bytecode>, constants: Vec<Val>, nregs: u8) -> Result<String> {
+    let _guard = VM_LOCK.lock().unwrap();
+    let diag = Rc::new(Diagnostic::new());
+    let heap = OwnedHeap::new(&diag)?;
+    let thunk = Thunk {
+      name: String::new(),
+      code: code.into(),
+      fvlocs: Box::new([]),
+      nparams: 0,
+      nregs,
+      constants: constants.into(),
+    };
+    execute(BytecodeImage::new(vec![thunk], vec![], heap), diag)
+  }
+
+  /// No source builds a cycle yet, so `t.1 = t` is written by hand.
+  #[test]
+  fn execution_cyclic_result_uses_datum_labels() {
+    let tuple = vec![
+      Bytecode::loadi(0.into(), 1.into()),
+      Bytecode::loadi(1.into(), 2.into()),
+      Bytecode::wobj(0.into(), Tag::TUPLE.into(), 2.into()),
+      Bytecode::setfield(0.into(), 0.into(), 0.into()),
+    ];
+    let position = vec![Val::from_i32(0)];
+    let mut code = tuple.clone();
+    code.push(Bytecode::ret(0.into()));
+    assert_eq!(run_bytecode(code, position.clone(), 3).unwrap(), "#0=(#0#, 2)");
+
+    // once cyclic, every object reached twice is labelled, as Chez does
+    let mut code = tuple;
+    code.extend([
+      Bytecode::mov(1.into(), 0.into()),
+      Bytecode::mov(2.into(), 0.into()),
+      Bytecode::wobj(1.into(), Tag::TUPLE.into(), 2.into()),
+      Bytecode::ret(1.into()),
+    ]);
+    assert_eq!(run_bytecode(code, position, 3).unwrap(), "(#0=(#0#, 2), #0#)");
   }
 
   #[test]

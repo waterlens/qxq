@@ -62,6 +62,7 @@ fn main() {
     .allowlist_function("vm_heap_free")
     .allowlist_function("vm_const_from_str")
     .allowlist_function("vm_format_result")
+    .allowlist_function("vm_result_free")
     .allowlist_function("vm_object_size_for_fields")
     .allowlist_function("vm_status_name")
     .allowlist_type("state")

@@ -1,0 +1,12 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+(* every value prints as the syntax that builds it, or in angle brackets when
+   there is none; a string result is no longer cut off by a small buffer *)
+type P = struct {x, y} with fn sum(self) self.x + self.y end end;
+let p = P{1, 2};
+let long = "0123456789012345678901234567890123456789012345678901234567890123456789";
+(p, (p, p), P, p.sum, fn (x) x end, (1.5, true, ()), [], {}, "it's \"quoted\"", long)
+
+(* EXPECT:
+   (P{x = 1, y = 2}, (P{x = 1, y = 2}, P{x = 1, y = 2}), <type P>, <fn>, <fn>, (1.5, true, ()), [], {}, "it's \"quoted\"", "0123456789012345678901234567890123456789012345678901234567890123456789")
+*)
