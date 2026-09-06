@@ -1,3 +1,4 @@
+use crate::bytecode::Tag;
 use std::fmt::{self, Display};
 
 const VAL_NUN_BIAS: u64 = 0x0002_0000_0000_0000;
@@ -11,40 +12,6 @@ const VAL_EMPTY: u64 = 0x0;
 const VAL_NULL: u64 = VAL_OTHER_TAG;
 const VAL_FALSE: u64 = VAL_OTHER_TAG | VAL_BOOL_TAG;
 const VAL_TRUE: u64 = VAL_OTHER_TAG | VAL_BOOL_TAG | VAL_BOOL_VAL_BIT;
-
-// Object kind, matching `enum obj_kind` in vm/src/object.h.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ObjectKind(u8);
-
-impl ObjectKind {
-  pub const WORDS: Self = ObjectKind(0);
-  pub const NOSCAN: Self = ObjectKind(1);
-}
-
-impl From<u8> for ObjectKind {
-  fn from(x: u8) -> Self {
-    Self(x)
-  }
-}
-
-impl TryFrom<usize> for ObjectKind {
-  type Error = ();
-  fn try_from(value: usize) -> Result<Self, Self::Error> {
-    if value <= 0xff { Ok(Self(value as u8)) } else { Err(()) }
-  }
-}
-
-impl From<ObjectKind> for u64 {
-  fn from(x: ObjectKind) -> Self {
-    x.0 as u64
-  }
-}
-
-impl From<ObjectKind> for u8 {
-  fn from(x: ObjectKind) -> Self {
-    x.0
-  }
-}
 
 /// Mirrors `struct str` in vm/src/object.h.
 /// The metainfo size field stores `sizeof(StrObj) + len + 1` (the unpadded object size).
@@ -160,9 +127,9 @@ impl Val {
     unsafe {
       let obj = self.0 as *const StrObj;
       let hd = (*obj).hd;
-      let kind = ((hd >> 48) & 0xff) as u8;
-      assert!(kind == u8::from(ObjectKind::NOSCAN), "str_as_bytes: not a string object");
-      let obj_size = (hd as u32) as usize;
+      let tag = hd as u8;
+      assert!(tag == u8::from(Tag::STR), "str_as_bytes: not a string object");
+      let obj_size = (hd >> 32) as usize;
       let len = obj_size - std::mem::size_of::<StrObj>() - 1;
       let bytes_ptr = (self.0 as *const u8).add(std::mem::size_of::<StrObj>());
       std::slice::from_raw_parts(bytes_ptr, len)

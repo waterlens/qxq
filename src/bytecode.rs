@@ -7,21 +7,23 @@ use qxq_macros::define_bytecode;
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 
+/// Object tags, matching `enum tag` in vm/src/object.h.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Tag(u8);
 
 impl Tag {
-  pub const UNIT: Self = Tag(0);
-  pub const TUPLE: Self = Tag(1);
-  pub const FALSE: Self = Tag(2);
-  pub const TRUE: Self = Tag(3);
-  pub const INT: Self = Tag(4);
-  pub const STR: Self = Tag(5);
-  pub const FLOAT: Self = Tag(6);
-  pub const ARRAY: Self = Tag(7);
-  pub const MAP: Self = Tag(8);
-  pub const TYPE: Self = Tag(9);
-  pub const STRUCT: Self = Tag(10);
+  pub const TUPLE: Self = Tag(0);
+  pub const ARRAY: Self = Tag(1);
+  pub const MAP: Self = Tag(2);
+  pub const TYPE: Self = Tag(3);
+  pub const STRUCT: Self = Tag(4);
+  pub const THUNK: Self = Tag(5);
+  pub const STR: Self = Tag(6);
+
+  /// Words objects, whose every slot is a value, precede the exotic layouts.
+  pub fn is_words(self) -> bool {
+    self < Self::THUNK
+  }
 }
 
 impl From<u8> for Tag {
@@ -52,20 +54,56 @@ impl From<Tag> for u8 {
 impl Display for Tag {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let name = match *self {
-      Self::UNIT => "unit",
       Self::TUPLE => "tuple",
-      Self::FALSE => "false",
-      Self::TRUE => "true",
-      Self::INT => "int",
-      Self::STR => "str",
-      Self::FLOAT => "float",
       Self::ARRAY => "array",
       Self::MAP => "map",
       Self::TYPE => "type",
       Self::STRUCT => "struct",
+      Self::THUNK => "thunk",
+      Self::STR => "str",
       _ => return write!(f, "tag::{}", self.0),
     };
     write!(f, "tag::{name}")
+  }
+}
+
+/// Constant-table entry kinds in the image, see doc/bytecode-file-format.md.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstKind(u8);
+
+impl ConstKind {
+  pub const INT: Self = ConstKind(0);
+  pub const FLOAT: Self = ConstKind(1);
+  pub const STR: Self = ConstKind(2);
+}
+
+impl From<u8> for ConstKind {
+  fn from(x: u8) -> Self {
+    Self(x)
+  }
+}
+
+impl From<ConstKind> for u64 {
+  fn from(x: ConstKind) -> Self {
+    x.0 as u64
+  }
+}
+
+/// A raw immediate as `loadr` shows it: trivial values by name, the rest in hex.
+struct RawImm(u16);
+
+impl Display for RawImm {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let v = Val::from_raw(u64::from(self.0));
+    if v.is_empty() {
+      f.write_str("empty")
+    } else if v.is_null() {
+      f.write_str("unit")
+    } else if v.is_bool() {
+      write!(f, "{}", v.as_bool())
+    } else {
+      write!(f, "#{:#x}", self.0)
+    }
   }
 }
 
@@ -653,7 +691,7 @@ define_bytecode! {
   Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("{:<12} #{}", "exta", op.o1),
   LoadI  (ABS, OpABS, op)   fn loadi(dst: Op8, o1: OpS16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadi", op.dst, op.o1),
   LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadui", op.dst, op.o1),
-  LoadR  (AB, OpAB, op)     fn loadr(dst: Op8, raw: Op16)         { dst, o1: raw } => ("{:<12} r{}, #{:#x}", "loadr", op.dst, u16::from(op.o1)),
+  LoadR  (AB, OpAB, op)     fn loadr(dst: Op8, raw: Op16)         { dst, o1: raw } => ("{:<12} r{}, {}", "loadr", op.dst, RawImm(u16::from(op.o1))),
   LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, @{}", "loadc", op.dst, op.o1),
   LoadType (AB, OpAB, op)   fn loadtype(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "loadtype", op.dst, op.o1),
   LoadFree (AB, OpAB, op)   fn loadfree(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, ^{}", "loadfree", op.dst, op.o1),
@@ -668,7 +706,6 @@ define_bytecode! {
   Retn   (AB, OpAB, op)     fn retn(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, #{}", "retn", op.dst, op.o1),
   Clos   (AB, OpAB, op)     fn clos(dst: Op8, id: Op16)           { dst, o1: id } => ("{:<12} r{}, fn{}", "clos", op.dst, op.o1),
   WObj   (ABC, OpABC, op)   fn wobj(dst: Op8, tag: Op8, n: Op8)   { dst, o1: tag, o2: n } => ("{:<12} r{}, {}, #{}", "wrap", op.dst, Tag::from(u8::from(op.o1)), op.o2),
-  MObj   (ABC, OpABC, op)   fn mobj(dst: Op8, tag: Op8, src: Op8) { dst, o1: tag, o2: src } => ("{:<12} r{}, {}, r{}", "mobj", op.dst, Tag::from(u8::from(op.o1)), op.o2),
   Jmp    (AS, OpAS, op)     fn jmp(dst: OpS24)                    { dst }         => ("{:<12} #{}", "jmp", op.dst),
   Goto   (AB, OpAB, op)     fn goto(addr: Op8)                    { dst: addr, o1: 0.into() } => ("{:<12} #{}", "goto", op.dst),
 

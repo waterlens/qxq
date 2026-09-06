@@ -3,7 +3,8 @@
 ()
 
 (* EXPECT:
+   --- Thunk ---
    thunk::__top_thunk__ params::0 regs::1 captured::[]
-   loadr        r0, #0x2
+   loadr        r0, unit
    ret          r0
 *)

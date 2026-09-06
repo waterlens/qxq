@@ -1,5 +1,5 @@
 use crate::bytecode::{
-  BinaryRepr, BytecodeImage, FreeVarId, Location, RegId, Tag, Thunk, TypeDesc,
+  BinaryRepr, BytecodeImage, ConstKind, FreeVarId, Location, RegId, Thunk, TypeDesc,
 };
 use crate::checksum;
 use crate::diagnostic::{Diagnostic, Result};
@@ -140,23 +140,22 @@ impl<R: Read> Loader<R> {
 
     let mut constants = Vec::with_capacity(nconstants as usize);
     for _ in 0..nconstants {
-      let (tag_val, n) = uleb8::decode_uleb128(&data[cursor..]);
+      let (kind, n) = uleb8::decode_uleb128(&data[cursor..]);
       cursor += n;
-      let tag = Tag::from(tag_val as u8);
 
-      match tag {
-        Tag::INT => {
+      match ConstKind::from(kind as u8) {
+        ConstKind::INT => {
           let (val, n) = uleb8::decode_uleb128(&data[cursor..]);
           cursor += n;
           let i = i64::from_le_bytes(val.to_le_bytes());
           constants.push(Val::from_i32(i as i32));
         }
-        Tag::FLOAT => {
+        ConstKind::FLOAT => {
           let (val, n) = uleb8::decode_uleb128(&data[cursor..]);
           cursor += n;
           constants.push(Val::from_f64(f64::from_bits(val)));
         }
-        Tag::STR => {
+        ConstKind::STR => {
           let (len, n) = uleb8::decode_uleb128(&data[cursor..]);
           cursor += n;
           let s = std::str::from_utf8(&data[cursor..cursor + len as usize]);
@@ -167,7 +166,7 @@ impl<R: Read> Loader<R> {
             .ok_or_else(|| self.diag.error("failed to allocate string constant"))?;
           constants.push(value);
         }
-        _ => return self.diag.fail("unsupported constant tag"),
+        _ => return self.diag.fail("unsupported constant kind"),
       }
     }
 

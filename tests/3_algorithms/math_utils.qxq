@@ -65,9 +65,9 @@ is_even(pow(2, 10))
    thunk::fn params::1 regs::2 captured::[]
    cmp.not.f    r0, #0
    jmp          #2
-   loadr        r1, #0x6
+   loadr        r1, false
    ret          r1
-   loadr        r1, #0x7
+   loadr        r1, true
    ret          r1
    
    --- Thunk ---

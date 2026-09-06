@@ -1,4 +1,4 @@
-use crate::bytecode::{BinaryRepr, BytecodeImage, Location, Tag, TypeDesc};
+use crate::bytecode::{BinaryRepr, BytecodeImage, ConstKind, Location, TypeDesc};
 use crate::checksum;
 use crate::diagnostic::{Diagnostic, Result};
 use crate::uleb8;
@@ -69,15 +69,15 @@ impl Dumper {
       // Constants
       for constant in thunk.constants.iter() {
         if constant.is_int() {
-          uleb8::encode_uleb128(Tag::INT.into(), &mut thunk_data);
+          uleb8::encode_uleb128(ConstKind::INT.into(), &mut thunk_data);
           let i = constant.as_i32() as i64;
           uleb8::encode_uleb128(u64::from_le_bytes(i.to_le_bytes()), &mut thunk_data);
         } else if constant.is_float() {
-          uleb8::encode_uleb128(Tag::FLOAT.into(), &mut thunk_data);
+          uleb8::encode_uleb128(ConstKind::FLOAT.into(), &mut thunk_data);
           uleb8::encode_uleb128(constant.as_f64().to_bits(), &mut thunk_data);
         } else if constant.is_ptr() {
           let bytes = constant.str_as_bytes();
-          uleb8::encode_uleb128(Tag::STR.into(), &mut thunk_data);
+          uleb8::encode_uleb128(ConstKind::STR.into(), &mut thunk_data);
           uleb8::encode_uleb128(bytes.len() as u64, &mut thunk_data);
           thunk_data.extend_from_slice(bytes);
         }

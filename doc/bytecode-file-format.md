@@ -50,11 +50,10 @@ captured variables.
 
 After the captured variables region, there is a constant region which stores
 the string constant, number constant, or other kinds of constant in future.
-Each constant starts with a type tag encoded by ULEB128 that is identical to
-the tag used in the compiler. Then the raw data dump of the constant
-representation is right after the type tag. For string, it contains a length
-together with a UTF-8 encoded string. For integer, the representation also uses
-ULEB128.
+Each constant starts with its kind encoded by ULEB128: 0 for an integer, 1 for
+a float, 2 for a string. The raw data dump of the constant representation
+follows the kind. For string, it contains a length together with a UTF-8
+encoded string. For integer, the representation also uses ULEB128.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |

@@ -66,7 +66,6 @@ pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
   validator.validate(image.thunks(), image.types())?;
 
   let max_nregs = image.thunks().iter().map(|t| t.nregs as usize).max().unwrap_or(0);
-  let numobject = compute_numobject(image.thunks());
   let (mut thunks, types, heap) = image.into_parts();
   append_entry_thunk(&mut thunks, &diag)?;
 
@@ -81,7 +80,6 @@ pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
       native_thunks.thunk_ptrs_mut(),
       native_types.as_mut_ptr().cast(),
       thunks.len(),
-      numobject,
       native_types.len(),
       stack_slots,
       &mut result,
@@ -112,24 +110,6 @@ fn append_entry_thunk(thunks: &mut Vec<Thunk>, diag: &Diagnostic) -> Result<()> 
     constants: Box::new([]),
   });
   Ok(())
-}
-
-fn compute_numobject(thunks: &[Thunk]) -> usize {
-  let mut max_tag: usize = 0;
-  for thunk in thunks {
-    for bc in thunk.code.iter() {
-      match *bc {
-        Bytecode(Operator::WObj, Operands::ABC(op)) => {
-          let tag = u8::from(op.o1) as usize;
-          if tag > max_tag {
-            max_tag = tag;
-          }
-        }
-        _ => {}
-      }
-    }
-  }
-  max_tag
 }
 
 struct ImageValidator {
@@ -176,7 +156,7 @@ impl ImageValidator {
       LoadType if b >= types.len() => illegal("type out of range"),
       LoadField | SetField | Invoke if !string(c) => illegal("member is not a string constant"),
       Invoke if b != a + FRAME_HEADER_SIZE => illegal("call region not after destination"),
-      MObj if Tag::from(b as u8) >= Tag::INT => illegal("heap-backed mobj"),
+      WObj if !Tag::from(b as u8).is_words() => illegal("wrap tag is not a words object"),
       LoadR if !Val::from_raw(b as u64).is_trivial() => illegal("nontrivial raw value"),
       _ => Ok(()),
     }
@@ -357,7 +337,6 @@ mod tests {
     let validator = ImageValidator::new(Rc::clone(&diag));
     validator.validate(image.thunks(), image.types())?;
     let max_nregs = image.thunks().iter().map(|t| t.nregs as usize).max().unwrap_or(0);
-    let numobject = compute_numobject(image.thunks());
     let (mut thunks, types, heap) = image.into_parts();
     append_entry_thunk(&mut thunks, &diag)?;
     let mut native_thunks = NativeThunkSet::new(&thunks, &diag)?;
@@ -372,7 +351,6 @@ mod tests {
         native_thunks.thunk_ptrs_mut(),
         native_types.as_mut_ptr().cast(),
         thunks.len(),
-        numobject,
         native_types.len(),
         stack_slots,
         &mut result,
@@ -531,33 +509,18 @@ mod tests {
   }
 
   #[test]
-  fn validator_rejects_heap_mobj() {
+  fn validator_rejects_exotic_wobj() {
     let diag = Rc::new(Diagnostic::new());
     let validator = ImageValidator::new(Rc::clone(&diag));
     let thunk = Thunk {
       name: String::new(),
-      code: vec![Bytecode::mobj(0.into(), Tag::INT.into(), 0.into())].into(),
+      code: vec![Bytecode::wobj(0.into(), Tag::THUNK.into(), 0.into())].into(),
       fvlocs: vec![].into(),
       nparams: 0,
       nregs: 1,
       constants: vec![].into(),
     };
     assert!(validator.validate(&[thunk], &[]).is_err());
-  }
-
-  #[test]
-  fn validator_allows_trivial_mobj() {
-    let diag = Rc::new(Diagnostic::new());
-    let validator = ImageValidator::new(Rc::clone(&diag));
-    let thunk = Thunk {
-      name: String::new(),
-      code: vec![Bytecode::mobj(0.into(), Tag::UNIT.into(), 0.into())].into(),
-      fvlocs: vec![].into(),
-      nparams: 0,
-      nregs: 1,
-      constants: vec![].into(),
-    };
-    assert!(validator.validate(&[thunk], &[]).is_ok());
   }
 
   #[test]
