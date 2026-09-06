@@ -44,3 +44,10 @@ cc = "1.2"
 
 [lints.clippy]
 too_many_arguments = "allow"
+
+[dev-dependencies]
+libtest-mimic = "0.8.2"
+
+[[test]]
+name = "filetests"
+harness = false

@@ -12,9 +12,8 @@
 - Build release: `just release`
 - Start REPL: `just repl`
 - Run unit tests: `just unit-test`
-- Run all non-expect tests: `just test`
-- Run all expect tests: `just test-expect`
-- Run the full suite: `just test-all`
+- Run all tests (unit tests and `tests/**/*.qxq`): `just test` or `cargo test`
+- Run the full suite in debug and release mode: `just test-all`
 - Update `EXPECT:` blocks: `just update-expect`
 - Run one expect test file: `just expect tests/path/to/file.qxq`
 - Compile vm submodule and update `vm.s`: `make -C vm rel`
@@ -31,10 +30,12 @@
 
 ## Test Workflow
 
-- `just unit-test` runs units tests in Rust source files.
-- `just test` runs every `tests/**/*.qxq` file in traditional mode through `scripts/run_tests.py`.
-- `just test-expect` runs only files that contain `(* RUN: ... *)` or `(* RUN-EXPECT-ERROR: ... *)`.
-- `just update-expect` rewrites a single `EXPECT:` block from current command output and skips multi-block files.
+- `cargo test` (or `just test`) is the single entry point: it runs the Rust unit tests and, through `tests/filetests.rs`, every `tests/**/*.qxq` file as one test named by its path relative to `tests/`.
+- `cargo test --release` does the same with the release build; `just test-all` runs both.
+- Files with a `(* RUN: ... *)` or `(* RUN-EXPECT-ERROR: ... *)` block run through `qxq --test-expect`; all other files must succeed under `qxq --inspect`.
+- Filter by name as with any cargo test, e.g. `cargo test -- 6_execution`; `just unit-test` runs only the Rust unit tests.
+- A file containing `(* SKIP: reason *)` is reported as ignored, with the reason in the test name; `qxq` itself refuses such a file with `skipped: reason` and exit code 2.
+- `just update-expect` rewrites the single `EXPECT:` block of every `tests/**/*.qxq` file from current command output, skipping multi-block and SKIP files; `--update-expect` takes a directory or a single file.
 - Expect files support `%s` for the current file path and `{preferred|fallback}` command selection.
 
 ## Git Workflow

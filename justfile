@@ -14,27 +14,26 @@ release:
 repl:
     @cargo run
 
-# Run traditional tests (exit code based)
+# Run all tests: the Rust unit tests and every tests/**/*.qxq file
 test *args:
-    @uv run scripts/run_tests.py --test {{args}}
+    @cargo test {{args}}
 
-# Run only expectation tests ((* RUN: *) based)
-test-expect *args:
-    @uv run scripts/run_tests.py --test-expect {{args}}
-
-# Update EXPECT: blocks and skip those with multiple blocks
-update-expect *args:
-    @uv run scripts/run_tests.py --update-expect --skip-multiple-expect {{args}}
+# Update the EXPECT: block of every test file, skipping files with multiple blocks
+update-expect:
+    @cargo run -- --update-expect tests --skip-multiple-expect
 
 # Run a single expect test file directly
 expect file:
     @cargo run -- --test-expect {{file}}
 
+# Run only the unit tests in the Rust sources
 unit-test:
-    @cargo test
+    @cargo test --lib --bins
 
-# Run all tests
-test-all: unit-test test (test "--release") test-expect (test-expect "--release")
+# Run all tests in debug and release mode
+test-all:
+    @cargo test
+    @cargo test --release
 
 # Install tree-sitter highlighter
 highlight-install:
@@ -43,4 +42,3 @@ highlight-install:
 # Uninstall tree-sitter highlighter
 highlight-uninstall:
     @just -f highlighting/justfile uninstall
-
