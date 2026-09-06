@@ -83,6 +83,8 @@ fn main() {
 
   let bindings = bindings_builder.generate().expect("Unable to generate bindings");
 
-  let bindings_path = PathBuf::from("src").join("generated").join("vm.rs");
-  bindings.write_to_file(&bindings_path).expect("Couldn't write bindings!");
+  // The directory is ignored by git, so a fresh clone lacks it.
+  let generated = PathBuf::from("src").join("generated");
+  fs::create_dir_all(&generated).expect("Couldn't create the bindings directory!");
+  bindings.write_to_file(generated.join("vm.rs")).expect("Couldn't write bindings!");
 }
