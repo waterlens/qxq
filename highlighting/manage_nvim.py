@@ -56,6 +56,9 @@ HIGHLIGHT_SCM_CONTENT = """
 "if" @keyword
 "then" @keyword
 "else" @keyword
+"type" @keyword
+"struct" @keyword
+"with" @keyword
 
 ; Literals
 (number) @number
@@ -71,11 +74,17 @@ HIGHLIGHT_SCM_CONTENT = """
 (let_binding name: (identifier) @variable.definition)
 (function_definition (parameters (identifier) @variable.parameter))
 (call_expression (identifier) @function.call)
+(type_declaration name: (identifier) @type)
+(struct_type field: (identifier) @property)
+(method_definition name: (identifier) @function.method)
+(method_definition (parameters (identifier) @variable.parameter))
+(member_expression member: (identifier) @property)
+(field_initializer name: (identifier) @property)
+(struct_expression type: (identifier) @type)
+((identifier) @variable.builtin (#eq? @variable.builtin "self"))
 
 ; Operators
 (operator) @operator
-"@" @operator
-":" @operator
 "=" @operator
 ";" @punctuation.delimiter
 "," @punctuation.delimiter

@@ -24,7 +24,10 @@ module.exports = grammar({
       $.binary_expression,
       $.unary_expression,
       $.call_expression,
+      $.struct_expression,
+      $.member_expression,
       $.let_binding,
+      $.type_declaration,
       $.function_definition,
       $.if_expression,
       $.parenthesized_expression,
@@ -52,8 +55,26 @@ module.exports = grammar({
       choice(
         seq('(', sepBy(',', $._expression), ')'),
         seq('[', sepBy(',', $._expression), ']'),
-        seq('{', sepBy(',', $._expression), '}'),
       )
+    )),
+
+    struct_expression: $ => prec.left(PREC.CALL, seq(
+      field('type', $._expression),
+      '{',
+      sepBy(',', choice($.field_initializer, $._expression)),
+      '}'
+    )),
+
+    field_initializer: $ => seq(
+      field('name', $.identifier),
+      '=',
+      field('value', $._expression)
+    ),
+
+    member_expression: $ => prec.left(PREC.CALL, seq(
+      field('object', $._expression),
+      '.',
+      field('member', $.identifier)
     )),
 
     parenthesized_expression: $ => seq(
@@ -75,6 +96,31 @@ module.exports = grammar({
       field('name', $.identifier),
       '=',
       field('value', $._expression)
+    ),
+
+    type_declaration: $ => seq(
+      'type',
+      field('name', $.identifier),
+      '=',
+      field('body', $.struct_type)
+    ),
+
+    struct_type: $ => seq(
+      'struct',
+      '{',
+      sepBy(',', field('field', $.identifier)),
+      '}',
+      repeat($.method_definition),
+      'end'
+    ),
+
+    method_definition: $ => seq(
+      'with',
+      'fn',
+      field('name', $.identifier),
+      field('parameters', $.parameters),
+      field('body', $._block),
+      'end'
     ),
 
     function_definition: $ => seq(

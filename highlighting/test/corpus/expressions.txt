@@ -107,7 +107,7 @@ f{x}[y](z)
   (call_expression
     (identifier)
     (identifier))
-  (call_expression
+  (struct_expression
     (identifier)
     (identifier))
   (call_expression
@@ -118,7 +118,7 @@ f{x}[y](z)
     (identifier)
     (identifier)
     (identifier))
-  (call_expression
+  (struct_expression
     (identifier)
     (identifier)
     (identifier))
@@ -129,7 +129,7 @@ f{x}[y](z)
     (identifier))
   (call_expression
     (call_expression
-      (call_expression
+      (struct_expression
         (identifier)
         (identifier))
       (identifier))

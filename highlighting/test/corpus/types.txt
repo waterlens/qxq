@@ -1,0 +1,77 @@
+==================
+Struct Declarations
+==================
+type Date = struct {year, month, day}
+  with fn get_year(self) self.a end
+  with fn next(self, n) self.get_year() + n end
+end;
+type Unit = struct {} end
+---
+
+(source_file
+  (type_declaration
+    (identifier)
+    (struct_type
+      (identifier)
+      (identifier)
+      (identifier)
+      (method_definition
+        (identifier)
+        (parameters
+          (identifier))
+        (member_expression
+          (identifier)
+          (identifier)))
+      (method_definition
+        (identifier)
+        (parameters
+          (identifier)
+          (identifier))
+        (binary_expression
+          (call_expression
+            (member_expression
+              (identifier)
+              (identifier)))
+          (operator)
+          (identifier)))))
+  (type_declaration
+    (identifier)
+    (struct_type)))
+
+==================
+Constructors and Members
+==================
+let day = Date{year = 2026, 1, day = 2};
+day.get_year() + day.a;
+Date{}.next(1).b
+---
+
+(source_file
+  (let_binding
+    (identifier)
+    (struct_expression
+      (identifier)
+      (field_initializer
+        (identifier)
+        (number))
+      (number)
+      (field_initializer
+        (identifier)
+        (number))))
+  (binary_expression
+    (call_expression
+      (member_expression
+        (identifier)
+        (identifier)))
+    (operator)
+    (member_expression
+      (identifier)
+      (identifier)))
+  (member_expression
+    (call_expression
+      (member_expression
+        (struct_expression
+          (identifier))
+        (identifier))
+      (number))
+    (identifier)))
