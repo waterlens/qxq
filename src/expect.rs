@@ -1,6 +1,7 @@
 use crate::diagnostic::Result;
 use anyhow::anyhow;
 use std::io::{self, BufRead};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub struct Expectation {
@@ -9,27 +10,45 @@ pub struct Expectation {
   pub end: usize,
 }
 
+/// The directives of a test file that decide whether and how it runs.
+pub struct Directives {
+  /// The reason given in `(* SKIP: reason *)`, if the file carries that marker.
+  pub skip: Option<String>,
+  /// Whether the file has a `RUN:` or `RUN-EXPECT-ERROR:` block.
+  pub has_run: bool,
+}
+
+pub fn directives(content: &str) -> Result<Directives> {
+  let meta = extract_metadata(content)?;
+  Ok(Directives { skip: meta.skip, has_run: meta.run_cmd.is_some() })
+}
+
 /// The "FileCheck" mode: reads from stdin and matches against a file.
 pub fn run_check(file_path: &str) -> Result<()> {
   let content = std::fs::read_to_string(file_path)?;
-  let (exps, _, err_pat) = extract_metadata(&content)?;
+  let meta = extract_metadata(&content)?;
 
-  let res = if exps.is_empty() {
+  let res = if meta.expectations.is_empty() {
     Err(anyhow!("no EXPECT: patterns found in {}", file_path))
   } else {
-    verify_output(io::stdin().lock(), &exps)
+    verify_output(io::stdin().lock(), &meta.expectations)
   };
 
-  handle_negative_test(res, err_pat)
+  handle_negative_test(res, meta.expected_error)
 }
 
 /// The "Driver" mode: reads RUN:, executes it, and verifies output.
 pub fn run_test_file(file_path: &str) -> Result<()> {
   let content = std::fs::read_to_string(file_path)?;
-  let (exps, run_cmd, err_pat) = extract_metadata(&content)?;
+  let meta = extract_metadata(&content)?;
 
-  let res = run_test_file_core(file_path, &exps, run_cmd.as_deref(), err_pat.is_some());
-  handle_negative_test(res, err_pat)
+  let res = run_test_file_core(
+    file_path,
+    &meta.expectations,
+    meta.run_cmd.as_deref(),
+    meta.expected_error.is_some(),
+  );
+  handle_negative_test(res, meta.expected_error)
 }
 
 fn run_test_file_core(
@@ -78,7 +97,8 @@ pub enum UpdateStatus {
 
 pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<UpdateStatus> {
   let content = std::fs::read_to_string(file_path)?;
-  let (exps, run_cmd, _) = extract_metadata(&content)?;
+  let meta = extract_metadata(&content)?;
+  let exps = meta.expectations;
 
   if exps.len() > 1 {
     if skip_multi {
@@ -88,7 +108,7 @@ pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<UpdateSt
     return Err(anyhow!("cannot automatically update file with multiple EXPECT: blocks"));
   }
 
-  let cmd_raw = run_cmd.ok_or_else(|| anyhow!("no RUN: block found in {}", file_path))?;
+  let cmd_raw = meta.run_cmd.ok_or_else(|| anyhow!("no RUN: block found in {}", file_path))?;
   let cmd = resolve_run_line(&cmd_raw, file_path)?;
   let out = execute_shell(&cmd)?;
   if !out.status.success() {
@@ -119,6 +139,52 @@ pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<UpdateSt
   } else {
     Err(anyhow!("no EXPECT: block found to update in {}", file_path))
   }
+}
+
+/// Updates every `.qxq` file below `dir` that has a RUN: block, leaving SKIP files alone.
+/// Failures are reported per file and the first error is only returned at the end.
+pub fn update_expectations_in_dir(dir: &Path, skip_multi: bool) -> Result<()> {
+  let mut files = Vec::new();
+  collect_qxq_files(dir, &mut files)?;
+  files.sort();
+
+  let mut failures = 0;
+  for file in &files {
+    let file_path = file.to_string_lossy();
+    if let Err(e) = update_if_test(&file_path, skip_multi) {
+      eprintln!("Failed to update {}: {:#}", file_path, e);
+      failures += 1;
+    }
+  }
+  if failures > 0 {
+    return Err(anyhow!("{} of {} files could not be updated", failures, files.len()));
+  }
+  Ok(())
+}
+
+fn update_if_test(file_path: &str, skip_multi: bool) -> Result<()> {
+  let content = std::fs::read_to_string(file_path)?;
+  let directives = directives(&content)?;
+  if let Some(reason) = directives.skip {
+    println!("Skipping update for {} (SKIP: {})", file_path, reason);
+    return Ok(());
+  }
+  if directives.has_run {
+    update_expectations(file_path, skip_multi)?;
+  }
+  Ok(())
+}
+
+fn collect_qxq_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
+  for entry in std::fs::read_dir(dir)? {
+    let path = entry?.path();
+    if path.is_dir() {
+      collect_qxq_files(&path, files)?;
+    } else if path.extension().is_some_and(|ext| ext == "qxq") {
+      files.push(path);
+    }
+  }
+  Ok(())
 }
 
 fn verify_output<R: BufRead>(mut input: R, expectations: &[Expectation]) -> Result<()> {
@@ -262,10 +328,16 @@ impl Scanner {
   }
 }
 
-fn extract_metadata(content: &str) -> Result<(Vec<Expectation>, Option<String>, Option<String>)> {
-  let mut expectations = Vec::new();
-  let mut run_cmd = None;
-  let mut expected_error = None;
+struct Metadata {
+  expectations: Vec<Expectation>,
+  run_cmd: Option<String>,
+  expected_error: Option<String>,
+  skip: Option<String>,
+}
+
+fn extract_metadata(content: &str) -> Result<Metadata> {
+  let mut meta =
+    Metadata { expectations: Vec::new(), run_cmd: None, expected_error: None, skip: None };
   let mut s = Scanner::new(content);
 
   while !s.is_eof() {
@@ -281,27 +353,19 @@ fn extract_metadata(content: &str) -> Result<(Vec<Expectation>, Option<String>, 
 
           if try_match(&mut s, "EXPECT:") {
             let start = s.index;
-            while !s.is_eof() {
-              if s.ch() == '*' {
-                let check_idx = s.index;
-                s.advance();
-                if s.ch() == ')' {
-                  s.index = check_idx;
-                  break;
-                }
-              } else {
-                s.advance();
-              }
-            }
-            expectations.push(Expectation {
-              content: s.buffer[start..s.index].iter().collect(),
+            let end = scan_to_comment_end(&mut s);
+            meta.expectations.push(Expectation {
+              content: s.buffer[start..end].iter().collect(),
               start,
-              end: s.index,
+              end,
             });
-            if s.ch() == '*' {
-              s.advance();
-              s.advance();
-            }
+            skip_comment_end(&mut s);
+          } else if try_match(&mut s, "SKIP:") {
+            let start = s.index;
+            let end = scan_to_comment_end(&mut s);
+            let reason: String = s.buffer[start..end].iter().collect();
+            meta.skip = Some(reason.trim().to_string());
+            skip_comment_end(&mut s);
           } else {
             s.index = start_after_ws;
             let is_err = try_match(&mut s, "RUN-EXPECT-ERROR:");
@@ -311,37 +375,23 @@ fn extract_metadata(content: &str) -> Result<(Vec<Expectation>, Option<String>, 
             let is_run = is_err || try_match(&mut s, "RUN:");
 
             if is_run {
-              if run_cmd.is_some() {
+              if meta.run_cmd.is_some() {
                 return Err(anyhow!("multiple RUN: or RUN-EXPECT-ERROR: blocks found"));
               }
               while s.ch().is_whitespace() {
                 s.advance();
               }
               let start = s.index;
-              while !s.is_eof() {
-                if s.ch() == '*' {
-                  let check_idx = s.index;
-                  s.advance();
-                  if s.ch() == ')' {
-                    s.index = check_idx;
-                    break;
-                  }
-                } else {
-                  s.advance();
-                }
-              }
-              let raw: String = s.buffer[start..s.index].iter().collect();
+              let end = scan_to_comment_end(&mut s);
+              let raw: String = s.buffer[start..end].iter().collect();
               if is_err {
                 let mut lines = raw.lines();
-                run_cmd = lines.next().map(|l| l.trim().to_string());
-                expected_error = Some(lines.collect::<Vec<_>>().join("\n").trim().to_string());
+                meta.run_cmd = lines.next().map(|l| l.trim().to_string());
+                meta.expected_error = Some(lines.collect::<Vec<_>>().join("\n").trim().to_string());
               } else {
-                run_cmd = Some(raw.trim().to_string());
+                meta.run_cmd = Some(raw.trim().to_string());
               }
-              if s.ch() == '*' {
-                s.advance();
-                s.advance();
-              }
+              skip_comment_end(&mut s);
             } else {
               s.index = start_after_ws;
               let mut level = 1;
@@ -375,7 +425,32 @@ fn extract_metadata(content: &str) -> Result<(Vec<Expectation>, Option<String>, 
       _ => s.advance(),
     }
   }
-  Ok((expectations, run_cmd, expected_error))
+  Ok(meta)
+}
+
+/// Advances to the `*)` that closes the current comment (or to EOF) and returns the
+/// index of its `*`.
+fn scan_to_comment_end(s: &mut Scanner) -> usize {
+  while !s.is_eof() {
+    if s.ch() == '*' {
+      let check_idx = s.index;
+      s.advance();
+      if s.ch() == ')' {
+        s.index = check_idx;
+        break;
+      }
+    } else {
+      s.advance();
+    }
+  }
+  s.index
+}
+
+fn skip_comment_end(s: &mut Scanner) {
+  if s.ch() == '*' {
+    s.advance();
+    s.advance();
+  }
 }
 
 fn try_match(s: &mut Scanner, prefix: &str) -> bool {

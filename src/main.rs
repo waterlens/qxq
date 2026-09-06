@@ -12,6 +12,7 @@ use std::{
   ffi::OsString,
   fs,
   io::{self, IsTerminal, Write},
+  path::Path,
   rc::Rc,
   time::{Duration, Instant},
 };
@@ -367,6 +368,18 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
   Ok(())
 }
 
+fn read_source(file_path: &str, diag: &Diagnostic) -> Result<String> {
+  diag.context(fs::read_to_string(file_path), format!("failed to read {}", file_path))
+}
+
+/// Refuses a file that carries `(* SKIP: reason *)`: reports the reason and exits with 2.
+fn exit_if_skipped(content: &str) {
+  if let Some(reason) = expect::directives(content).ok().and_then(|d| d.skip) {
+    eprintln!("skipped: {reason}");
+    std::process::exit(2);
+  }
+}
+
 fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
   validate_cli(&cli, &diag)?;
 
@@ -375,14 +388,20 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
   }
 
   if let Some(file) = cli.check_expect {
+    exit_if_skipped(&read_source(&file, &diag)?);
     return expect::run_check(&file);
   }
 
   if let Some(file) = cli.test_expect {
+    exit_if_skipped(&read_source(&file, &diag)?);
     return expect::run_test_file(&file);
   }
 
   if let Some(file) = cli.update_expect {
+    if Path::new(&file).is_dir() {
+      return expect::update_expectations_in_dir(Path::new(&file), cli.skip_multiple_expect);
+    }
+    exit_if_skipped(&read_source(&file, &diag)?);
     match expect::update_expectations(&file, cli.skip_multiple_expect)? {
       expect::UpdateStatus::Updated => return Ok(()),
       expect::UpdateStatus::Skipped => std::process::exit(2),
@@ -409,8 +428,8 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
         }
         continue;
       }
-      let content =
-        diag.context(fs::read_to_string(&file_path), format!("failed to read {}", file_path))?;
+      let content = read_source(&file_path, &diag)?;
+      exit_if_skipped(&content);
       let arena = Bump::new();
       let parser = parser::Parser::new(&arena, Rc::clone(&diag), &content);
       let tree = diag.context(parser.parse(), format!("failed to parse {}", file_path))?;
