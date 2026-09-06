@@ -1,12 +1,12 @@
 use crate::bytecode::FloatBits;
 use crate::diagnostic::{Diagnostic, Result};
-use small_map::RapidSmallMap;
 use std::rc::Rc;
 
 use std::fmt;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 
+/// A source position; `column` and `index` count bytes.
 #[derive(Debug, Clone, Copy)]
 pub struct Loc {
   pub line: u32,
@@ -43,9 +43,8 @@ impl<'a> TokenStr<'a> {
   pub fn new(s: &'a str) -> Self {
     TokenStr(s)
   }
-  pub fn from_span<'arena>(arena: &'arena bumpalo::Bump, span: TokenSpan<'a>) -> TokenStr<'arena> {
-    let text = span.to_string();
-    TokenStr::new(arena.alloc_str(&text))
+  pub fn from_span(span: TokenSpan<'a>) -> Self {
+    TokenStr::new(span.0)
   }
 }
 
@@ -73,12 +72,13 @@ impl<'a> From<&'a str> for TokenStr<'a> {
   }
 }
 
+/// The source text of a token, a slice of the tokenizer's buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenSpan<'a>(&'a [char]);
+pub struct TokenSpan<'a>(&'a str);
 
 impl<'a> TokenSpan<'a> {
-  const EMPTY: TokenSpan<'static> = TokenSpan(&['<', 'e', 'm', 'p', 't', 'y', '>']);
-  pub fn new(s: &'a [char]) -> Self {
+  const EMPTY: TokenSpan<'static> = TokenSpan("<empty>");
+  pub fn new(s: &'a str) -> Self {
     TokenSpan(s)
   }
   pub const fn empty() -> Self {
@@ -91,18 +91,18 @@ impl<'a> TokenSpan<'a> {
 
 impl Display for TokenSpan<'_> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{}", self.0.iter().collect::<String>())
+    write!(f, "{}", self.0)
   }
 }
 
-impl AsRef<[char]> for TokenSpan<'_> {
-  fn as_ref(&self) -> &[char] {
+impl AsRef<str> for TokenSpan<'_> {
+  fn as_ref(&self) -> &str {
     self.0
   }
 }
 
-impl<'a> From<&'a [char]> for TokenSpan<'a> {
-  fn from(s: &'a [char]) -> Self {
+impl<'a> From<&'a str> for TokenSpan<'a> {
+  fn from(s: &'a str) -> Self {
     TokenSpan::new(s)
   }
 }
@@ -218,7 +218,7 @@ impl std::fmt::Display for Token<'_> {
     match self.tag {
       Eof => write!(f, "<end of file>"),
       Newline => write!(f, "<new line>"),
-      Identifer => write!(f, "<identifier {}>", self.span.0.iter().collect::<String>()),
+      Identifer => write!(f, "<identifier {}>", self.span.0),
       Kw(kw) => write!(f, "<keyword {kw}>"),
       Op(op) => write!(f, "<op {op}>"),
       RawOp(op) => write!(f, "<raw op: `{op}`>"),
@@ -248,9 +248,13 @@ impl<'a> Token<'a> {
 
 use bumpalo::Bump;
 
+/// Scans the source as bytes.  Every token class is ASCII; bytes at or above
+/// 0x80 only occur inside string literals and comments, where they are copied
+/// or skipped whole, so multi-byte sequences are never cut.  Locations count
+/// bytes.
 pub struct Tokenizer<'a> {
-  arena: &'a bumpalo::Bump,
-  buffer: &'a [char],
+  arena: &'a Bump,
+  buffer: &'a str,
   index: usize,
   colstart: usize,
   line: u32,
@@ -260,24 +264,21 @@ pub struct Tokenizer<'a> {
 use Paired::*;
 use TokenErr::*;
 use TokenTag::*;
-use once_cell::sync::Lazy;
 
-static KEYWORDS: Lazy<RapidSmallMap<16, &'static [char], Keyword>> = Lazy::new(|| {
-  let mut map: RapidSmallMap<16, &'static [char], Keyword> = RapidSmallMap::new();
-  map.insert(&['f', 'n'], Keyword::Fn);
-  map.insert(&['l', 'e', 't'], Keyword::Let);
-  map.insert(&['r', 'e', 'c'], Keyword::Rec);
-  map.insert(&['w', 'i', 't', 'h'], Keyword::With);
-  map.insert(&['a', 'n', 'd'], Keyword::And);
-  map.insert(&['i', 's'], Keyword::Is);
-  map.insert(&['i', 'f'], Keyword::If);
-  map.insert(&['e', 'l', 's', 'e'], Keyword::Else);
-  map.insert(&['t', 'h', 'e', 'n'], Keyword::Then);
-  map.insert(&['e', 'n', 'd'], Keyword::End);
-  map.insert(&['t', 'y', 'p', 'e'], Keyword::Type);
-  map.insert(&['s', 't', 'r', 'u', 'c', 't'], Keyword::Struct);
-  map
-});
+static KEYWORDS: phf::Map<&'static str, Keyword> = phf::phf_map! {
+  "fn" => Keyword::Fn,
+  "let" => Keyword::Let,
+  "rec" => Keyword::Rec,
+  "with" => Keyword::With,
+  "and" => Keyword::And,
+  "is" => Keyword::Is,
+  "if" => Keyword::If,
+  "else" => Keyword::Else,
+  "then" => Keyword::Then,
+  "end" => Keyword::End,
+  "type" => Keyword::Type,
+  "struct" => Keyword::Struct,
+};
 
 impl<'a, 'b> Tokenizer<'a>
 where
@@ -287,12 +288,14 @@ where
   where
     I: AsRef<str>,
   {
-    let i = input.as_ref();
-    let mut buffer = i.chars().collect::<Vec<_>>();
-    if buffer.last() != Some(&'\0') {
-      buffer.push('\0');
-    }
-    let buffer = arena.alloc_slice_copy(&buffer);
+    // A NUL sentinel ends the buffer so the scanner never bounds-checks.
+    let input = input.as_ref();
+    let bytes: &'a [u8] = {
+      let bytes = arena.alloc_slice_fill_copy(input.len() + 1, 0u8);
+      bytes[..input.len()].copy_from_slice(input.as_bytes());
+      bytes
+    };
+    let buffer = std::str::from_utf8(bytes).expect("a str followed by NUL is valid UTF-8");
     Tokenizer { arena, buffer, index: 0, colstart: 0, line: 1, diag }
   }
 
@@ -305,16 +308,16 @@ where
     Loc::new(self.line, (self.index - self.colstart + 1) as u32, self.index)
   }
 
-  fn make_span(&'b self, start: usize) -> TokenSpan<'a> {
-    TokenSpan::new(&self.buffer[start..self.index])
+  fn slice(&'b self, start: usize) -> &'a str {
+    &self.buffer[start..self.index]
   }
 
   fn make_token(&'b self, tag: TokenTag<'a>, loc: Loc) -> Token<'a> {
-    Token::new(tag, self.make_span(loc.index), loc)
+    Token::new(tag, TokenSpan::new(self.slice(loc.index)), loc)
   }
 
   fn make_error(&'b self, err: TokenErr, loc: Loc) -> Token<'a> {
-    Token::new(Error(err), self.make_span(loc.index), loc)
+    self.make_token(Error(err), loc)
   }
 
   fn eof(&'b self) -> Token<'a> {
@@ -325,101 +328,106 @@ where
     )
   }
 
-  fn is_keyword(&self, s: &[char]) -> Option<Keyword> {
-    KEYWORDS.get(s).cloned()
+  fn ch(&self) -> u8 {
+    self.buffer.as_bytes()[self.index]
   }
-
-  fn ch(&self) -> char {
-    self.buffer[self.index]
-  }
-  fn ch_at(&self, i: usize) -> char {
-    self.buffer[i]
+  fn ch_at(&self, i: usize) -> u8 {
+    self.buffer.as_bytes()[i]
   }
 
   fn string_literal(&'b mut self, loc: Loc) -> Token<'a> {
     self.index += 1;
-    let mut buf = String::new();
+    let start = self.index;
+    // Only literals with escapes are copied; the rest are sliced from the buffer.
+    let mut unescaped: Option<Vec<u8>> = None;
     loop {
       match self.ch() {
-        '\0' => return self.make_error(EarlyEof, loc),
-        '\n' => {
+        0 => return self.make_error(EarlyEof, loc),
+        b'\n' => {
           self.index += 1;
           self.move_to_newline_begin();
           return self.make_error(NewlineInLiteral, loc);
         }
-        '"' => break,
-        '\\' => {
+        b'"' => break,
+        b'\\' => {
+          let buf =
+            unescaped.get_or_insert_with(|| self.buffer.as_bytes()[start..self.index].to_vec());
           self.index += 1;
           match self.ch() {
-            '\0' => return self.make_error(EarlyEof, loc),
-            'n' | 'r' | 't' | '\\' | '"' => buf.push(match self.ch() {
-              'n' => '\n',
-              'r' => '\r',
-              't' => '\t',
-              _ => self.ch(),
-            }),
+            0 => return self.make_error(EarlyEof, loc),
+            b'n' => buf.push(b'\n'),
+            b'r' => buf.push(b'\r'),
+            b't' => buf.push(b'\t'),
+            c @ (b'\\' | b'"') => buf.push(c),
             _ => {
               self.index += 1;
               return self.make_error(InvalidEscapeSequence, loc);
             }
           }
         }
-        _ => {
-          buf.push(self.ch());
+        c => {
+          if let Some(buf) = &mut unescaped {
+            buf.push(c);
+          }
         }
       }
       self.index += 1;
     }
+    let text = match unescaped {
+      // Escapes only ever add ASCII, so the copy is still valid UTF-8.
+      Some(buf) => self.arena.alloc_str(std::str::from_utf8(&buf).expect("valid UTF-8")),
+      None => self.slice(start),
+    };
     self.index += 1;
-    self.make_token(TokenTag::StrLiteral(self.arena.alloc_str(&buf)), loc)
+    self.make_token(StrLiteral(text), loc)
   }
 
-  fn numeric_literal(&'b mut self, loc: Loc, first_c: char, neg: bool) -> Token<'a> {
+  fn numeric_literal(&'b mut self, loc: Loc, first_c: u8, neg: bool) -> Token<'a> {
     use TokenErr::*;
     let start = self.index; // position of first_c in buffer
     self.index += 1;
     let mut base: u32 = 10;
-    let mut value: i128 = first_c.to_digit(10).unwrap().into();
+    let mut value: i128 = (first_c - b'0').into();
     if neg {
       value = -value;
     }
-    if first_c == '0' {
+    if first_c == b'0' {
       match self.ch() {
-        'b' | 'B' => {
+        b'b' | b'B' => {
           self.index += 1;
           base = 2;
         }
-        'o' | 'O' => {
+        b'o' | b'O' => {
           self.index += 1;
           base = 8;
         }
-        'x' | 'X' => {
+        b'x' | b'X' => {
           self.index += 1;
           base = 16;
         }
-        '0'..='9' | '_' => {}
-        '.' | 'e' | 'E' => {} // handled below as float
+        b'0'..=b'9' | b'_' => {}
+        b'.' | b'e' | b'E' => {} // handled below as float
         _ => return self.make_token(IntLiteral(value), loc),
       }
     }
     if base != 10 {
       match self.ch() {
-        '0'..='9' | 'a'..='f' | 'A'..='F' => {}
+        b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => {}
         _ => return self.make_error(InvalidIntLiteralPrefix, loc),
       }
     }
     // Parse integer digits (with underscore separators)
     loop {
       match self.ch() {
-        '_' => {
+        b'_' => {
           self.index += 1;
           continue;
         }
-        '0'..='9' => {}
-        'a'..='f' | 'A'..='F' if base == 16 => {}
+        b'0'..=b'9' => {}
+        b'a'..=b'f' | b'A'..=b'F' if base == 16 => {}
         _ => break,
       }
-      let n = match self.ch().to_digit(base) {
+      let n = match (self.ch() as char).to_digit(base) {
         Some(n) => n as i128,
         None => {
           self.index += 1;
@@ -432,9 +440,9 @@ where
     }
     // Float: only for decimal base, when followed by '.' + digit or 'e'/'E'
     if base == 10
-      && (self.ch() == 'e'
-        || self.ch() == 'E'
-        || (self.ch() == '.' && self.ch_at(self.index + 1).is_ascii_digit()))
+      && (self.ch() == b'e'
+        || self.ch() == b'E'
+        || (self.ch() == b'.' && self.ch_at(self.index + 1).is_ascii_digit()))
     {
       return self.float_literal_tail(loc, start, neg);
     }
@@ -447,28 +455,27 @@ where
   fn float_literal_tail(&'b mut self, loc: Loc, start: usize, neg: bool) -> Token<'a> {
     use TokenErr::*;
     // Fractional part
-    if self.ch() == '.' {
+    if self.ch() == b'.' {
       self.index += 1;
-      while self.ch().is_ascii_digit() || self.ch() == '_' {
+      while self.ch().is_ascii_digit() || self.ch() == b'_' {
         self.index += 1;
       }
     }
     // Exponent part
-    if self.ch() == 'e' || self.ch() == 'E' {
+    if self.ch() == b'e' || self.ch() == b'E' {
       self.index += 1;
-      if self.ch() == '+' || self.ch() == '-' {
+      if self.ch() == b'+' || self.ch() == b'-' {
         self.index += 1;
       }
       if !self.ch().is_ascii_digit() {
         return self.make_error(InvalidFloatLiteral, loc);
       }
-      while self.ch().is_ascii_digit() || self.ch() == '_' {
+      while self.ch().is_ascii_digit() || self.ch() == b'_' {
         self.index += 1;
       }
     }
-    // Parse from source slice, stripping underscores into a stack buffer.
-    // All float literal chars are ASCII, so one byte each.
-    let src = &self.buffer[start..self.index];
+    // Parse from the source slice, stripping underscores into a stack buffer.
+    let src = self.slice(start).as_bytes();
     let mut buf = [0u8; 64];
     let mut len = 0;
     if neg {
@@ -476,8 +483,8 @@ where
       len += 1;
     }
     for &c in src {
-      if c != '_' {
-        buf[len] = c as u8;
+      if c != b'_' {
+        buf[len] = c;
         len += 1;
       }
     }
@@ -492,11 +499,11 @@ where
     let mut symbol_like = false;
     loop {
       match self.ch() {
-        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => (),
-        '!' | '$' | '%' | '&' | '*' | '+' | '-' | '/' | ':' | '<' | '=' | '>' | '?' | '@' | '^'
-        | '~' => symbol_like |= true,
-        '\0' | ' ' | '\t' | '\r' | '\n' => break,
-        ')' | ']' | '}' | ',' | ';' => break,
+        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => (),
+        b'!' | b'$' | b'%' | b'&' | b'*' | b'+' | b'-' | b'/' | b':' | b'<' | b'=' | b'>'
+        | b'?' | b'@' | b'^' | b'~' => symbol_like |= true,
+        0 | b' ' | b'\t' | b'\r' | b'\n' => break,
+        b')' | b']' | b'}' | b',' | b';' => break,
         _ => {
           if !symbol_like {
             break;
@@ -508,11 +515,10 @@ where
       self.index += 1;
     }
 
-    let tok = self.make_token(Identifer, loc);
-    if let Some(kw) = self.is_keyword(tok.span.as_ref()) {
-      return self.make_token(Kw(kw), loc);
+    match KEYWORDS.get(self.slice(loc.index)) {
+      Some(&kw) => self.make_token(Kw(kw), loc),
+      None => self.make_token(Identifer, loc),
     }
-    tok
   }
 
   fn skip_comment(&'b mut self) -> bool {
@@ -520,16 +526,16 @@ where
     let mut level = 1;
     loop {
       match self.ch() {
-        '(' => {
+        b'(' => {
           self.index += 1;
-          if self.ch() == '*' {
+          if self.ch() == b'*' {
             self.index += 1;
             level += 1;
           }
         }
-        '*' => {
+        b'*' => {
           self.index += 1;
-          if self.ch() == ')' {
+          if self.ch() == b')' {
             self.index += 1;
             level -= 1;
             if level == 0 {
@@ -537,8 +543,8 @@ where
             }
           }
         }
-        '\0' => return false,
-        '\n' => {
+        0 => return false,
+        b'\n' => {
           self.index += 1;
           self.move_to_newline_begin();
         }
@@ -547,83 +553,78 @@ where
     }
   }
 
-  fn operator(&'b mut self, loc: Loc, first_c: char) -> Token<'a> {
+  fn operator(&'b mut self, loc: Loc, first_c: u8) -> Token<'a> {
     self.index += 1;
-    let mut buf = first_c.to_string();
     match first_c {
-      ',' | ';' | ':' | '.' => return self.make_token(Op(self.arena.alloc_str(&buf)), loc),
-      '?' | '~' | '!' => {
+      b',' | b';' | b':' | b'.' => return self.make_token(Op(self.slice(loc.index)), loc),
+      b'?' | b'~' | b'!' => {
         match self.ch() {
-          '$' | '&' | '*' | '+' | '-' | '/' | '=' | '>' | '@' | '^' | '|' | '%' | '<' => {}
+          b'$' | b'&' | b'*' | b'+' | b'-' | b'/' | b'=' | b'>' | b'@' | b'^' | b'|' | b'%'
+          | b'<' => {}
           _ => {
-            if first_c != '!' {
+            if first_c != b'!' {
               return self.make_error(InvalidUnaryOperator, self.get_loc());
             }
           }
         }
         while matches!(
           self.ch(),
-          '$' | '&' | '*' | '+' | '-' | '/' | '=' | '>' | '@' | '^' | '|' | '%' | '<'
+          b'$' | b'&' | b'*' | b'+' | b'-' | b'/' | b'=' | b'>' | b'@' | b'^' | b'|' | b'%' | b'<'
         ) {
-          buf.push(self.ch());
           self.index += 1;
         }
       }
-      '$' | '&' | '*' | '+' | '-' | '/' | '=' | '>' | '@' | '^' | '|' | '%' | '<' | '#' => {
+      b'$' | b'&' | b'*' | b'+' | b'-' | b'/' | b'=' | b'>' | b'@' | b'^' | b'|' | b'%' | b'<'
+      | b'#' => {
         match self.ch() {
-          '$' | '&' | '*' | '+' | '-' | '/' | '=' | '>' | '@' | '^' | '|' | '%' | '<' | '!'
-          | '.' | ':' | '?' | '~' => {}
+          b'$' | b'&' | b'*' | b'+' | b'-' | b'/' | b'=' | b'>' | b'@' | b'^' | b'|' | b'%'
+          | b'<' | b'!' | b'.' | b':' | b'?' | b'~' => {}
           _ => {
-            if first_c == '#' {
+            if first_c == b'#' {
               return self.make_error(InvalidBinaryOperator, self.get_loc());
             }
           }
         }
         while matches!(
           self.ch(),
-          '$'
-            | '&'
-            | '*'
-            | '+'
-            | '-'
-            | '/'
-            | '='
-            | '>'
-            | '@'
-            | '^'
-            | '|'
-            | '%'
-            | '<'
-            | '!'
-            | '.'
-            | ':'
-            | '?'
-            | '~'
+          b'$'
+            | b'&'
+            | b'*'
+            | b'+'
+            | b'-'
+            | b'/'
+            | b'='
+            | b'>'
+            | b'@'
+            | b'^'
+            | b'|'
+            | b'%'
+            | b'<'
+            | b'!'
+            | b'.'
+            | b':'
+            | b'?'
+            | b'~'
         ) {
-          buf.push(self.ch());
           self.index += 1;
         }
       }
-      '`' => {
-        buf.clear();
-        loop {
-          match self.ch() {
-            '`' => {
-              let mut loc = loc;
-              loc.index += 1;
-              let tok = self.make_token(RawOp(self.arena.alloc_str(&buf)), loc);
-              self.index += 1;
-              return tok;
-            }
-            '\0' => return self.make_error(EarlyEof, self.get_loc()),
-            _ => buf.push(self.ch()),
+      b'`' => loop {
+        match self.ch() {
+          b'`' => {
+            let mut loc = loc;
+            loc.index += 1;
+            let tok = self.make_token(RawOp(self.slice(loc.index)), loc);
+            self.index += 1;
+            return tok;
           }
-          self.index += 1;
+          0 => return self.make_error(EarlyEof, self.get_loc()),
+          _ => self.index += 1,
         }
-      }
+      },
       _ => unreachable!(),
     }
-    self.make_token(Op(self.arena.alloc_str(&buf)), loc)
+    self.make_token(Op(self.slice(loc.index)), loc)
   }
 
   pub fn next_with_err(&'b mut self) -> Result<Token<'a>> {
@@ -636,22 +637,22 @@ where
       let c = self.ch();
       let loc = self.get_loc();
       match c {
-        '\0' => return self.eof(),
-        ' ' | '\t' | '\r' => {
+        0 => return self.eof(),
+        b' ' | b'\t' | b'\r' => {
           self.index += 1;
-          while let ' ' | '\t' | '\r' = self.ch() {
+          while let b' ' | b'\t' | b'\r' = self.ch() {
             self.index += 1;
           }
           continue;
         }
-        '\n' => {
+        b'\n' => {
           self.index += 1;
           self.move_to_newline_begin();
           return self.make_token(Newline, loc);
         }
-        '(' => {
+        b'(' => {
           self.index += 1;
-          if self.ch() == '*' {
+          if self.ch() == b'*' {
             self.index += 1;
             if !self.skip_comment() {
               return self.make_error(EarlyEof, loc);
@@ -660,39 +661,39 @@ where
             return self.make_token(PairedOpen(Parenthesis), loc);
           }
         }
-        ')' => {
+        b')' => {
           self.index += 1;
           return self.make_token(PairedClose(Parenthesis), loc);
         }
-        '[' => {
+        b'[' => {
           self.index += 1;
           return self.make_token(PairedOpen(Bracket), loc);
         }
-        ']' => {
+        b']' => {
           self.index += 1;
           return self.make_token(PairedClose(Bracket), loc);
         }
-        '{' => {
+        b'{' => {
           self.index += 1;
           return self.make_token(PairedOpen(Brace), loc);
         }
-        '}' => {
+        b'}' => {
           self.index += 1;
           return self.make_token(PairedClose(Brace), loc);
         }
-        '"' => return self.string_literal(loc),
-        '0'..='9' => return self.numeric_literal(loc, c, false),
-        '+' | '-' => {
+        b'"' => return self.string_literal(loc),
+        b'0'..=b'9' => return self.numeric_literal(loc, c, false),
+        b'+' | b'-' => {
           let next_c = self.ch_at(self.index + 1);
           if next_c.is_ascii_digit() {
             self.index += 1;
-            return self.numeric_literal(loc, next_c, c == '-');
+            return self.numeric_literal(loc, next_c, c == b'-');
           }
           return self.operator(loc, c);
         }
-        'a'..='z' | 'A'..='Z' | '_' => return self.ident(loc),
-        ',' | ';' | ':' | '.' | '?' | '~' | '!' | '$' | '&' | '*' | '/' | '=' | '>' | '@' | '^'
-        | '|' | '%' | '<' | '#' | '`' => {
+        b'a'..=b'z' | b'A'..=b'Z' | b'_' => return self.ident(loc),
+        b',' | b';' | b':' | b'.' | b'?' | b'~' | b'!' | b'$' | b'&' | b'*' | b'/' | b'='
+        | b'>' | b'@' | b'^' | b'|' | b'%' | b'<' | b'#' | b'`' => {
           return self.operator(loc, c);
         }
         _ => return self.make_error(UnexpectedChar, loc),
@@ -822,6 +823,8 @@ mod tests {
     test_tokenize("\"\\\"", &[t(Error(EarlyEof), "\"\\\"")]);
     test_tokenize("\"", &[t(Error(EarlyEof), "\"")]);
     test_tokenize("\"a", &[t(Error(EarlyEof), "\"a")]);
+    test_tokenize("\"héllo\"", &[t(StrLiteral("héllo"), "\"héllo\"")]);
+    test_tokenize("\"é\\n\"", &[t(StrLiteral("é\n"), "\"é\\n\"")]);
   }
 
   #[test]
@@ -829,5 +832,6 @@ mod tests {
     test_tokenize("(* *)\n", &[t(Newline, "\n")]);
     test_tokenize("(* (* *)\n", &[t(Error(EarlyEof), "(* (* *)\n")]);
     test_tokenize("(* (* *) *)\n", &[t(Newline, "\n")]);
+    test_tokenize("(* 注释 *)\n", &[t(Newline, "\n")]);
   }
 }

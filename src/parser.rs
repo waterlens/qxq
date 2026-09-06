@@ -685,7 +685,7 @@ impl<'a> Parser<'a> {
 
   fn parse_ident<'t>(&'t mut self, is_decl: bool) -> Result<TokenStr<'a>> {
     let tok = self.next_ident(false)?;
-    let name = TokenStr::from_span(self.arena, tok.inner.span);
+    let name = TokenStr::from_span(tok.inner.span);
     if is_decl {
       self.declare_local(name);
     } else {
@@ -733,7 +733,7 @@ impl<'a> Parser<'a> {
   fn parse_struct_decl<'t>(&'t mut self) -> PeekExpr<'a> {
     let arena = self.arena;
     let name_tok = self.next_ident(false)?;
-    let name = TokenStr::from_span(arena, name_tok.inner.span);
+    let name = TokenStr::from_span(name_tok.inner.span);
     let _ = self.expect_operator("=", false)?;
     let _ = self.expect_keyword(Keyword::Struct, false)?;
     let _ = self.expect_paired_open(Paired::Brace)?;
@@ -742,7 +742,7 @@ impl<'a> Parser<'a> {
     if !self.peek_paired_close(Paired::Brace, true) {
       loop {
         let tok = self.next_ident(true)?;
-        fields.push(TokenStr::from_span(arena, tok.inner.span));
+        fields.push(TokenStr::from_span(tok.inner.span));
         if !self.peek_operator(",", true) {
           break;
         }
@@ -758,7 +758,7 @@ impl<'a> Parser<'a> {
       self.skip_token();
       let _ = self.expect_keyword(Keyword::Fn, false)?;
       let tok = self.next_ident(false)?;
-      let mname = TokenStr::from_span(arena, tok.inner.span);
+      let mname = TokenStr::from_span(tok.inner.span);
       let (params, body, freevars) = self.parse_function_parts(None)?;
       if params.first().map(|p| p.0) != Some("self") {
         return self.diag.fail(format!("the first parameter of method {mname} must be `self`"));
@@ -824,7 +824,7 @@ impl<'a> Parser<'a> {
     let tok = self.next_token()?;
     if tok.inner.tag == TokenTag::Identifer && self.peek_operator("=", false) {
       self.skip_token();
-      let label = Some(TokenStr::from_span(self.arena, tok.inner.span));
+      let label = Some(TokenStr::from_span(tok.inner.span));
       return Ok(Init { label, expr: self.parse_expr()?.inner });
     }
     Ok(Init { label: None, expr: self.parse_expr_from(tok, 0)?.inner })
@@ -848,7 +848,7 @@ impl<'a> Parser<'a> {
       FloatLiteral(f) => arena.alloc(ExprCon::FloatLiteral(f, self.new_empty_info())),
       StrLiteral(s) => arena.alloc(ExprCon::StrLiteral(s, self.new_empty_info())),
       Identifer => {
-        let name = TokenStr::from_span(arena, lhs_token.inner.span);
+        let name = TokenStr::from_span(lhs_token.inner.span);
         match name.0 {
           "true" => arena.alloc(ExprCon::BoolLiteral(true, self.new_empty_info())),
           "false" => arena.alloc(ExprCon::BoolLiteral(false, self.new_empty_info())),
@@ -944,7 +944,7 @@ impl<'a> Parser<'a> {
             self.skip_token();
           }
           let name_tok = self.next_ident(false)?;
-          let name = TokenStr::from_span(arena, name_tok.inner.span);
+          let name = TokenStr::from_span(name_tok.inner.span);
 
           let _ = self.expect_operator("=", false)?;
 
@@ -1029,7 +1029,7 @@ impl<'a> Parser<'a> {
 
         if op_str == "." {
           let tok = self.next_ident(false)?;
-          let member = TokenStr::from_span(arena, tok.inner.span);
+          let member = TokenStr::from_span(tok.inner.span);
           let info = self.new_empty_info();
           lhs = if self.peek_paired_open(Paired::Parenthesis) {
             self.skip_token();

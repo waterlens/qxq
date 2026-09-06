@@ -685,14 +685,12 @@ dependencies = [
  "hashbrown",
  "indexmap",
  "libtest-mimic",
- "once_cell",
  "phf",
  "qxq_macros",
  "rustyline",
  "serde",
  "serde_json",
  "slotmap",
- "small-map",
  "ssof",
 ]
 
@@ -713,15 +711,6 @@ checksum = "c069c179fcdc6a2fe24d8d18305cf085fdbd4f922c041943e203685d6a1c58fd"
 dependencies = [
  "endian-type",
  "nibble_vec",
-]
-
-[[package]]
-name = "rapidhash"
-version = "4.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5da7e78a036ce858e8d55b7e7dc8ba3a88b78350fd2155d3591bbd966b58589e"
-dependencies = [
- "rustversion",
 ]
 
 [[package]]
@@ -885,17 +874,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
 dependencies = [
  "version_check",
-]
-
-[[package]]
-name = "small-map"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64c0b79fa0e86d80062670059d27f93911776cdeba2555bf428b455d8738c32f"
-dependencies = [
- "hashbrown",
- "rapidhash",
- "rustc-hash",
 ]
 
 [[package]]
