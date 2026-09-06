@@ -3,8 +3,8 @@ use clap::{ArgGroup, Parser};
 use qxq::diagnostic::{Diagnostic, Result};
 use qxq::*;
 use rustyline::{
-  config::Configurer, error::ReadlineError, Cmd, ConditionalEventHandler, DefaultEditor, Event,
-  EventContext, EventHandler, KeyEvent, Movement, RepeatCount,
+  Cmd, ConditionalEventHandler, DefaultEditor, Event, EventContext, EventHandler, KeyEvent,
+  Movement, RepeatCount, config::Configurer, error::ReadlineError,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -126,11 +126,7 @@ fn apply_repl_command(config: &ReplConfig, cmd: &str) -> Result<ReplConfig> {
 struct ReplInterruptHandler;
 
 fn repl_interrupt_command(line: &str) -> Cmd {
-  if line.is_empty() {
-    Cmd::Interrupt
-  } else {
-    Cmd::Kill(Movement::WholeBuffer)
-  }
+  if line.is_empty() { Cmd::Interrupt } else { Cmd::Kill(Movement::WholeBuffer) }
 }
 
 impl ConditionalEventHandler for ReplInterruptHandler {
@@ -231,23 +227,14 @@ fn run_repl_perf_expression(line: &str, diag: &Diagnostic) -> Result<()> {
     let target_args = vec![source_path.as_os_str().to_os_string()];
     let target_exe =
       diag.context(env::current_exe(), "failed to resolve current qxq executable")?;
-    let plan = perf::build_plan(
-      perf::Platform::current(),
-      &root,
-      &run_id,
-      &target_exe,
-      &target_args,
-      diag,
-    )?;
+    let plan =
+      perf::build_plan(perf::Platform::current(), &root, &run_id, &target_exe, &target_args, diag)?;
     perf::run_profile(&plan, diag)
   })();
   let cleanup = fs::remove_file(&source_path);
 
   if let Err(err) = cleanup {
-    eprintln!(
-      "Warning: failed to remove temporary perf source {}: {err}",
-      source_path.display()
-    );
+    eprintln!("Warning: failed to remove temporary perf source {}: {err}", source_path.display());
   }
 
   result.map(|report| print_perf_report(&report))
