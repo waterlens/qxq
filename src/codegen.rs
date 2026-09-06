@@ -1457,6 +1457,9 @@ impl<'a> CodeGenCtx<'a> {
       MemberApply { receiver, member, args, info: _ } => {
         self.emit_member_apply(bc, receiver, member, args, data, control, next)?;
       }
+      Index { receiver, index, info: _ } => {
+        self.emit_index(bc, receiver, *index, data, control, next)?;
+      }
     }
     Ok(())
   }
@@ -1643,9 +1646,17 @@ impl<'a> CodeGenCtx<'a> {
 
   /// Member operands are 8-bit indices into the thunk's constant table.
   fn member_constant(&self, bc: &mut BytecodeCtx, member: &TokenStr<'a>) -> Result<Op8> {
-    let id = bc.add_str(member.0.to_string());
+    self.small_constant(bc.add_str(member.0.to_string()), member.0)
+  }
+
+  /// A position is an int constant; the VM counts fields from 0.
+  fn position_constant(&self, bc: &mut BytecodeCtx, index: u32) -> Result<Op8> {
+    self.small_constant(bc.add_int(i64::from(index) - 1), &index.to_string())
+  }
+
+  fn small_constant(&self, id: ConstantId, member: &str) -> Result<Op8> {
     let small = id.try_small().ok_or_else(|| {
-      self.diagnostic.error(format!("too many constants to address member `{}`", member.0))
+      self.diagnostic.error(format!("too many constants to address member `{member}`"))
     })?;
     Ok(small.into())
   }
@@ -1659,10 +1670,35 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
+    let m = self.member_constant(bc, member)?;
+    self.emit_load_field(bc, receiver, m, data, control, next)
+  }
+
+  fn emit_index(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    index: u32,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let m = self.position_constant(bc, index)?;
+    self.emit_load_field(bc, receiver, m, data, control, next)
+  }
+
+  fn emit_load_field(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    m: Op8,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
     let (regs, n_temps) = self.eval_any_loc_args(bc, std::slice::from_ref(&receiver))?;
     let recv = regs[0];
     self.clean_any_loc_args(n_temps);
-    let m = self.member_constant(bc, member)?;
     self.emit_with_dest(bc, data, control, next, |_, bc, r| {
       bc.push(Bytecode::loadfield(r.into(), recv.into(), m));
       Ok(())

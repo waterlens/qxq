@@ -145,6 +145,12 @@ pub enum Expr<'a, I> {
     args: ExprsRef<'a, I>,
     info: I,
   },
+  /// `receiver.n`: the n-th field of a tuple or struct, counted from 1.
+  Index {
+    receiver: ExprRef<'a, I>,
+    index: u32,
+    info: I,
+  },
 }
 
 /// One constructor initializer: `label = expr`, or a positional `expr`.
@@ -239,6 +245,9 @@ impl<I> ToSexp for Expr<'_, I> {
         parts.extend(args.iter().map(|x| x.to_sexp(pool)));
         pool.list(parts)
       }
+      Index { receiver, index, info: _ } => {
+        pool.list(&[pool.atom("index"), receiver.to_sexp(pool), pool.atom(index.to_string())])
+      }
     }
   }
 }
@@ -274,7 +283,8 @@ impl<I> Expr<'_, I> {
       | StructDecl { info: i, .. }
       | Construct { info: i, .. }
       | Member { info: i, .. }
-      | MemberApply { info: i, .. } => i,
+      | MemberApply { info: i, .. }
+      | Index { info: i, .. } => i,
     }
   }
 }
@@ -397,6 +407,12 @@ impl<'a> ToSexp for InfoExpr<'a> {
         parts.push(InfoExpr { expr: receiver, map: self.map }.to_sexp(pool));
         parts.push(pool.atom(member.as_ref()));
         parts.extend(args.iter().map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool)));
+        false
+      }
+      Index { receiver, index, info: _ } => {
+        parts.push(pool.atom("index"));
+        parts.push(InfoExpr { expr: receiver, map: self.map }.to_sexp(pool));
+        parts.push(pool.atom(index.to_string()));
         false
       }
     };
@@ -1028,15 +1044,26 @@ impl<'a> Parser<'a> {
         self.skip_token();
 
         if op_str == "." {
-          let tok = self.next_ident(false)?;
-          let member = TokenStr::from_span(tok.inner.span);
+          let tok = self.next_token()?;
           let info = self.new_empty_info();
-          lhs = if self.peek_paired_open(Paired::Parenthesis) {
-            self.skip_token();
-            let args = arena.alloc_slice_clone(&self.parse_args(Paired::Parenthesis)?);
-            arena.alloc(ExprCon::MemberApply { receiver: lhs, member, args, info })
-          } else {
-            arena.alloc(ExprCon::Member { receiver: lhs, member, info })
+          lhs = match tok.inner.tag {
+            IntLiteral(n) => {
+              let index = u32::try_from(n).ok().filter(|&n| n > 0).ok_or_else(|| {
+                self.diag.error(format!("fields are numbered from 1, but got {n}"))
+              })?;
+              arena.alloc(ExprCon::Index { receiver: lhs, index, info })
+            }
+            Identifer => {
+              let member = TokenStr::from_span(tok.inner.span);
+              if self.peek_paired_open(Paired::Parenthesis) {
+                self.skip_token();
+                let args = arena.alloc_slice_clone(&self.parse_args(Paired::Parenthesis)?);
+                arena.alloc(ExprCon::MemberApply { receiver: lhs, member, args, info })
+              } else {
+                arena.alloc(ExprCon::Member { receiver: lhs, member, info })
+              }
+            }
+            _ => return self.diag.fail(format!("expected a member, but got {}", tok.inner)),
           };
         } else if op_token.inner.tag == PairedOpen(Paired::Brace) {
           let inits = arena.alloc_slice_clone(&self.parse_inits()?);
@@ -1288,6 +1315,16 @@ mod tests {
     test_parse_exprs("P{x = 1}.x", "(member (construct P (init x 1)) x)");
     parse_fails("type P = struct {x} with fn f() 1 end end");
     parse_fails("type P = struct {x} with fn f(this) 1 end end");
+  }
+
+  #[test]
+  fn test_index() {
+    test_parse_exprs("t.1", "(index t 1)");
+    test_parse_exprs("t.1.2", "(index (index t 1) 2)");
+    test_parse_exprs("t.1(2)", "((index t 1) 2)");
+    test_parse_exprs("p.x.1", "(index (member p x) 1)");
+    parse_fails("t.0");
+    parse_fails("t.-1");
   }
 
   #[test]

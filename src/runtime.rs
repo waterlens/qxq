@@ -158,11 +158,15 @@ impl ImageValidator {
       _ => (0, 0, 0),
     };
     let string = |i: usize| thunk.constants.get(i).is_some_and(|v| v.is_ptr());
+    let position = |i: usize| thunk.constants.get(i).is_some_and(|v| v.is_int());
     let illegal = |what: &str| self.diag.fail(format!("illegal instruction: {what}: {bytecode}"));
     match operator {
       LoadFree if b > thunk.fvlocs.len() => illegal("free variable out of range"),
       LoadType if b >= types.len() => illegal("type out of range"),
-      LoadField | SetField | Invoke if !string(c) => illegal("member is not a string constant"),
+      LoadField | SetField if !string(c) && !position(c) => {
+        illegal("member is not a string or int")
+      }
+      Invoke if !string(c) => illegal("member is not a string constant"),
       Invoke if b != a + FRAME_HEADER_SIZE => illegal("call region not after destination"),
       WObj if !Tag::from(b as u8).is_words() => illegal("wrap tag is not a words object"),
       LoadR if !Val::from_raw(b as u64).is_trivial() => illegal("nontrivial raw value"),
@@ -462,10 +466,12 @@ mod tests {
     let string = OwnedHeap::new(&diag).unwrap().alloc_str("x").unwrap();
     let setfield = Bytecode::setfield(0.into(), 1.into(), 0.into());
     assert!(validator.validate(&[thunk(vec![setfield], vec![])], &[]).is_err());
-    assert!(validator.validate(&[thunk(vec![setfield], vec![Val::from_i32(1)])], &[]).is_err());
+    assert!(validator.validate(&[thunk(vec![setfield], vec![Val::from_f64(1.0)])], &[]).is_err());
+    assert!(validator.validate(&[thunk(vec![setfield], vec![Val::from_i32(1)])], &[]).is_ok());
     assert!(validator.validate(&[thunk(vec![setfield], vec![string])], &[]).is_ok());
     let invoke = Bytecode::invoke(0.into(), 2.into(), 0.into());
     assert!(validator.validate(&[thunk(vec![invoke], vec![string])], &[]).is_ok());
+    assert!(validator.validate(&[thunk(vec![invoke], vec![Val::from_i32(1)])], &[]).is_err());
     let invoke = Bytecode::invoke(0.into(), 1.into(), 0.into());
     assert!(validator.validate(&[thunk(vec![invoke], vec![string])], &[]).is_err());
     let loadtype = Bytecode::loadtype(0.into(), 0.into());

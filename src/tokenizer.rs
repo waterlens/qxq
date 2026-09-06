@@ -438,11 +438,13 @@ where
       value = if neg { value - n } else { value + n };
       self.index += 1;
     }
-    // Float: only for decimal base, when followed by '.' + digit or 'e'/'E'
+    // Float: only for decimal base, when followed by '.' + digit or 'e'/'E'.
+    // A number right after '.' is a position, so `t.1.2` stays two positions.
+    let after_dot = start > 0 && self.ch_at(start - 1) == b'.';
     if base == 10
       && (self.ch() == b'e'
         || self.ch() == b'E'
-        || (self.ch() == b'.' && self.ch_at(self.index + 1).is_ascii_digit()))
+        || (self.ch() == b'.' && !after_dot && self.ch_at(self.index + 1).is_ascii_digit()))
     {
       return self.float_literal_tail(loc, start, neg);
     }

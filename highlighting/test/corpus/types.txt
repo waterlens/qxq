@@ -75,3 +75,22 @@ Date{}.next(1).b
         (identifier))
       (number))
     (identifier)))
+
+==================
+Tuple Positions
+==================
+t.1.2;
+(1, 2).1
+---
+
+(source_file
+  (member_expression
+    object: (member_expression
+      object: (identifier)
+      member: (number))
+    member: (number))
+  (member_expression
+    object: (tuple_expression
+      (number)
+      (number))
+    member: (number)))

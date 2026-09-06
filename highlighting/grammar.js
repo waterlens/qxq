@@ -74,7 +74,7 @@ module.exports = grammar({
     member_expression: $ => prec.left(PREC.CALL, seq(
       field('object', $._expression),
       '.',
-      field('member', $.identifier)
+      field('member', choice($.identifier, $.number))
     )),
 
     parenthesized_expression: $ => seq(

@@ -1,0 +1,14 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+let t = (1, 2, 3);
+let p = (t.3, t.1);
+let nested = ((10, 20), 30);
+type Date = struct {year, month, day}
+  with fn get_year(self) self.1 end
+end;
+let d = Date{year = 2026, 1, day = 2};
+p.1 * 10 + p.2 + t.2 * 100 + nested.1.2 + d.3 + d.get_year()
+
+(* EXPECT:
+   2279
+*)
