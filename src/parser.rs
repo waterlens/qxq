@@ -1111,12 +1111,16 @@ impl<'a> Parser<'a> {
 
         let old_lhs: ExprRef<'_, InfoKey> = lhs;
 
-        lhs = arena.alloc(ExprCon::OpApply {
-          op: arena.alloc(ExprCon::Op(op_str.into(), self.new_empty_info())),
-          pair: None,
-          args: arena.alloc_slice_clone(&[old_lhs, rhs.inner]),
-          info: self.new_empty_info(),
-        });
+        lhs = if op_str == "@" {
+          self.compose(old_lhs, rhs.inner)
+        } else {
+          arena.alloc(ExprCon::OpApply {
+            op: arena.alloc(ExprCon::Op(op_str.into(), self.new_empty_info())),
+            pair: None,
+            args: arena.alloc_slice_clone(&[old_lhs, rhs.inner]),
+            info: self.new_empty_info(),
+          })
+        };
 
         lhs_op = None;
 
@@ -1127,6 +1131,45 @@ impl<'a> Parser<'a> {
     }
 
     Ok(PeekResult { inner: lhs })
+  }
+
+  /// `f @ g` is `(fn (@f, @g) fn (@x) @f(@g(@x)) end end)(f, g)`: both sides are
+  /// evaluated once, as arguments, since `let` is not an expression here.  No
+  /// identifier starts with `@`, so nothing is shadowed.
+  fn compose(&mut self, f: ExprRef<'a, InfoKey>, g: ExprRef<'a, InfoKey>) -> ExprRef<'a, InfoKey> {
+    let arena = self.arena;
+    let (fname, gname, xname) = (TokenStr::new("@f"), TokenStr::new("@g"), TokenStr::new("@x"));
+    let x = &*arena.alloc(ExprCon::Ident(xname, self.new_empty_info()));
+    let gx = &*arena.alloc(ExprCon::Apply {
+      func: arena.alloc(ExprCon::Ident(gname, self.new_empty_info())),
+      pair: Some(Paired::Parenthesis),
+      args: arena.alloc_slice_clone(&[x]),
+      info: self.new_empty_info(),
+    });
+    let fgx = &*arena.alloc(ExprCon::Apply {
+      func: arena.alloc(ExprCon::Ident(fname, self.new_empty_info())),
+      pair: Some(Paired::Parenthesis),
+      args: arena.alloc_slice_clone(&[gx]),
+      info: self.new_empty_info(),
+    });
+    let inner = &*arena.alloc(ExprCon::Fn {
+      name: None,
+      params: arena.alloc_slice_clone(&[xname]),
+      body: fgx,
+      info: self.new_info(vec![fname, gname]),
+    });
+    let outer = &*arena.alloc(ExprCon::Fn {
+      name: None,
+      params: arena.alloc_slice_clone(&[fname, gname]),
+      body: inner,
+      info: self.new_empty_info(),
+    });
+    arena.alloc(ExprCon::Apply {
+      func: outer,
+      pair: Some(Paired::Parenthesis),
+      args: arena.alloc_slice_clone(&[f, g]),
+      info: self.new_empty_info(),
+    })
   }
 
   fn parse_exprs<'t>(&'t mut self) -> PeekExpr<'a> {
@@ -1234,7 +1277,6 @@ mod tests {
     test_parse_exprs("`rawop`(1)", "(rawop 1)");
     test_parse_exprs("(`rawop`)(1)", "(rawop 1)");
     test_parse_exprs("(+)(1)", "(+ 1)");
-    test_parse_exprs("f @ g @ h", "(@ f (@ g h))");
     test_parse_exprs("f()", "(f)");
     test_parse_exprs("f[]", "(f)");
     test_parse_exprs("f{}", "(construct f)");
@@ -1367,5 +1409,12 @@ mod tests {
       "fn (x) let y = 1; x + y + z end",
       "(fn (x) (block (let y 1) (+ (+ x y) z)) (freevars z))",
     );
+  }
+
+  #[test]
+  fn test_compose() {
+    let compose = "(fn (@f @g) (fn (@x) (@f (@g @x))))";
+    test_parse_exprs("f @ g", &format!("({compose} f g)"));
+    test_parse_exprs("f @ g @ h", &format!("({compose} f ({compose} g h))"));
   }
 }

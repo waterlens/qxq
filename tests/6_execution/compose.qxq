@@ -1,0 +1,12 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+let inc = fn (x) x + 1 end;
+let dbl = fn (x) x * 2 end;
+let f = inc @ dbl;
+let g = inc @ dbl @ inc;
+let h = fn (k) (fn (x) x + k end) @ dbl end;
+f(3) * 1000 + g(3) * 10 + h(5)(1)
+
+(* EXPECT:
+   7097
+*)

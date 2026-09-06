@@ -1,0 +1,52 @@
+(* RUN: {qxq|cargo run --} --inspect %s *)
+let inc = fn (x) x + 1 end;
+let dbl = fn (x) x * 2 end;
+(inc @ dbl)(3)
+
+(* EXPECT:
+   --- Syntax Tree ---
+   (block (let inc (fn (x) (+ x 1))) (let dbl (fn (x) (* x 2))) (((fn (@f @g) (fn (@x) (@f (@g @x)))) inc dbl) 3))
+   --- Thunk ---
+   thunk::fn params::1 regs::2 captured::[]
+   constants::[
+     @0: 1
+   ]
+   add.dc       r1, r0, @0
+   ret          r1
+
+   --- Thunk ---
+   thunk::fn params::1 regs::2 captured::[]
+   constants::[
+     @0: 2
+   ]
+   mul.dc       r1, r0, @0
+   ret          r1
+
+   --- Thunk ---
+   thunk::fn params::1 regs::7 captured::[r0 as ^1, r1 as ^2]
+   loadfree     r1, ^1
+   loadfree     r4, ^2
+   move         r6, r0
+   apply        r4, #1
+   move         r3, r4
+   apply        r1, #1
+   ret          r1
+
+   --- Thunk ---
+   thunk::fn params::2 regs::3 captured::[]
+   clos         r2, fn2
+   ret          r2
+
+   --- Thunk ---
+   thunk::__top_thunk__ params::0 regs::7 captured::[]
+   clos         r0, fn0
+   clos         r1, fn1
+   clos         r3, fn3
+   move         r5, r0
+   move         r6, r1
+   apply        r3, #2
+   move         r2, r3
+   loadi        r4, #3
+   apply        r2, #1
+   ret          r2
+*)
