@@ -14,6 +14,7 @@
 - Run unit tests: `just unit-test`
 - Run all tests (unit tests and `tests/**/*.qxq`): `just test` or `cargo test`
 - Run the full suite in debug and release mode: `just test-all`
+- Benchmark the release binary: `just bench`
 - Update `EXPECT:` blocks: `just update-expect`
 - Run one expect test file: `just expect tests/path/to/file.qxq`
 - Compile vm submodule and update `vm.s`: `make -C vm rel`
@@ -37,6 +38,7 @@
 - A file containing `(* SKIP: reason *)` is reported as ignored, with the reason in the test name; `qxq` itself refuses such a file with `skipped: reason` and exit code 2.
 - `just update-expect` rewrites the single `EXPECT:` block of every `tests/**/*.qxq` file from current command output, skipping multi-block and SKIP files; `--update-expect` takes a directory or a single file.
 - Expect files support `%s` for the current file path and `{preferred|fallback}` command selection.
+- `just bench` builds release and runs `hyperfine` on `bench/*.qxq`; `just bench path/to/other/qxq` compares another binary.
 
 ## Git Workflow
 

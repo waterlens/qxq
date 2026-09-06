@@ -1,0 +1,5 @@
+type Fib = struct {k}
+  with fn fib(self, n) if n < 2 then n else self.fib(n - 1) + self.fib(n - 2) end end
+end;
+let f = Fib{0};
+f.fib(32)
