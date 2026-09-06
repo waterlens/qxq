@@ -80,7 +80,7 @@ fn show_message() {
           \|__||__|/ \|__|           \|__|
 "#
   );
-  println!("QxQ REPL Version 0.1.0");
+  println!("QxQ REPL Version {}", env!("CARGO_PKG_VERSION"));
   println!("Copyright (c) 2024-{} waterlens", chrono::Local::now().format("%Y"));
   println!();
 }
