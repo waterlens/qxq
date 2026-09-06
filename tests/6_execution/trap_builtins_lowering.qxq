@@ -8,9 +8,23 @@ let obj = print_object("hi");
 print_heap_stat()
 
 (* EXPECT:
-   trap         #4
-   trap         #5
-   trap         #6
-   trap         #7
-   trap         #8
+   --- Thunk ---
+   thunk::__top_thunk__ params::0 regs::6 captured::[]
+   constants::[
+     @0: "hi"
+   ]
+   loadi        r0, #42
+   trap         #4, r0, r1
+   loadr        r1, unit
+   trap         #5, r0, r1
+   loadr        r2, unit
+   loadi        r4, #42
+   trap         #6, r0, r4
+   loadr        r3, unit
+   loadc        r5, @0
+   trap         #7, r5, r0
+   loadr        r4, unit
+   trap         #8, r0, r0
+   loadr        r5, unit
+   ret          r5
 *)

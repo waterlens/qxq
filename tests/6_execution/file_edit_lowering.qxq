@@ -6,11 +6,17 @@ let wrote = edit(offset, 65);
 close(path)
 
 (* EXPECT:
+   --- Thunk ---
    thunk::__top_thunk__ params::0 regs::4 captured::[]
+   constants::[
+     @0: "p"
+   ]
    loadc        r0, @0
    trap         #9, r0, r1
    loadi        r3, #65
    trap         #11, r1, r3
+   loadr        r2, unit
    trap         #10, r0, r0
+   loadr        r3, unit
    ret          r3
 *)

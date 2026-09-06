@@ -3,6 +3,7 @@
 (32767, 32768, 65535, 65536)
 
 (* EXPECT:
+   --- Thunk ---
    thunk::__top_thunk__ params::0 regs::4 captured::[]
    constants::[
      @0: 65536

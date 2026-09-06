@@ -4,6 +4,7 @@ let f = 1;
 (1, f)
 
 (* EXPECT:
+   --- Thunk ---
    thunk::__top_thunk__ params::0 regs::3 captured::[]
    loadi        r0, #1
    loadi        r1, #1

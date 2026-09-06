@@ -5,6 +5,7 @@ let map = {};
 map
 
 (* EXPECT:
+   --- Thunk ---
    thunk::__top_thunk__ params::0 regs::2 captured::[]
    wrap         r0, tag::array, #0
    wrap         r1, tag::map, #0
