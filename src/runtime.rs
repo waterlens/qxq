@@ -62,6 +62,14 @@ impl Drop for OwnedHeap {
 
 /// Executes `image`, consuming both its bytecode and its associated heap.
 pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
+  run(image, diag, None)
+}
+
+fn run(
+  image: BytecodeImage,
+  diag: Rc<Diagnostic>,
+  stats: Option<&mut vm::gc_stats>,
+) -> Result<String> {
   let validator = ImageValidator::new(Rc::clone(&diag));
   validator.validate(image.thunks(), image.types())?;
 
@@ -83,7 +91,7 @@ pub fn execute(image: BytecodeImage, diag: Rc<Diagnostic>) -> Result<String> {
       native_types.len(),
       stack_slots,
       &mut result,
-      std::ptr::null_mut(),
+      stats.map_or(std::ptr::null_mut(), |s| s),
     )
   };
 
@@ -334,33 +342,9 @@ mod tests {
     diag: Rc<Diagnostic>,
   ) -> Result<(String, vm::gc_stats)> {
     let _guard = VM_LOCK.lock().unwrap();
-    let validator = ImageValidator::new(Rc::clone(&diag));
-    validator.validate(image.thunks(), image.types())?;
-    let max_nregs = image.thunks().iter().map(|t| t.nregs as usize).max().unwrap_or(0);
-    let (mut thunks, types, heap) = image.into_parts();
-    append_entry_thunk(&mut thunks, &diag)?;
-    let mut native_thunks = NativeThunkSet::new(&thunks, &diag)?;
-    let mut native_types = OwnedType::from_descs(&types, &diag)?;
-    let mut result = 0;
-    let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
     let mut stats: vm::gc_stats = unsafe { std::mem::zeroed() };
-    let status = unsafe {
-      vm::vm_exec_with(
-        heap.as_ptr(),
-        native_thunks.entry_ptr(),
-        native_thunks.thunk_ptrs_mut(),
-        native_types.as_mut_ptr().cast(),
-        thunks.len(),
-        native_types.len(),
-        stack_slots,
-        &mut result,
-        &mut stats,
-      )
-    };
-    if status != vm::status_t_S_OK {
-      return diag.fail(format!("vm execution failed with status {}", status_name(status)));
-    }
-    Ok((format_result(result, &diag)?, stats))
+    let out = run(image, diag, Some(&mut stats))?;
+    Ok((out, stats))
   }
 
   fn obj_size(nfields: usize) -> usize {
