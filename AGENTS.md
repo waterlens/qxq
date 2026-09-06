@@ -4,6 +4,7 @@
 
 - Rust compiler: `./`
 - C VM (submodule): `./vm/`
+- VM configuration macros, one file per architecture: `./vm/flags/<arch>` (read by `vm/Makefile`, `build.rs` and `vm/scripts/asm.py`)
 
 ## Primary Commands
 

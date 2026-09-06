@@ -8,13 +8,23 @@ fn main() {
 
   let mut build = cc::Build::new();
 
-  build.flag("-std=c2x").flag("-Wall").flag("-Wextra").define("JUMP_MODE", "0");
+  build.flag("-std=c2x").flag("-Wall").flag("-Wextra");
 
   if release {
-    build.flag("-O3").define("DECODE_MODE", "1").define("NDEBUG", None::<&str>);
+    build.flag("-O3").define("NDEBUG", None::<&str>);
   } else {
-    build.flag("-O0").define("DECODE_MODE", "1");
+    build.flag("-O0");
   }
+
+  // VM configuration macros, one file per architecture, shared with vm/Makefile
+  // and vm/scripts/asm.py.
+  let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+  let flags = PathBuf::from("vm/flags").join(&arch);
+  let text = fs::read_to_string(&flags).unwrap_or_else(|_| panic!("missing {}", flags.display()));
+  for flag in text.split_whitespace() {
+    build.flag(flag);
+  }
+  println!("cargo:rerun-if-changed={}", flags.display());
 
   println!("cargo:rerun-if-changed=build.rs");
 
