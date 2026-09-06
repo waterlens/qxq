@@ -77,6 +77,10 @@ impl<R: Read> Loader<R> {
       *cursor += n;
       value
     };
+    let len = read(&mut cursor) as usize;
+    let name = std::str::from_utf8(&data[cursor..cursor + len]);
+    let name = self.diag.context(name, "invalid UTF-8 type name")?.to_string();
+    cursor += len;
     let nfields = read(&mut cursor) as u16;
     let nslots = read(&mut cursor) as u16;
     let nmembers = read(&mut cursor);
@@ -89,7 +93,7 @@ impl<R: Read> Loader<R> {
       cursor += len;
       members.push((name.to_string(), slot));
     }
-    Ok((TypeDesc { nfields, nslots, members: members.into_boxed_slice() }, cursor))
+    Ok((TypeDesc { name, nfields, nslots, members: members.into_boxed_slice() }, cursor))
   }
 
   fn load_thunk(&self, data: &[u8], heap: &mut OwnedHeap) -> Result<Thunk> {

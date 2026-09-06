@@ -70,12 +70,13 @@ declared in the image. `LoadType` addresses it by index.
 | --------------- | --------------- | --------------- | --------------- | --------------- |
 | \#Type | | | ntypes | # of type descriptions encoded by ULEB128 |
 
-Each type description lists its member names and the slots they resolve to.
-The declared fields occupy slots `0..nfields` and the methods occupy
-`nfields..nslots`, both in declaration order.
+Each type description lists its declared name, then its member names and the
+slots they resolve to. The declared fields occupy slots `0..nfields` and the
+methods occupy `nfields..nslots`, both in declaration order.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |
+| Name | | | name | length encoded by ULEB128, then the UTF-8 name |
 | \#Field | | | nfields | # of declared fields encoded by ULEB128 |
 | \#Slot | | | nslots | # of member slots encoded by ULEB128 |
 | \#Member | | | nmembers | # of member entries encoded by ULEB128 |

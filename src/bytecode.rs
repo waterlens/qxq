@@ -788,13 +788,14 @@ pub struct Thunk {
 /// array: the declared fields first, then the methods in declaration order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDesc {
+  pub name: String,
   pub nfields: u16,
   pub nslots: u16,
   pub members: Box<[(String, u16)]>,
 }
 
 impl TypeDesc {
-  pub fn new(fields: &[&str], methods: &[&str]) -> Result<Self, String> {
+  pub fn new(name: &str, fields: &[&str], methods: &[&str]) -> Result<Self, String> {
     let mut members: IndexMap<String, u16> = IndexMap::new();
     for (slot, name) in fields.iter().chain(methods).enumerate() {
       if members.insert(name.to_string(), slot as u16).is_some() {
@@ -802,6 +803,7 @@ impl TypeDesc {
       }
     }
     Ok(Self {
+      name: name.to_string(),
       nfields: fields.len() as u16,
       nslots: (fields.len() + methods.len()) as u16,
       members: members.into_iter().collect(),
@@ -813,7 +815,7 @@ impl TypeDesc {
   }
 
   /// The declared name of a slot.
-  pub fn name(&self, slot: u16) -> &str {
+  pub fn slot_name(&self, slot: u16) -> &str {
     self.members.iter().find(|m| m.1 == slot).map_or("?", |m| m.0.as_str())
   }
 }

@@ -1541,7 +1541,8 @@ impl<'a> CodeGenCtx<'a> {
     }
     let field_names: Vec<&str> = fields.iter().map(|f| f.0).collect();
     let method_names: Vec<&str> = decls.iter().map(|d| d.0.0).collect();
-    let desc = TypeDesc::new(&field_names, &method_names).map_err(|e| self.diagnostic.error(e))?;
+    let desc =
+      TypeDesc::new(name.0, &field_names, &method_names).map_err(|e| self.diagnostic.error(e))?;
     let id =
       bc.add_type(desc).ok_or_else(|| self.diagnostic.error("too many type declarations"))?;
 
@@ -1587,13 +1588,13 @@ impl<'a> CodeGenCtx<'a> {
         },
       };
       if std::mem::replace(&mut assigned[slot], true) {
-        let field = desc.name(slot as u16);
+        let field = desc.slot_name(slot as u16);
         return self.diagnostic.fail(format!("field `{field}` of `{tname}` is initialized twice"));
       }
       order.push((slot, init.expr));
     }
     if let Some(slot) = assigned.iter().position(|a| !a) {
-      let field = desc.name(slot as u16);
+      let field = desc.slot_name(slot as u16);
       return self.diagnostic.fail(format!("missing field `{field}` of `{tname}`"));
     }
     Ok(order)

@@ -107,6 +107,8 @@ impl Dumper {
   }
 
   fn dump_type(ty: &TypeDesc, data: &mut Vec<u8>) {
+    uleb8::encode_uleb128(ty.name.len() as u64, data);
+    data.extend_from_slice(ty.name.as_bytes());
     uleb8::encode_uleb128(ty.nfields.into(), data);
     uleb8::encode_uleb128(ty.nslots.into(), data);
     uleb8::encode_uleb128(ty.members.len() as u64, data);

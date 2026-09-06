@@ -279,7 +279,14 @@ impl OwnedType {
       })
       .collect();
     let ptr = unsafe {
-      vm::vm_type_alloc(desc.nfields.into(), desc.nslots.into(), members.as_ptr(), members.len())
+      vm::vm_type_alloc(
+        desc.name.as_ptr().cast(),
+        desc.name.len() as u32,
+        desc.nfields.into(),
+        desc.nslots.into(),
+        members.as_ptr(),
+        members.len(),
+      )
     };
     let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm type"))?;
     Ok(Self { ptr })
@@ -478,7 +485,7 @@ mod tests {
     assert!(validator.validate(&[thunk(vec![loadtype], vec![])], &[]).is_err());
     assert!(
       validator
-        .validate(&[thunk(vec![loadtype], vec![])], &[TypeDesc::new(&[], &[]).unwrap()])
+        .validate(&[thunk(vec![loadtype], vec![])], &[TypeDesc::new("T", &[], &[]).unwrap()])
         .is_ok()
     );
   }
