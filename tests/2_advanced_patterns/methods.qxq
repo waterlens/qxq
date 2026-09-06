@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run -- --inspect} %s *)
+(* RUN: {qxq|cargo run --} --inspect %s *)
 
 type Date = struct {year, month, day}
   with fn get_year(self) self.a end

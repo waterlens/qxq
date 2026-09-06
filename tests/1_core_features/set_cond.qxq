@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run -- --inspect} %s *)
+(* RUN: {qxq|cargo run --} --inspect %s *)
 1 < 2;
 1 > 2;
 1 <= 2;

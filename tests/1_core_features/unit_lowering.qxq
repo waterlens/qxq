@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run -- --inspect --no-tree} %s *)
+(* RUN: {qxq|cargo run --} --inspect --no-tree %s *)
 
 ()
 

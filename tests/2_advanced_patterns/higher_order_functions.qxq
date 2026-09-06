@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run -- --inspect} %s *)
+(* RUN: {qxq|cargo run --} --inspect %s *)
 let compose = fn (f, g) fn (x) f(g(x)) end end;
 let inc = fn(x) x + 1 end;
 let inc2 = compose(inc, inc);

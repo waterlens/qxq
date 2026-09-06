@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run -- --inspect} %s *)
+(* RUN: {qxq|cargo run --} --inspect %s *)
 if 1 > 0 then
   "greater"
 else

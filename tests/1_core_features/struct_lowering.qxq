@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run -- --inspect} %s *)
+(* RUN: {qxq|cargo run --} --inspect %s *)
 type Counter = struct {n}
   with fn add(self, k) self.n + k end
   with fn twice(self, k) add(k) + self.add(k) end

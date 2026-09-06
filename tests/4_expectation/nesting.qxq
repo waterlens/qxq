@@ -1,4 +1,4 @@
-(* RUN: {qxq|cargo run -- --inspect} %s *)
+(* RUN: {qxq|cargo run --} --inspect %s *)
 (* This is a (* nested *) comment that should be ignored *)
 100
 (* EXPECT:

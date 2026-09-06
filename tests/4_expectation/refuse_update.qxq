@@ -1,4 +1,4 @@
-(* RUN-EXPECT-ERROR: {qxq|cargo run -- --inspect} %s
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} --inspect %s
    expectation #2 line '999999' not found
 *)
 1 + 1
