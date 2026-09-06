@@ -4,7 +4,8 @@
 
 - Rust compiler: `./`
 - C VM (submodule): `./vm/`
-- VM configuration macros, one file per architecture: `./vm/flags/<arch>` (read by `vm/Makefile`, `build.rs` and `vm/scripts/asm.py`)
+- VM configuration macros, one file per architecture: `./vm/flags/<arch>` (read by `build.rs` and `vm/scripts/asm.py`)
+- `build.rs` compiles the VM with whatever `cc` is; it needs `musttail` support (clang, or gcc 15 and later), and `CC=` overrides the choice
 
 ## Primary Commands
 
@@ -18,9 +19,8 @@
 - Benchmark the release binary: `just bench`
 - Update `EXPECT:` blocks: `just update-expect`
 - Run one expect test file: `just expect tests/path/to/file.qxq`
-- Build the vm library: `make -C vm rel`
-- Regenerate the review-only vm assembly dumps (`vm/asm/vm.<target>.s`, needs zig 0.15.1 on PATH): `make -C vm asm`
-- Check the dumps are current: `make -C vm asm-check`
+- Regenerate the review-only vm assembly dumps (`vm/asm/vm.<target>.s`, needs zig 0.15.1 on PATH): `just asm`
+- Check the dumps are current: `just asm-check`
 - One-time per clone, so dump diffs show the handler in hunk headers: `git -C vm config diff.asm.xfuncname '^_?[A-Za-z0-9_]+:'`
 
 ## Direct Cargo Usage
@@ -54,7 +54,7 @@
 1. Edit Rust compiler code.
 2. Run `just test-all` for all kinds of tests.
 3. Run `just update-expect` after intentional output changes.
-4. Run `make -C vm asm` after changing `vm/src/vm.c` and commit the updated `vm/asm/*.s` with the vm change (`make -C vm asm-check` must pass).
+4. Run `just asm` after changing `vm/src/vm.c` and commit the updated `vm/asm/*.s` with the vm change (`just asm-check` must pass).
 
 ## Code Style
 

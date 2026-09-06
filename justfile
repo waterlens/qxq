@@ -40,6 +40,14 @@ test-all:
 bench extra="": release
     @hyperfine -N -w 2 -r 10 -L bin target/release/qxq{{ if extra != "" { "," + extra } else { "" } }} -L file fib,tak,method,float '{bin} bench/{file}.qxq'
 
+# Regenerate the review-only vm assembly dumps (needs zig 0.15.1 on PATH)
+asm:
+    @python3 vm/scripts/asm.py
+
+# Check the tracked dumps against a fresh generation
+asm-check:
+    @python3 vm/scripts/asm.py --check
+
 # Install tree-sitter highlighter
 highlight-install:
     @just -f highlighting/justfile install
