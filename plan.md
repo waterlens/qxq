@@ -350,7 +350,7 @@ Update the following together:
 - Runtime type-value and struct-instance allocation, layout, member lookup, and
   GC scanning.
 - Rust-to-C conversion of bytecode and the shared type-description region.
-- The generated `vm.s` artifact.
+- The generated `vm/asm/*.s` dumps.
 
 The compiler maintains the invariant that each member operand selects a string
 constant and each `Invoke` call area begins at `rDst + FRAME_HEADER_SIZE`.
@@ -385,5 +385,5 @@ Targeted commands:
 cargo test
 just expect tests/2_advanced_patterns/methods.qxq
 cargo run -- tests/6_execution/methods.qxq
-make -C vm rel
+make -C vm asm
 ```

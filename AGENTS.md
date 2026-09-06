@@ -17,7 +17,10 @@
 - Benchmark the release binary: `just bench`
 - Update `EXPECT:` blocks: `just update-expect`
 - Run one expect test file: `just expect tests/path/to/file.qxq`
-- Compile vm submodule and update `vm.s`: `make -C vm rel`
+- Build the vm binary: `make -C vm rel`
+- Regenerate the review-only vm assembly dumps (`vm/asm/vm.<target>.s`, needs zig 0.15.1 on PATH): `make -C vm asm`
+- Check the dumps are current: `make -C vm asm-check`
+- One-time per clone, so dump diffs show the handler in hunk headers: `git -C vm config diff.asm.xfuncname '^_?[A-Za-z0-9_]+:'`
 
 ## Direct Cargo Usage
 
@@ -50,7 +53,7 @@
 1. Edit Rust compiler code.
 2. Run `just test-all` for all kinds of tests.
 3. Run `just update-expect` after intentional output changes.
-4. Run `make -C vm rel` to update the change in vm to `vm.s` if needed.
+4. Run `make -C vm asm` after changing `vm/src/vm.c` and commit the updated `vm/asm/*.s` with the vm change (`make -C vm asm-check` must pass).
 
 ## Code Style
 
