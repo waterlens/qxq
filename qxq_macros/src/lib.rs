@@ -270,6 +270,12 @@ fn generate_c_header(entries: &[BytecodeEntry]) {
   path.push("src");
   path.push("bclist.def");
 
+  // build.rs reruns when this file changes, so only rewrite it when the content differs;
+  // otherwise every compile would trigger the next rebuild.
+  if std::fs::read(&path).is_ok_and(|old| old == content.as_bytes()) {
+    return;
+  }
+
   match File::create(&path) {
     Ok(mut file) => {
       file.write_all(content.as_bytes()).unwrap();
