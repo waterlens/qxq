@@ -430,17 +430,18 @@ mod tests {
   }
 
   #[test]
-  fn execution_shared_result_prints_without_labels() {
+  fn execution_shared_result_prints_twice() {
     let result = compile_and_run("let p = (1, 2); (p, p)").unwrap();
     assert_eq!(result, "((1, 2), (1, 2))");
   }
 
   #[test]
-  fn execution_cyclic_result_uses_datum_labels() {
+  fn execution_cyclic_result_marks_the_cycle() {
     let node = "type N = struct {next} end; let n = N{()}; n.next <- n;";
-    assert_eq!(compile_and_run(&format!("{node} n")).unwrap(), "#0=N{next = #0#}");
-    // once cyclic, every object reached twice is labelled, as Chez does
-    assert_eq!(compile_and_run(&format!("{node} (n, n)")).unwrap(), "(#0=N{next = #0#}, #0#)");
+    assert_eq!(compile_and_run(&format!("{node} n")).unwrap(), "N{next = <cycle>}");
+    // only a reference back to an enclosing value is a cycle
+    let pair = compile_and_run(&format!("{node} (n, n)")).unwrap();
+    assert_eq!(pair, "(N{next = <cycle>}, N{next = <cycle>})");
   }
 
   #[test]
