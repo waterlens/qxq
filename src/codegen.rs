@@ -1460,6 +1460,9 @@ impl<'a> CodeGenCtx<'a> {
       Index { receiver, index, info: _ } => {
         self.emit_index(bc, receiver, *index, data, control, next)?;
       }
+      Assign { target, value, info: _ } => {
+        self.emit_assign(bc, target, value, data, control, next)?;
+      }
     }
     Ok(())
   }
@@ -1686,6 +1689,27 @@ impl<'a> CodeGenCtx<'a> {
   ) -> Result<()> {
     let m = self.position_constant(bc, index)?;
     self.emit_load_field(bc, receiver, m, data, control, next)
+  }
+
+  // The receiver is evaluated before the value; the assignment itself is unit.
+  fn emit_assign(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    target: ExprRef<'a, InfoKey>,
+    value: ExprRef<'a, InfoKey>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let (receiver, m) = match target {
+      Expr::Member { receiver, member, info: _ } => (*receiver, self.member_constant(bc, member)?),
+      Expr::Index { receiver, index, info: _ } => (*receiver, self.position_constant(bc, *index)?),
+      _ => self.diagnostic.ice("assignment target is not a field"),
+    };
+    let (regs, n_temps) = self.eval_any_loc_args(bc, &[receiver, value])?;
+    bc.push(Bytecode::setfield(regs[1].into(), regs[0].into(), m));
+    self.clean_any_loc_args(n_temps);
+    self.emit_store(bc, Value::Unit, data, control, next)
   }
 
   fn emit_load_field(

@@ -55,6 +55,7 @@ impl Affinity {
     "{" => (Self::POSTFIX_START + 1, Self::NONE),
   };
   const INFIX: phf::Map<&'static str, (u32, u32)> = phf::phf_map! {
+    "<-" => (Self::INFIX_START, Self::INFIX_START + 1),
     ":" => (Self::INFIX_START + 20, Self::INFIX_START + 19),
     "<" => (Self::INFIX_START + 1, Self::INFIX_START + 2),
     ">" => (Self::INFIX_START + 1, Self::INFIX_START + 2),
@@ -149,6 +150,13 @@ pub enum Expr<'a, I> {
   Index {
     receiver: ExprRef<'a, I>,
     index: u32,
+    info: I,
+  },
+  /// `target <- value` writes a struct field, so the target is a `Member` or
+  /// an `Index`; the expression itself is unit.
+  Assign {
+    target: ExprRef<'a, I>,
+    value: ExprRef<'a, I>,
     info: I,
   },
 }
@@ -248,6 +256,9 @@ impl<I> ToSexp for Expr<'_, I> {
       Index { receiver, index, info: _ } => {
         pool.list(&[pool.atom("index"), receiver.to_sexp(pool), pool.atom(index.to_string())])
       }
+      Assign { target, value, info: _ } => {
+        pool.list(&[pool.atom("<-"), target.to_sexp(pool), value.to_sexp(pool)])
+      }
     }
   }
 }
@@ -284,7 +295,8 @@ impl<I> Expr<'_, I> {
       | Construct { info: i, .. }
       | Member { info: i, .. }
       | MemberApply { info: i, .. }
-      | Index { info: i, .. } => i,
+      | Index { info: i, .. }
+      | Assign { info: i, .. } => i,
     }
   }
 }
@@ -413,6 +425,12 @@ impl<'a> ToSexp for InfoExpr<'a> {
         parts.push(pool.atom("index"));
         parts.push(InfoExpr { expr: receiver, map: self.map }.to_sexp(pool));
         parts.push(pool.atom(index.to_string()));
+        false
+      }
+      Assign { target, value, info: _ } => {
+        parts.push(pool.atom("<-"));
+        parts.push(InfoExpr { expr: target, map: self.map }.to_sexp(pool));
+        parts.push(InfoExpr { expr: value, map: self.map }.to_sexp(pool));
         false
       }
     };
@@ -1113,6 +1131,8 @@ impl<'a> Parser<'a> {
 
         lhs = if op_str == "@" {
           self.compose(old_lhs, rhs.inner)
+        } else if op_str == "<-" {
+          self.assign(old_lhs, rhs.inner)?
         } else {
           arena.alloc(ExprCon::OpApply {
             op: arena.alloc(ExprCon::Op(op_str.into(), self.new_empty_info())),
@@ -1131,6 +1151,19 @@ impl<'a> Parser<'a> {
     }
 
     Ok(PeekResult { inner: lhs })
+  }
+
+  /// `<-` binds loosest and does not chain: a second `<-` finds an
+  /// assignment on its left, which is not a field.
+  fn assign(
+    &mut self,
+    target: ExprRef<'a, InfoKey>,
+    value: ExprRef<'a, InfoKey>,
+  ) -> Result<ExprRef<'a, InfoKey>> {
+    if !matches!(target, Expr::Member { .. } | Expr::Index { .. }) {
+      return self.diag.fail("assignment target is not a field");
+    }
+    Ok(self.arena.alloc(ExprCon::Assign { target, value, info: self.new_empty_info() }))
   }
 
   /// `f @ g` is `(fn (@f, @g) fn (@x) @f(@g(@x)) end end)(f, g)`: both sides are
@@ -1409,6 +1442,17 @@ mod tests {
       "fn (x) let y = 1; x + y + z end",
       "(fn (x) (block (let y 1) (+ (+ x y) z)) (freevars z))",
     );
+  }
+
+  #[test]
+  fn test_assign() {
+    test_parse_exprs("p.x <- 1 + 2", "(<- (member p x) (+ 1 2))");
+    test_parse_exprs("p.1 <- q.y", "(<- (index p 1) (member q y))");
+    test_parse_exprs("f(p).x <- p.y == 2", "(<- (member (f p) x) (== (member p y) 2))");
+    parse_fails("x <- 1");
+    parse_fails("f(x) <- 1");
+    parse_fails("p.x <- q.y <- 1");
+    parse_fails("1 + p.x <- 2");
   }
 
   #[test]

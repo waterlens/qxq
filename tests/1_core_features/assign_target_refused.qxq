@@ -1,0 +1,5 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} --inspect %s
+   assignment target is not a field
+*)
+let x = 1;
+x <- 2

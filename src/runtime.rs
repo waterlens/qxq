@@ -435,44 +435,12 @@ mod tests {
     assert_eq!(result, "((1, 2), (1, 2))");
   }
 
-  fn run_bytecode(code: Vec<Bytecode>, constants: Vec<Val>, nregs: u8) -> Result<String> {
-    let _guard = VM_LOCK.lock().unwrap();
-    let diag = Rc::new(Diagnostic::new());
-    let heap = OwnedHeap::new(&diag)?;
-    let thunk = Thunk {
-      name: String::new(),
-      code: code.into(),
-      fvlocs: Box::new([]),
-      nparams: 0,
-      nregs,
-      constants: constants.into(),
-    };
-    execute(BytecodeImage::new(vec![thunk], vec![], heap), diag)
-  }
-
-  /// No source builds a cycle yet, so `t.1 = t` is written by hand.
   #[test]
   fn execution_cyclic_result_uses_datum_labels() {
-    let tuple = vec![
-      Bytecode::loadi(0.into(), 1.into()),
-      Bytecode::loadi(1.into(), 2.into()),
-      Bytecode::wobj(0.into(), Tag::TUPLE.into(), 2.into()),
-      Bytecode::setfield(0.into(), 0.into(), 0.into()),
-    ];
-    let position = vec![Val::from_i32(0)];
-    let mut code = tuple.clone();
-    code.push(Bytecode::ret(0.into()));
-    assert_eq!(run_bytecode(code, position.clone(), 3).unwrap(), "#0=(#0#, 2)");
-
+    let node = "type N = struct {next} end; let n = N{()}; n.next <- n;";
+    assert_eq!(compile_and_run(&format!("{node} n")).unwrap(), "#0=N{next = #0#}");
     // once cyclic, every object reached twice is labelled, as Chez does
-    let mut code = tuple;
-    code.extend([
-      Bytecode::mov(1.into(), 0.into()),
-      Bytecode::mov(2.into(), 0.into()),
-      Bytecode::wobj(1.into(), Tag::TUPLE.into(), 2.into()),
-      Bytecode::ret(1.into()),
-    ]);
-    assert_eq!(run_bytecode(code, position, 3).unwrap(), "(#0=(#0#, 2), #0#)");
+    assert_eq!(compile_and_run(&format!("{node} (n, n)")).unwrap(), "(#0=N{next = #0#}, #0#)");
   }
 
   #[test]

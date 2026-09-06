@@ -1,0 +1,6 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: not a field
+*)
+type P = struct {x} with fn get(self) self.x end end;
+let p = P{1};
+p.get <- 2

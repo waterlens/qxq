@@ -1,0 +1,26 @@
+(* RUN: {qxq|cargo run --} --inspect --no-tree %s *)
+
+type P = struct {x} end;
+let p = P{1};
+p.x <- 2;
+p.1 <- 3
+
+(* EXPECT:
+   --- Thunk ---
+   thunk::__top_thunk__ params::0 regs::3 captured::[]
+   constants::[
+     @0: "x"
+     @1: 0
+   ]
+   loadtype     r0, @0
+   wrap         r0, tag::type, #1
+   move         r1, r0
+   loadi        r2, #1
+   wrap         r1, tag::struct, #2
+   loadi        r2, #2
+   set.field    r2, r1, @0
+   loadi        r2, #3
+   set.field    r2, r1, @1
+   loadr        r2, unit
+   ret          r2
+*)

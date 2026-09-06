@@ -1,0 +1,5 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: not a field
+*)
+let t = (1, 2);
+t.1 <- 3

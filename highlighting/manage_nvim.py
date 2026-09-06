@@ -86,6 +86,7 @@ HIGHLIGHT_SCM_CONTENT = """
 ; Operators
 (operator) @operator
 "=" @operator
+"<-" @operator
 ";" @punctuation.delimiter
 "," @punctuation.delimiter
 

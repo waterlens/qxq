@@ -1,0 +1,35 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+type P = struct {x, y}
+  with fn sum(self) self.x + self.y end
+end;
+let p = P{1, 2};
+let r = 0;
+
+(* by name and by position; the assignment itself is unit *)
+p.x <- 10;
+let r = r + if p.sum() == 12 then 0 else 1 end;
+p.2 <- 20;
+let r = r + if p.sum() == 30 then 0 else 2 end;
+let r = r + if (p.x <- 5) == () then 0 else 4 end;
+
+(* a write is seen through every reference, a closure included *)
+let q = p;
+let read = fn () p.x end;
+q.x <- 7;
+let r = r + if read() == 7 then 0 else 8 end;
+
+(* the receiver is evaluated before the value *)
+let order = P{0, 0};
+let pick = fn (n) order.x <- n; order end;
+pick(1).y <- order.x + 1;
+let r = r + if order.y == 2 then 0 else 16 end;
+
+(* methods read the fields through the same slots *)
+let r = r + if p.sum() == 27 then 0 else 32 end;
+
+r
+
+(* EXPECT:
+   0
+*)

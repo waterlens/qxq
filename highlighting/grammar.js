@@ -21,6 +21,7 @@ module.exports = grammar({
     ),
 
     _expression: $ => choice(
+      $.assignment_expression,
       $.binary_expression,
       $.unary_expression,
       $.call_expression,
@@ -47,6 +48,12 @@ module.exports = grammar({
       prec.left(2, seq(field('left', $._expression), alias(choice('==', '!=', '<', '>', '<=', '>='), $.operator), field('right', $._expression))),
       prec.left(1, seq(field('left', $._expression), $.operator, field('right', $._expression))),
     ),
+
+    assignment_expression: $ => prec.right(0, seq(
+      field('target', $.member_expression),
+      '<-',
+      field('value', $._expression),
+    )),
 
     unary_expression: $ => prec(PREC.UNARY, seq($.operator, $._expression)),
 

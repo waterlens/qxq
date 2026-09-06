@@ -225,3 +225,25 @@ f >>= g
     left: (identifier)
     (operator)
     right: (identifier)))
+
+==================
+Field Assignment
+==================
+p.x <- 1;
+p.1 <- a + b
+---
+
+(source_file
+  (assignment_expression
+    target: (member_expression
+      object: (identifier)
+      member: (identifier))
+    value: (number))
+  (assignment_expression
+    target: (member_expression
+      object: (identifier)
+      member: (number))
+    value: (binary_expression
+      left: (identifier)
+      (operator)
+      right: (identifier))))
