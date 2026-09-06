@@ -106,8 +106,10 @@ pub fn update_expectations(file_path: &str, skip_multi: bool) -> Result<UpdateSt
     new_chars.extend_from_slice(&chars[..exp.start]);
     new_chars.push('\n');
     for line in new_output.trim_end().lines() {
-      new_chars.extend("   ".chars());
-      new_chars.extend(line.chars());
+      if !line.trim().is_empty() {
+        new_chars.extend("   ".chars());
+        new_chars.extend(line.chars());
+      }
       new_chars.push('\n');
     }
     new_chars.extend_from_slice(&chars[exp.end..]);

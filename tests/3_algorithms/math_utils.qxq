@@ -35,7 +35,7 @@ is_even(pow(2, 10))
    neg.d        r1, r0
    ret          r1
    ret          r0
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[r0 as ^1, r1 as ^2]
    constants::[
@@ -51,7 +51,7 @@ is_even(pow(2, 10))
    mul.dd       r5, r1, r6
    apply        r2, #2
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[]
    clos         r2, fn1
@@ -60,7 +60,7 @@ is_even(pow(2, 10))
    loadi        r6, #1
    apply        r3, #2
    ret          r3
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
    cmp.not.f    r0, #0
@@ -69,14 +69,14 @@ is_even(pow(2, 10))
    ret          r1
    loadr        r1, true
    ret          r1
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    div.dd       r2, r0, r1
    mul.dd       r2, r1, r2
    sub.dd       r2, r0, r2
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::5 captured::[r3 as ^1]
    loadfree     r1, ^1
@@ -86,7 +86,7 @@ is_even(pow(2, 10))
    setc         r1, #0
    cmp.eq.di    r1, #0
    ret          r1
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::7 captured::[r4 as ^1, r2 as ^2]
    loadfree     r1, ^2
@@ -96,7 +96,7 @@ is_even(pow(2, 10))
    move         r3, r4
    apply        r1, #1
    ret          r1
-   
+
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::13 captured::[]
    clos         r0, fn0

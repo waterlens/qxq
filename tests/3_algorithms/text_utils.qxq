@@ -35,7 +35,7 @@ repeat("ha", 3)
    loadc        r2, @1
    add.dd       r1, r1, r2
    ret          r1
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[r1 as ^1, r0 as ^2]
    constants::[
@@ -51,7 +51,7 @@ repeat("ha", 3)
    add.dd       r5, r1, r6
    apply        r2, #2
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[]
    constants::[
@@ -63,7 +63,7 @@ repeat("ha", 3)
    loadc        r6, @0
    apply        r3, #2
    ret          r3
-   
+
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::8 captured::[]
    constants::[

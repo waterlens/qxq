@@ -38,7 +38,7 @@ fib(10)
    mul.dd       r5, r1, r0
    apply        r2, #2
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::6 captured::[]
    clos         r1, fn0
@@ -47,7 +47,7 @@ fib(10)
    loadi        r5, #1
    apply        r2, #2
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::5 captured::[]
    constants::[
@@ -65,7 +65,7 @@ fib(10)
    apply        r2, #1
    add.dd       r1, r1, r2
    ret          r1
-   
+
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::5 captured::[]
    clos         r0, fn1

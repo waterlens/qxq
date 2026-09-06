@@ -16,12 +16,12 @@ inc2(5)
    move         r3, r4
    apply        r1, #1
    ret          r1
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    clos         r2, fn0
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
    constants::[
@@ -29,7 +29,7 @@ inc2(5)
    ]
    add.dc       r1, r0, @0
    ret          r1
-   
+
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::7 captured::[]
    clos         r0, fn1

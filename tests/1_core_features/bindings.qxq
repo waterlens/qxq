@@ -31,7 +31,7 @@ factorial(5)
    apply        r1, #1
    mul.dd       r1, r0, r1
    ret          r1
-   
+
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::6 captured::[]
    loadi        r0, #1

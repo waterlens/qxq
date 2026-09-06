@@ -15,21 +15,21 @@ add(1, 2)
    thunk::fn params::0 regs::1 captured::[]
    loadi        r0, #1
    ret          r0
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::1 captured::[]
    ret          r0
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    add.dd       r2, r0, r1
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    add.dd       r2, r0, r1
    ret          r2
-   
+
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::5 captured::[]
    clos         r0, fn0

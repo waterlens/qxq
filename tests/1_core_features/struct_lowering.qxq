@@ -17,7 +17,7 @@ c.twice(2) + c.later()(3)
    load.field   r2, r0, @0
    add.dd       r2, r2, r1
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[]
    constants::[
@@ -31,7 +31,7 @@ c.twice(2) + c.later()(3)
    invoke       r3, r5, @0
    add.dd       r2, r2, r3
    ret          r2
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::5 captured::[r0 as ^1]
    constants::[
@@ -41,12 +41,12 @@ c.twice(2) + c.later()(3)
    move         r4, r0
    invoke       r1, r3, @0
    ret          r1
-   
+
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
    clos         r1, fn2
    ret          r1
-   
+
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::7 captured::[]
    constants::[
