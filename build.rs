@@ -9,6 +9,10 @@ fn main() {
   let mut build = cc::Build::new();
 
   build.flag("-std=c2x").flag("-Wall").flag("-Wextra");
+  // gcc cannot see that the f64 out-parameters never reach the tail callee.
+  if !build.get_compiler().is_like_clang() {
+    build.flag("-Wno-maybe-musttail-local-addr");
+  }
 
   if release {
     build.flag("-O3").define("NDEBUG", None::<&str>);
