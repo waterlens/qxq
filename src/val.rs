@@ -7,6 +7,9 @@ const VAL_OTHER_TAG: u64 = 0x2;
 const VAL_BOOL_TAG: u64 = 0x4;
 const VAL_BOOL_VAL_BIT: u64 = 0x1;
 const VAL_NOT_CELL_MASK: u64 = VAL_FLOAT_TAG | VAL_OTHER_TAG;
+// Pointer kinds in the low three bits, matching VAL_KIND_* in vm/src/object.h.
+const VAL_KIND_MASK: u64 = 0x7;
+const VAL_KIND_STR: u64 = 0x5;
 
 const VAL_EMPTY: u64 = 0x0;
 const VAL_NULL: u64 = VAL_OTHER_TAG;
@@ -123,16 +126,18 @@ impl Val {
 
   /// Returns the string data as a byte slice. Only valid for string cell values.
   pub fn str_as_bytes(&self) -> &[u8] {
-    assert!(self.is_ptr());
+    assert!(
+      self.is_ptr() && (self.0 & VAL_KIND_MASK) == VAL_KIND_STR,
+      "str_as_bytes: not a string"
+    );
     unsafe {
-      let obj = self.0 as *const StrObj;
-      let hd = (*obj).hd;
+      let base = (self.0 - VAL_KIND_STR) as *const u8;
+      let hd = (*base.cast::<StrObj>()).hd;
       let tag = hd as u8;
       assert!(tag == u8::from(Tag::STR), "str_as_bytes: not a string object");
       let obj_size = (hd >> 32) as usize;
       let len = obj_size - std::mem::size_of::<StrObj>() - 1;
-      let bytes_ptr = (self.0 as *const u8).add(std::mem::size_of::<StrObj>());
-      std::slice::from_raw_parts(bytes_ptr, len)
+      std::slice::from_raw_parts(base.add(std::mem::size_of::<StrObj>()), len)
     }
   }
 
