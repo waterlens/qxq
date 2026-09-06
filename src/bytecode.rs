@@ -785,8 +785,7 @@ pub struct Thunk {
 }
 
 /// Image-owned description of a struct type. Member names map to slots of one
-/// array: the declared fields first, positional aliases (`a`, `b`, ...) sharing
-/// those slots, then the methods in declaration order.
+/// array: the declared fields first, then the methods in declaration order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDesc {
   pub nfields: u16,
@@ -801,9 +800,6 @@ impl TypeDesc {
       if members.insert(name.to_string(), slot as u16).is_some() {
         return Err(format!("duplicate member `{name}`"));
       }
-    }
-    for (slot, alias) in (b'a'..=b'z').enumerate().take(fields.len()) {
-      members.entry(String::from(alias as char)).or_insert(slot as u16);
     }
     Ok(Self {
       nfields: fields.len() as u16,

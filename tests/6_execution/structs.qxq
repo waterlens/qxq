@@ -15,7 +15,7 @@ type P = struct {x, y, z}
 end;
 let r = r + if P{1, 2, 3}.sum() == 123 then 0 else 2 end;
 let r = r + if P{z = 3, 1, y = 2}.sum() == 123 then 0 else 4 end;
-let r = r + if P{y = 2, z = 3, x = 1}.a == 1 then 0 else 8 end;
+let r = r + if P{y = 2, z = 3, x = 1}.x == 1 then 0 else 8 end;
 
 (* mutual recursion between siblings, also from a nested closure *)
 type Parity = struct {}

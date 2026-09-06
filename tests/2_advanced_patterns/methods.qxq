@@ -1,20 +1,20 @@
 (* RUN: {qxq|cargo run --} --inspect %s *)
 
 type Date = struct {year, month, day}
-  with fn get_year(self) self.a end
-  with fn get_month(self) self.b end
-  with fn get_day(self) self.c end
+  with fn get_year(self) self.year end
+  with fn get_month(self) self.month end
+  with fn get_day(self) self.day end
 end;
 let day = Date{year = 2026, 1, day = 2};
 day.get_year() + day.get_month() + day.get_day()
 
 (* EXPECT:
    --- Syntax Tree ---
-   (block (type Date (struct (fields year month day) (method get_year (self) (member self a)) (method get_month (self) (member self b)) (method get_day (self) (member self c)))) (let day (construct Date (init year 2026) (init _ 1) (init day 2))) (+ (+ (member-apply day get_year) (member-apply day get_month)) (member-apply day get_day)))
+   (block (type Date (struct (fields year month day) (method get_year (self) (member self year)) (method get_month (self) (member self month)) (method get_day (self) (member self day)))) (let day (construct Date (init year 2026) (init _ 1) (init day 2))) (+ (+ (member-apply day get_year) (member-apply day get_month)) (member-apply day get_day)))
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
    constants::[
-     @0: "a"
+     @0: "year"
    ]
    load.field   r1, r0, @0
    ret          r1
@@ -22,7 +22,7 @@ day.get_year() + day.get_month() + day.get_day()
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
    constants::[
-     @0: "b"
+     @0: "month"
    ]
    load.field   r1, r0, @0
    ret          r1
@@ -30,7 +30,7 @@ day.get_year() + day.get_month() + day.get_day()
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
    constants::[
-     @0: "c"
+     @0: "day"
    ]
    load.field   r1, r0, @0
    ret          r1

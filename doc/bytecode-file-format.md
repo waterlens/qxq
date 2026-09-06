@@ -71,9 +71,8 @@ declared in the image. `LoadType` addresses it by index.
 | \#Type | | | ntypes | # of type descriptions encoded by ULEB128 |
 
 Each type description lists its member names and the slots they resolve to.
-The declared fields occupy slots `0..nfields`, positional aliases `a`, `b`, ...
-share those slots, and the methods occupy `nfields..nslots` in declaration
-order.
+The declared fields occupy slots `0..nfields` and the methods occupy
+`nfields..nslots`, both in declaration order.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |
