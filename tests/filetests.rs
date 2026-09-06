@@ -72,7 +72,7 @@ fn trial_for(tests_dir: &Path, file: PathBuf) -> Trial {
 
 fn main() {
   let mut args = Arguments::from_args();
-  // The 6_execution/file_edit_* tests write to fixed paths under /tmp, so run the trials
+  // The 7_io/file_edit_* tests write to fixed paths under /tmp, so run the trials
   // one at a time unless --test-threads is given explicitly.
   if args.test_threads.is_none() {
     args.test_threads = Some(1);
