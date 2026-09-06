@@ -1,0 +1,37 @@
+(* SKIP: trait and mixin syntax is not implemented yet *)
+(* RUN: {qxq|cargo run --} --inspect %s *)
+
+type Show = trait
+  fn to_string(self)
+end;
+
+
+type Pretty = trait {Show} (* Pretty implies Show *)
+  fn to_pretty(self);
+  fn to_string(self)
+end;
+
+type Str = struct {inner}
+  with mixin Show
+    fn to_string(self) std.format("my string {}", self.inner) end
+  end
+
+  with mixin Pretty
+    fn to_pretty(self) std.format("my pretty string {}", self.inner) end
+    fn to_string(self) = Show#to_string(self) end
+  end
+end;
+
+type StrWrapper = struct {inner : Pretty}
+  with mixin Show
+    fn to_string(self) = inner.Show#to_string() end
+  end
+  with mixin Pretty
+    fn to_pretty(self) = inner.to_pretty() end
+    fn to_string(self) = inner.Pretty#to_string() end
+  end
+end;
+let s = Str{"hello"};
+let s2 = StrWrapper{inner: s};
+s.Show#to_string() + s2.to_pretty();
+
