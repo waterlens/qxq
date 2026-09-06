@@ -18,7 +18,7 @@
 - Benchmark the release binary: `just bench`
 - Update `EXPECT:` blocks: `just update-expect`
 - Run one expect test file: `just expect tests/path/to/file.qxq`
-- Build the vm binary: `make -C vm rel`
+- Build the vm library: `make -C vm rel`
 - Regenerate the review-only vm assembly dumps (`vm/asm/vm.<target>.s`, needs zig 0.15.1 on PATH): `make -C vm asm`
 - Check the dumps are current: `make -C vm asm-check`
 - One-time per clone, so dump diffs show the handler in hunk headers: `git -C vm config diff.asm.xfuncname '^_?[A-Za-z0-9_]+:'`
