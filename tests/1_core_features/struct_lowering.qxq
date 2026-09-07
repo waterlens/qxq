@@ -14,7 +14,7 @@ c.twice(2) + c.later()(3)
    constants::[
      @0: "n"
    ]
-   load.field   r2, r0, @0
+   loadfld      r2, r0, @0
    add.dd       r2, r2, r1
    ret          r2
 
@@ -37,7 +37,7 @@ c.twice(2) + c.later()(3)
    constants::[
      @0: "add"
    ]
-   loadfree     r3, ^1
+   loadfv       r3, ^1
    move         r4, r0
    invoke       r1, r3, @0
    ret          r1
@@ -53,7 +53,7 @@ c.twice(2) + c.later()(3)
      @0: "twice"
      @1: "later"
    ]
-   loadtype     r0, @0
+   loadty       r0, @0
    loadi        r1, #1
    wrap         r0, tag::struct, #2
    move         r3, r0

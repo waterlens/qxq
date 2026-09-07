@@ -13,15 +13,15 @@ Counter.twice(2).n + Counter.zero().add(1).n
    constants::[
      @0: "n"
    ]
-   loadtype     r2, @0
-   load.field   r4, r0, @0
+   loadty       r2, @0
+   loadfld      r4, r0, @0
    add.dd       r3, r4, r1
    wrap         r2, tag::struct, #2
    ret          r2
 
    --- Thunk ---
    thunk::fn params::0 regs::2 captured::[]
-   loadtype     r0, @0
+   loadty       r0, @0
    loadi        r1, #0
    wrap         r0, tag::struct, #2
    ret          r0
@@ -32,10 +32,10 @@ Counter.twice(2).n + Counter.zero().add(1).n
      @0: "add"
      @1: "zero"
    ]
-   loadtype     r4, @0
-   load.field   r4, r4, @0
-   loadtype     r8, @0
-   load.field   r8, r8, @1
+   loadty       r4, @0
+   loadfld      r4, r4, @0
+   loadty       r8, @0
+   loadfld      r8, r8, @1
    apply        r8, #0
    move         r6, r8
    move         r7, r0
@@ -53,18 +53,18 @@ Counter.twice(2).n + Counter.zero().add(1).n
      @2: "zero"
      @3: "add"
    ]
-   loadtype     r0, @0
-   load.field   r0, r0, @1
+   loadty       r0, @0
+   loadfld      r0, r0, @1
    loadi        r2, #2
    apply        r0, #1
-   load.field   r0, r0, @0
-   loadtype     r4, @0
-   load.field   r4, r4, @2
+   loadfld      r0, r0, @0
+   loadty       r4, @0
+   loadfld      r4, r4, @2
    apply        r4, #0
    move         r3, r4
    loadi        r4, #1
    invoke       r1, r3, @3
-   load.field   r1, r1, @0
+   loadfld      r1, r1, @0
    add.dd       r0, r0, r1
    ret          r0
 *)

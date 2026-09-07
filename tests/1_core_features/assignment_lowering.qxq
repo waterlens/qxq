@@ -12,13 +12,13 @@ p.1 <- 3
      @0: "x"
      @1: 0
    ]
-   loadtype     r0, @0
+   loadty       r0, @0
    loadi        r1, #1
    wrap         r0, tag::struct, #2
    loadi        r1, #2
-   set.field    r1, r0, @0
+   setfld       r1, r0, @0
    loadi        r1, #3
-   set.field    r1, r0, @1
+   setfld       r1, r0, @1
    loadr        r1, unit
    ret          r1
 *)

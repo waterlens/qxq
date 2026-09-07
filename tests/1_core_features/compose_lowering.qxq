@@ -24,8 +24,8 @@ let dbl = fn (x) x * 2 end;
 
    --- Thunk ---
    thunk::fn params::1 regs::7 captured::[r0 as ^1, r1 as ^2]
-   loadfree     r1, ^1
-   loadfree     r4, ^2
+   loadfv       r1, ^1
+   loadfv       r4, ^2
    move         r6, r0
    apply        r4, #1
    move         r3, r4

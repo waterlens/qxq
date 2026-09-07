@@ -16,7 +16,7 @@ day.get_year() + day.get_month() + day.get_day()
    constants::[
      @0: "year"
    ]
-   load.field   r1, r0, @0
+   loadfld      r1, r0, @0
    ret          r1
 
    --- Thunk ---
@@ -24,7 +24,7 @@ day.get_year() + day.get_month() + day.get_day()
    constants::[
      @0: "month"
    ]
-   load.field   r1, r0, @0
+   loadfld      r1, r0, @0
    ret          r1
 
    --- Thunk ---
@@ -32,7 +32,7 @@ day.get_year() + day.get_month() + day.get_day()
    constants::[
      @0: "day"
    ]
-   load.field   r1, r0, @0
+   loadfld      r1, r0, @0
    ret          r1
 
    --- Thunk ---
@@ -42,7 +42,7 @@ day.get_year() + day.get_month() + day.get_day()
      @1: "get_month"
      @2: "get_day"
    ]
-   loadtype     r0, @0
+   loadty       r0, @0
    loadi        r1, #2026
    loadi        r2, #1
    loadi        r3, #2
