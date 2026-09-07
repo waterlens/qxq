@@ -70,6 +70,14 @@ impl<R: Read> Loader<R> {
     Ok(BytecodeImage::new(thunks, types, heap))
   }
 
+  /// A length-prefixed UTF-8 string at `cursor`, which moves past it.
+  fn read_str<'d>(&self, data: &'d [u8], cursor: &mut usize) -> Result<&'d str> {
+    let (len, n) = uleb8::decode_uleb128(&data[*cursor..]);
+    let text = &data[*cursor + n..*cursor + n + len as usize];
+    *cursor += n + len as usize;
+    self.diag.context(std::str::from_utf8(text), "invalid UTF-8 string")
+  }
+
   fn load_type(&self, data: &[u8]) -> Result<(TypeDesc, usize)> {
     let mut cursor = 0;
     let read = |cursor: &mut usize| {
@@ -77,24 +85,17 @@ impl<R: Read> Loader<R> {
       *cursor += n;
       value
     };
-    let len = read(&mut cursor) as usize;
-    let name = std::str::from_utf8(&data[cursor..cursor + len]);
-    let name = self.diag.context(name, "invalid UTF-8 type name")?.to_string();
-    cursor += len;
-    let nfields = read(&mut cursor) as u16;
-    let nmembers = read(&mut cursor);
-    let mut members = Vec::with_capacity(nmembers as usize);
-    for _ in 0..nmembers {
-      let slot = read(&mut cursor) as u16;
-      let len = read(&mut cursor) as usize;
-      let name = std::str::from_utf8(&data[cursor..cursor + len]);
-      let name = self.diag.context(name, "invalid UTF-8 member name")?;
-      cursor += len;
-      members.push((name.to_string(), slot));
-    }
-    let nmethods = read(&mut cursor);
-    let methods = (0..nmethods).map(|_| read(&mut cursor) as u16).collect();
-    Ok((TypeDesc { name, nfields, members: members.into_boxed_slice(), methods }, cursor))
+    let text = |cursor: &mut usize| self.read_str(data, cursor).map(str::to_string);
+    let members = |cursor: &mut usize| -> Result<Box<[(String, u16)]>> {
+      (0..read(cursor))
+        .map(|_| -> Result<(String, u16)> { Ok((text(cursor)?, read(cursor) as u16)) })
+        .collect()
+    };
+    let name = text(&mut cursor)?;
+    let fields = (0..read(&mut cursor)).map(|_| text(&mut cursor)).collect::<Result<_>>()?;
+    let methods = members(&mut cursor)?;
+    let functions = members(&mut cursor)?;
+    Ok((TypeDesc { name, fields, methods, functions }, cursor))
   }
 
   fn load_thunk(&self, data: &[u8], heap: &mut OwnedHeap) -> Result<Thunk> {
@@ -161,11 +162,7 @@ impl<R: Read> Loader<R> {
           constants.push(Val::from_f64(f64::from_bits(val)));
         }
         ConstKind::STR => {
-          let (len, n) = uleb8::decode_uleb128(&data[cursor..]);
-          cursor += n;
-          let s = std::str::from_utf8(&data[cursor..cursor + len as usize]);
-          let s = self.diag.context(s, "invalid UTF-8 string")?;
-          cursor += len as usize;
+          let s = self.read_str(data, &mut cursor)?;
           let value = heap
             .alloc_str(s)
             .ok_or_else(|| self.diag.error("failed to allocate string constant"))?;

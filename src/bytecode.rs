@@ -1,7 +1,7 @@
 use crate::diagnostic::Result as DResult;
 use crate::runtime::OwnedHeap;
 use crate::val::Val;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use indexmap::IndexMap;
 use qxq_macros::define_bytecode;
 use std::fmt::{self, Display};
@@ -803,43 +803,44 @@ pub struct Thunk {
   pub constants: Box<[Val]>,
 }
 
-/// Image-owned description of a struct type. Member names map to slots of one
-/// array: the declared fields first, then the methods in declaration order.
-/// The VM builds the type value from it once: the description, then the
-/// closure of each method's thunk.
+/// Image-owned description of a struct type: its declared name and fields, and
+/// its methods and functions with their thunks. The VM builds the type value
+/// from it once: the description, then the closure of each method and function.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDesc {
   pub name: String,
-  pub nfields: u16,
-  pub members: Box<[(String, u16)]>,
-  /// The thunk of each method, in slot order.
-  pub methods: Box<[u16]>,
+  pub fields: Box<[String]>,
+  pub methods: Box<[(String, u16)]>,
+  pub functions: Box<[(String, u16)]>,
 }
 
 impl TypeDesc {
-  /// A description whose method thunks are still to be set.
-  pub fn new(name: &str, fields: &[&str], methods: &[&str]) -> Result<Self, String> {
-    let mut members: IndexMap<String, u16> = IndexMap::new();
-    for (slot, name) in fields.iter().chain(methods).enumerate() {
-      if members.insert(name.to_string(), slot as u16).is_some() {
+  /// A description whose member thunks are still to be set.
+  pub fn new(
+    name: &str,
+    fields: &[&str],
+    methods: &[&str],
+    functions: &[&str],
+  ) -> Result<Self, String> {
+    let mut seen = HashSet::new();
+    for name in fields.iter().chain(methods).chain(functions) {
+      if !seen.insert(*name) {
         return Err(format!("duplicate member `{name}`"));
       }
     }
+    let members = |names: &[&str]| -> Box<[(String, u16)]> {
+      names.iter().map(|n| (n.to_string(), 0)).collect()
+    };
     Ok(Self {
       name: name.to_string(),
-      nfields: fields.len() as u16,
-      members: members.into_iter().collect(),
-      methods: Box::new([]),
+      fields: fields.iter().map(|f| f.to_string()).collect(),
+      methods: members(methods),
+      functions: members(functions),
     })
   }
 
-  pub fn slot(&self, name: &str) -> Option<u16> {
-    self.members.iter().find(|m| m.0 == name).map(|m| m.1)
-  }
-
-  /// The declared name of a slot.
-  pub fn slot_name(&self, slot: u16) -> &str {
-    self.members.iter().find(|m| m.1 == slot).map_or("?", |m| m.0.as_str())
+  pub fn field(&self, name: &str) -> Option<usize> {
+    self.fields.iter().position(|f| f == name)
   }
 }
 
@@ -1016,9 +1017,13 @@ impl BytecodeCtx {
     &self.types[usize::from(id.0)]
   }
 
-  /// Set once the method bodies are compiled, with the type already in scope.
-  pub fn set_type_methods(&mut self, id: TypeId, methods: Box<[u16]>) {
-    self.types[usize::from(id.0)].methods = methods;
+  /// Set once the member bodies are compiled, with the type already in scope.
+  pub fn set_type_thunks(&mut self, id: TypeId, methods: &[u16], functions: &[u16]) {
+    let desc = &mut self.types[usize::from(id.0)];
+    let members = desc.methods.iter_mut().chain(desc.functions.iter_mut());
+    for (member, thunk) in members.zip(methods.iter().chain(functions)) {
+      member.1 = *thunk;
+    }
   }
 
   pub fn push_thunk(&mut self, name: &str, fvlocs: Box<[Location]>, nparams: u8) {

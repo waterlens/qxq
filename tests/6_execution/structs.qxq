@@ -49,6 +49,19 @@ let r = r + if build(4).sum() == 444 then 0 else 512 end;
 type Node = struct {v} with fn dup(self) Node{self.v} end end;
 let r = r + if Node{7}.dup().v == 7 then 0 else 1024 end;
 
+type Point = struct {x, y}
+  with fn origin() Point{0, 0} end
+  with fn of(v) build(v, v) end
+  with fn build(x, y) Point{x, y} end
+  with fn norm(self) self.x * self.x + self.y * self.y end
+  with fn twice(self) build(self.x * 2, self.y * 2) end
+end;
+let r = r + if Point.origin().norm() == 0 then 0 else 2048 end;
+let r = r + if Point.of(3).twice().norm() == 72 then 0 else 4096 end;
+let r = r + if Point.norm(Point.of(1)) == 2 then 0 else 8192 end;
+let of = Point.of;
+let r = r + if of(2).x == 2 then 0 else 16384 end;
+
 r
 
 (* EXPECT:

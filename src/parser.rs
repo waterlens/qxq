@@ -122,12 +122,13 @@ pub enum Expr<'a, I> {
   Block(ExprsRef<'a, I>, I),
   If(ExprRef<'a, I>, ExprRef<'a, I>, ExprRef<'a, I>, I),
   Tuple(ExprsRef<'a, I>, I),
-  /// `type name = struct {fields} with fn ... end ... end`; every method is a
-  /// named `Fn` whose first parameter is `self`.
+  /// `type name = struct {fields} with fn ... end ... end`; a member is a
+  /// method when its first parameter is `self`, else a function.
   StructDecl {
     name: TokenStr<'a>,
     fields: &'a [TokenStr<'a>],
-    methods: ExprsRef<'a, I>,
+    methods: &'a [MemberFn<'a, I>],
+    functions: &'a [MemberFn<'a, I>],
     info: I,
   },
   Construct {
@@ -175,15 +176,32 @@ impl<I> ToSexp for Init<'_, I> {
   }
 }
 
-fn method_to_sexp<'pool, I>(method: &Expr<'_, I>, pool: &'pool SexpPool) -> Sexp<'pool> {
-  match method {
-    Expr::Fn { name: Some(name), params, body, info: _ } => pool.list(&[
-      pool.atom("method"),
-      pool.atom(name.as_ref()),
-      pool.list(params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>()),
-      body.to_sexp(pool),
-    ]),
-    _ => method.to_sexp(pool),
+/// A member function of a struct type: `with fn name(params) body end`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MemberFn<'a, I> {
+  pub name: TokenStr<'a>,
+  pub params: &'a [TokenStr<'a>],
+  pub body: ExprRef<'a, I>,
+  pub info: I,
+}
+
+impl<I> MemberFn<'_, I> {
+  /// A method takes `self` first; any other member is a function.
+  pub fn is_method(&self) -> bool {
+    self.params.first().is_some_and(|p| p.0 == "self")
+  }
+
+  /// `(method name (params) body)` or `(function ...)`, with the body rendered.
+  fn sexp_parts<'pool>(&self, body: Sexp<'pool>, pool: &'pool SexpPool) -> Vec<Sexp<'pool>> {
+    let kind = if self.is_method() { "method" } else { "function" };
+    let params = self.params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>();
+    vec![pool.atom(kind), pool.atom(self.name.as_ref()), pool.list(params), body]
+  }
+}
+
+impl<I> ToSexp for MemberFn<'_, I> {
+  fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
+    pool.list(self.sexp_parts(self.body.to_sexp(pool), pool))
   }
 }
 
@@ -233,10 +251,10 @@ impl<I> ToSexp for Expr<'_, I> {
       }
       Tuple(xs, _) => pool
         .non_empty_list(pool.atom("tuple"), xs.iter().map(|x| x.to_sexp(pool)).collect::<Vec<_>>()),
-      StructDecl { name, fields, methods, info: _ } => {
+      StructDecl { name, fields, methods, functions, info: _ } => {
         let fields = fields.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>();
         let mut parts = vec![pool.atom("struct"), pool.non_empty_list(pool.atom("fields"), fields)];
-        parts.extend(methods.iter().map(|m| method_to_sexp(m, pool)));
+        parts.extend(methods.iter().chain(functions.iter()).map(|m| m.to_sexp(pool)));
         pool.list(&[pool.atom("type"), pool.atom(name.as_ref()), pool.list(parts)])
       }
       Construct { ty, inits, info: _ } => {
@@ -304,6 +322,29 @@ impl<I> Expr<'_, I> {
 pub struct InfoExpr<'a> {
   pub expr: ExprRef<'a, InfoKey>,
   pub map: &'a SlotMap<InfoKey, Info<'a>>,
+}
+
+struct InfoMember<'a> {
+  member: &'a MemberFn<'a, InfoKey>,
+  map: &'a SlotMap<InfoKey, Info<'a>>,
+}
+
+/// The `(freevars ...)` of a node, when it has any.
+fn freevars_sexp<'pool>(
+  map: &SlotMap<InfoKey, Info<'_>>,
+  key: InfoKey,
+  pool: &'pool SexpPool,
+) -> Option<Sexp<'pool>> {
+  map.get(key).filter(|info| !info.freevars.is_empty()).map(|info| info.to_sexp(pool))
+}
+
+impl ToSexp for InfoMember<'_> {
+  fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
+    let body = InfoExpr { expr: self.member.body, map: self.map }.to_sexp(pool);
+    let mut parts = self.member.sexp_parts(body, pool);
+    parts.extend(freevars_sexp(self.map, self.member.info, pool));
+    pool.list(parts)
+  }
 }
 
 impl<'a> ToSexp for InfoExpr<'a> {
@@ -389,12 +430,13 @@ impl<'a> ToSexp for InfoExpr<'a> {
         parts.extend(xs.iter().map(|x| InfoExpr { expr: x, map: self.map }.to_sexp(pool)));
         false
       }
-      StructDecl { name, fields, methods, info: _ } => {
+      StructDecl { name, fields, methods, functions, info: _ } => {
         parts.push(pool.atom("type"));
         parts.push(pool.atom(name.as_ref()));
         let fields = fields.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>();
         let mut body = vec![pool.atom("struct"), pool.non_empty_list(pool.atom("fields"), fields)];
-        body.extend(methods.iter().map(|m| InfoExpr { expr: m, map: self.map }.to_sexp(pool)));
+        let members = methods.iter().chain(functions.iter());
+        body.extend(members.map(|m| InfoMember { member: m, map: self.map }.to_sexp(pool)));
         parts.push(pool.list(body));
         false
       }
@@ -435,12 +477,7 @@ impl<'a> ToSexp for InfoExpr<'a> {
       }
     };
 
-    let info_key = self.expr.get_info();
-    if let Some(info) = self.map.get(*info_key)
-      && !info.freevars.is_empty()
-    {
-      parts.push(info.to_sexp(pool));
-    }
+    parts.extend(freevars_sexp(self.map, *self.expr.get_info(), pool));
 
     if is_atom && parts.len() == 1 { parts.pop().unwrap() } else { pool.list(&parts) }
   }
@@ -784,38 +821,42 @@ impl<'a> Parser<'a> {
       }
     }
     let _ = self.expect_paired_close(Paired::Brace, true)?;
-    // The type is in scope in its own methods.
+    // The type is in scope in its own members.
     self.declare_local(name);
 
-    // A method body may name a binder of its recursion group declared later,
-    // so free variables are settled only once every method has been parsed.
-    let mut methods = vec![];
+    // A member body may name a sibling declared later, so free variables are
+    // settled only once every member has been parsed.
+    let mut members = vec![];
     while self.peek_keyword(Keyword::With, true) {
       self.skip_token();
       let _ = self.expect_keyword(Keyword::Fn, false)?;
       let tok = self.next_ident(false)?;
       let mname = TokenStr::from_span(tok.inner.span);
       let (params, body, freevars) = self.parse_function_parts(None)?;
-      if params.first().map(|p| p.0) != Some("self") {
-        return self.diag.fail(format!("the first parameter of method {mname} must be `self`"));
-      }
-      methods.push((mname, params, body, freevars));
+      members.push((mname, params, body, freevars));
     }
     let _ = self.expect_keyword(Keyword::End, true)?;
 
-    let rec_group: Vec<_> = methods.iter().map(|m| m.0).collect();
-    let mut method_exprs = Vec::with_capacity(methods.len());
-    for (mname, params, body, mut freevars) in methods {
+    let rec_group: Vec<_> = members.iter().map(|m| m.0).collect();
+    let mut methods = vec![];
+    let mut functions = vec![];
+    for (mname, params, body, mut freevars) in members {
       freevars.retain(|v| !rec_group.contains(v));
       self.propagate_freevars(&freevars);
       let info = self.new_info(freevars);
-      method_exprs.push(&*arena.alloc(ExprCon::Fn { name: Some(mname), params, body, info }));
+      let member = MemberFn { name: mname, params, body, info };
+      if member.is_method() {
+        methods.push(member);
+      } else {
+        functions.push(member);
+      }
     }
 
     let decl = arena.alloc(ExprCon::StructDecl {
       name,
       fields: arena.alloc_slice_copy(&fields),
-      methods: arena.alloc_slice_clone(&method_exprs),
+      methods: arena.alloc_slice_clone(&methods),
+      functions: arena.alloc_slice_clone(&functions),
       info: self.new_empty_info(),
     });
     Ok(PeekResult { inner: decl })
@@ -1389,8 +1430,10 @@ mod tests {
     test_parse_exprs("P{}", "(construct P)");
     test_parse_exprs("P{\n  x = 1,\n  y = 2\n}", "(construct P (init x 1) (init y 2))");
     test_parse_exprs("P{x = 1}.x", "(member (construct P (init x 1)) x)");
-    parse_fails("type P = struct {x} with fn f() 1 end end");
-    parse_fails("type P = struct {x} with fn f(this) 1 end end");
+    test_parse_exprs(
+      "type P = struct {x} with fn f(self) 1 end with fn g() 2 end with fn h(this) 3 end end",
+      "(type P (struct (fields x) (method f (self) 1) (function g () 2) (function h (this) 3)))",
+    );
   }
 
   #[test]
@@ -1408,15 +1451,15 @@ mod tests {
     // Method names of the recursion group resolve through `self`, so they are not free.
     test_parse_with_info(
       "type P = struct {x} with fn f(self) g(k) + self.g(1) end with fn g(self, n) n end end",
-      "(type P (struct (fields x) (fn f (self) (+ (g k) (member-apply self g 1)) (freevars k)) (fn g (self n) n)))",
+      "(type P (struct (fields x) (method f (self) (+ (g k) (member-apply self g 1)) (freevars k)) (method g (self n) n)))",
     );
     test_parse_with_info(
       "type P = struct {} with fn f(self) fn () g() end end with fn g(self) 1 end end",
-      "(type P (struct (fields) (fn f (self) (fn () (g) (freevars g))) (fn g (self) 1)))",
+      "(type P (struct (fields) (method f (self) (fn () (g) (freevars g))) (method g (self) 1)))",
     );
     test_parse_with_info(
       "fn (k) type P = struct {} with fn f(self) g() + k end with fn g(self) 1 end end end",
-      "(fn (k) (type P (struct (fields) (fn f (self) (+ (g) k) (freevars k)) (fn g (self) 1))))",
+      "(fn (k) (type P (struct (fields) (method f (self) (+ (g) k) (freevars k)) (method g (self) 1))))",
     );
   }
 

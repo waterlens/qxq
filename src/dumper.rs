@@ -108,18 +108,21 @@ impl Dumper {
   }
 
   fn dump_type(ty: &TypeDesc, data: &mut Vec<u8>) {
-    uleb8::encode_uleb128(ty.name.len() as u64, data);
-    data.extend_from_slice(ty.name.as_bytes());
-    uleb8::encode_uleb128(ty.nfields.into(), data);
-    uleb8::encode_uleb128(ty.members.len() as u64, data);
-    for (name, slot) in ty.members.iter() {
-      uleb8::encode_uleb128((*slot).into(), data);
-      uleb8::encode_uleb128(name.len() as u64, data);
-      data.extend_from_slice(name.as_bytes());
+    fn text(s: &str, data: &mut Vec<u8>) {
+      uleb8::encode_uleb128(s.len() as u64, data);
+      data.extend_from_slice(s.as_bytes());
     }
-    uleb8::encode_uleb128(ty.methods.len() as u64, data);
-    for method in ty.methods.iter() {
-      uleb8::encode_uleb128((*method).into(), data);
+    text(&ty.name, data);
+    uleb8::encode_uleb128(ty.fields.len() as u64, data);
+    for field in ty.fields.iter() {
+      text(field, data);
+    }
+    for members in [&ty.methods, &ty.functions] {
+      uleb8::encode_uleb128(members.len() as u64, data);
+      for (name, thunk) in members.iter() {
+        text(name, data);
+        uleb8::encode_uleb128((*thunk).into(), data);
+      }
     }
   }
 }

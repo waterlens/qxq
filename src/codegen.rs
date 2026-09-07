@@ -10,7 +10,7 @@ use crate::{
     SmallConstantId, Tag, TrapId, TypeDesc, TypeId,
   },
   diagnostic::{Diagnostic, Result},
-  parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, Init, SynTree},
+  parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, Init, MemberFn, SynTree},
   tokenizer::{Paired, TokenStr},
   val,
 };
@@ -37,9 +37,8 @@ pub struct CodeGenCtx<'a> {
   scope: Scope<'a>,
   tree: ExprRef<'a, InfoKey>,
   information: SlotMap<InfoKey, Info<'a>>,
-  /// Binders of the recursion group whose bodies are being compiled: the
-  /// methods of one struct type.
-  rec_group: Vec<TokenStr<'a>>,
+  /// The members of the type whose bodies are being compiled.
+  rec_group: Vec<(TokenStr<'a>, Binding)>,
   /// The receiver through which method references are lowered.
   self_expr: ExprRef<'a, InfoKey>,
 }
@@ -47,8 +46,10 @@ pub struct CodeGenCtx<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Binding {
   Var(Location),
-  /// A method of the recursion group, reached through the current `self`.
+  /// A method of the type being compiled, reached through the current `self`.
   Method,
+  /// A function of the type being compiled, reached through the type.
+  Function(TypeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -221,7 +222,7 @@ impl<'a> Scope<'a> {
     &mut self,
     self_name: &Option<TokenStr<'a>>,
     captured: &[(TokenStr<'a>, Location)],
-    rec_group: &[TokenStr<'a>],
+    rec_group: &[(TokenStr<'a>, Binding)],
   ) -> Result<()> {
     self.enter();
     if let Some(self_name) = self_name {
@@ -238,8 +239,8 @@ impl<'a> Scope<'a> {
       };
       self.insert(name, Binding::Var(loc));
     }
-    for name in rec_group {
-      self.insert(name, Binding::Method);
+    for (name, binding) in rec_group {
+      self.insert(name, *binding);
     }
     Ok(())
   }
@@ -419,6 +420,19 @@ impl<'a> CodeGenCtx<'a> {
 
   fn reify_type(&mut self, bc: &mut BytecodeCtx, r: RegId, t: TypeId) {
     bc.push(Bytecode::loadtype(r.into(), t.into()));
+  }
+
+  fn reify_function(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    r: RegId,
+    id: TypeId,
+    name: &TokenStr<'a>,
+  ) -> Result<()> {
+    self.reify_type(bc, r, id);
+    let m = self.member_constant(bc, name)?;
+    bc.push(Bytecode::loadfield(r.into(), r.into(), m));
+    Ok(())
   }
 
   /// The thunk index as instructions and type descriptions carry it.
@@ -1272,7 +1286,7 @@ impl<'a> CodeGenCtx<'a> {
       StrLiteral(s, _) => Some(Value::StrLiteral(s)),
       Ident(token_str, _) => match self.scope.get_bound(token_str) {
         Some(Binding::Var(loc)) => Some(Value::Loc(loc)),
-        Some(Binding::Method) => {
+        Some(Binding::Method | Binding::Function(_)) => {
           self.emit_expr(bc, expr, data, control, next)?;
           None
         }
@@ -1324,6 +1338,11 @@ impl<'a> CodeGenCtx<'a> {
         Some(Binding::Method) => {
           self.emit_member(bc, self.self_expr, token_str, data, control, next)?;
         }
+        Some(Binding::Function(id)) => {
+          self.emit_with_dest(bc, data, control, next, |s, bc, r| {
+            s.reify_function(bc, r, id, token_str)
+          })?;
+        }
         None => return self.diagnostic.fail(format!("undeclared identifier: {}", token_str.0)),
       },
       Op(op_str, _) => {
@@ -1342,6 +1361,9 @@ impl<'a> CodeGenCtx<'a> {
             let recv = self.self_expr;
             return self.emit_member_apply(bc, recv, token_str, args, data, control, next);
           }
+          if let Some(Binding::Function(id)) = bound {
+            return self.emit_function_apply(bc, id, token_str, args, data, control, next);
+          }
           if bound.is_none()
             && let Some(builtin) = SourceBuiltin::from_name(token_str.0)
           {
@@ -1351,23 +1373,7 @@ impl<'a> CodeGenCtx<'a> {
 
         let func_reg = self.allocate_temporary()?;
         self.emit_expr_to(bc, func, func_reg)?;
-        let _frame_ra = self.allocate_temporary()?;
-        // don't explicity set the value of frame return address
-        let mut args_regs = Vec::with_capacity(args.len());
-        for _ in 0..args.len() {
-          args_regs.push(self.allocate_temporary()?);
-        }
-        for (elem, r) in (*args).iter().zip(args_regs.into_iter()) {
-          self.emit_expr_to(bc, elem, r)?;
-        }
-        let args_len: u16 =
-          args.len().try_into().map_err(|_| self.diagnostic.error("argument length overflow"))?;
-        for _ in 0..args_len {
-          reg_pop!(self);
-        }
-        reg_pop!(self);
-        bc.push(Bytecode::apply(func_reg.into(), args_len.into()));
-        self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
+        self.emit_apply(bc, func_reg, args, data, control, next)?;
       }
       Bind { rec, name, expr, info: _ } => {
         let r = self.allocate_named(name.0)?;
@@ -1448,8 +1454,8 @@ impl<'a> CodeGenCtx<'a> {
           self.emit_store(bc, Value::Unit, data, control, next)?;
         };
       }
-      StructDecl { name, fields, methods, info: _ } => {
-        self.emit_struct_decl(bc, name, fields, methods, data, control, next)?;
+      StructDecl { name, fields, methods, functions, info: _ } => {
+        self.emit_struct_decl(bc, name, fields, methods, functions, data, control, next)?;
       }
       Construct { ty, inits, info: _ } => {
         self.emit_construct(bc, ty, inits, data, control, next)?;
@@ -1486,6 +1492,7 @@ impl<'a> CodeGenCtx<'a> {
       match self.scope.get_bound(fv) {
         Some(Binding::Var(loc)) => captured.push((*fv, loc)),
         Some(Binding::Method) => through_self = true,
+        Some(Binding::Function(_)) => {}
         None if SourceBuiltin::from_name(fv.0).is_some() => {}
         None => {
           return self.diagnostic.fail(format!("unable to find captured variable: {}", fv.0));
@@ -1530,43 +1537,57 @@ impl<'a> CodeGenCtx<'a> {
     bc: &mut BytecodeCtx,
     name: &TokenStr<'a>,
     fields: &[TokenStr<'a>],
-    methods: ExprsRef<'a, InfoKey>,
+    methods: &[MemberFn<'a, InfoKey>],
+    functions: &[MemberFn<'a, InfoKey>],
     data: DataDest,
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
-    let mut decls = Vec::with_capacity(methods.len());
-    for method in methods {
-      match method {
-        Expr::Fn { name: Some(mname), params, body, info } => {
-          decls.push((*mname, *params, *body, *info))
-        }
-        _ => self.diagnostic.ice("struct method is not a named function"),
-      }
-    }
-    let field_names: Vec<&str> = fields.iter().map(|f| f.0).collect();
-    let method_names: Vec<&str> = decls.iter().map(|d| d.0.0).collect();
-    let desc =
-      TypeDesc::new(name.0, &field_names, &method_names).map_err(|e| self.diagnostic.error(e))?;
+    let names =
+      |members: &[MemberFn<'a, InfoKey>]| members.iter().map(|m| m.name.0).collect::<Vec<_>>();
+    let field_names = fields.iter().map(|f| f.0).collect::<Vec<_>>();
+    let desc = TypeDesc::new(name.0, &field_names, &names(methods), &names(functions))
+      .map_err(|e| self.diagnostic.error(e))?;
     let id =
       bc.add_type(desc).ok_or_else(|| self.diagnostic.error("too many type declarations"))?;
 
-    // The type is in scope in its methods, which capture nothing.
+    // The type is in scope in its members, which capture nothing. Methods see
+    // every sibling, functions only the other functions.
     self.scope.insert(name, Binding::Var(Location::Type(id)));
-    let outer = std::mem::replace(&mut self.rec_group, decls.iter().map(|d| d.0).collect());
-    let mut thunks = Vec::with_capacity(decls.len());
-    for (mname, params, body, info) in decls.iter() {
-      if let Some(fv) = self.captured_variable(*info) {
-        return self
-          .diagnostic
-          .fail(format!("method `{}` of `{}` captures `{}`", mname.0, name.0, fv.0));
+    let function_group: Vec<_> =
+      functions.iter().map(|f| (f.name, Binding::Function(id))).collect();
+    let method_group = methods
+      .iter()
+      .map(|m| (m.name, Binding::Method))
+      .chain(function_group.iter().copied())
+      .collect();
+    let method_thunks = self.emit_member_thunks(bc, name, methods, method_group)?;
+    let function_thunks = self.emit_member_thunks(bc, name, functions, function_group)?;
+    bc.set_type_thunks(id, &method_thunks, &function_thunks);
+    self.emit_store(bc, Value::Unit, data, control, next)
+  }
+
+  /// Compiles the bodies of one member group as closed thunks, with `group`
+  /// in scope.
+  fn emit_member_thunks(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    tname: &TokenStr<'a>,
+    members: &[MemberFn<'a, InfoKey>],
+    group: Vec<(TokenStr<'a>, Binding)>,
+  ) -> Result<Vec<u16>> {
+    let outer = std::mem::replace(&mut self.rec_group, group);
+    let mut thunks = Vec::with_capacity(members.len());
+    for member in members {
+      if let Some(fv) = self.captured_variable(member.info) {
+        let (mname, tname) = (member.name.0, tname.0);
+        return self.diagnostic.fail(format!("`{mname}` of `{tname}` captures `{}`", fv.0));
       }
-      let fid = self.emit_function(bc, &None, params, body, *info)?;
+      let fid = self.emit_function(bc, &None, member.params, member.body, member.info)?;
       thunks.push(self.thunk_id(fid)?);
     }
     self.rec_group = outer;
-    bc.set_type_methods(id, thunks.into_boxed_slice());
-    self.emit_store(bc, Value::Unit, data, control, next)
+    Ok(thunks)
   }
 
   /// The first free variable a function could only reach by capturing.
@@ -1575,7 +1596,7 @@ impl<'a> CodeGenCtx<'a> {
     freevars.iter().copied().find(|fv| match self.scope.get_bound(fv) {
       Some(Binding::Var(loc)) => loc.in_frame(),
       Some(Binding::Method) => true,
-      None => false,
+      Some(Binding::Function(_)) | None => false,
     })
   }
 
@@ -1587,14 +1608,14 @@ impl<'a> CodeGenCtx<'a> {
     desc: &TypeDesc,
     inits: &[Init<'a, InfoKey>],
   ) -> Result<Vec<(usize, ExprRef<'a, InfoKey>)>> {
-    let nfields = usize::from(desc.nfields);
+    let nfields = desc.fields.len();
     let mut assigned = vec![false; nfields];
     let mut order = Vec::with_capacity(inits.len());
     for init in inits {
       let slot = match init.label {
-        Some(label) => match desc.slot(label.0) {
-          Some(slot) if usize::from(slot) < nfields => usize::from(slot),
-          _ => return self.diagnostic.fail(format!("`{tname}` has no field `{}`", label.0)),
+        Some(label) => match desc.field(label.0) {
+          Some(slot) => slot,
+          None => return self.diagnostic.fail(format!("`{tname}` has no field `{}`", label.0)),
         },
         None => match assigned.iter().position(|a| !a) {
           Some(slot) => slot,
@@ -1602,13 +1623,13 @@ impl<'a> CodeGenCtx<'a> {
         },
       };
       if std::mem::replace(&mut assigned[slot], true) {
-        let field = desc.slot_name(slot as u16);
+        let field = &desc.fields[slot];
         return self.diagnostic.fail(format!("field `{field}` of `{tname}` is initialized twice"));
       }
       order.push((slot, init.expr));
     }
     if let Some(slot) = assigned.iter().position(|a| !a) {
-      let field = desc.slot_name(slot as u16);
+      let field = &desc.fields[slot];
       return self.diagnostic.fail(format!("missing field `{field}` of `{tname}`"));
     }
     Ok(order)
@@ -1630,7 +1651,7 @@ impl<'a> CodeGenCtx<'a> {
       return self.diagnostic.fail(format!("`{}` is not a struct type", tname.0));
     };
     let desc = bc.type_desc(id);
-    let nfields = usize::from(desc.nfields);
+    let nfields = desc.fields.len();
     let order = self.resolve_inits(tname.0, desc, inits)?;
 
     // The instance is built in place when the destination is the register on
@@ -1741,6 +1762,52 @@ impl<'a> CodeGenCtx<'a> {
     })
   }
 
+  // The call region starts at the closure: the return address, then the
+  // arguments.
+  fn emit_apply(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    func_reg: RegId,
+    args: ExprsRef<'a, InfoKey>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let _frame_ra = self.allocate_temporary()?;
+    let mut args_regs = Vec::with_capacity(args.len());
+    for _ in 0..args.len() {
+      args_regs.push(self.allocate_temporary()?);
+    }
+    for (arg, r) in args.iter().zip(args_regs) {
+      self.emit_expr_to(bc, arg, r)?;
+    }
+    let args_len: u16 =
+      args.len().try_into().map_err(|_| self.diagnostic.error("argument length overflow"))?;
+    for _ in 0..args_len {
+      reg_pop!(self);
+    }
+    reg_pop!(self);
+    bc.push(Bytecode::apply(func_reg.into(), args_len.into()));
+    self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
+  }
+
+  /// Calls a function of a type: its closure comes from the type value and
+  /// takes no receiver.
+  fn emit_function_apply(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    id: TypeId,
+    name: &TokenStr<'a>,
+    args: ExprsRef<'a, InfoKey>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let func_reg = self.allocate_temporary()?;
+    self.reify_function(bc, func_reg, id, name)?;
+    self.emit_apply(bc, func_reg, args, data, control, next)
+  }
+
   // The call region is laid out like an ordinary application: the closure
   // slot, the return address, then the receiver as the first argument.
   fn emit_member_apply(
@@ -1753,6 +1820,11 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
+    if let Expr::Ident(tname, _) = receiver
+      && let Some(Binding::Var(Location::Type(id))) = self.scope.get_bound(tname)
+    {
+      return self.emit_function_apply(bc, id, member, args, data, control, next);
+    }
     let dst = self.allocate_temporary()?;
     let _frame_ra = self.allocate_temporary()?;
     let recv = self.allocate_temporary()?;

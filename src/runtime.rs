@@ -144,13 +144,13 @@ impl ImageValidator {
       }
     }
 
-    // A method thunk serves as its own closure, so it captures nothing.
+    // A member thunk serves as its own closure, so it captures nothing.
     for desc in types {
-      for method in desc.methods.iter() {
-        match thunks.get(usize::from(*method)) {
-          None => return self.diag.fail(format!("method thunk of `{}` out of range", desc.name)),
+      for (name, thunk) in desc.methods.iter().chain(desc.functions.iter()) {
+        match thunks.get(usize::from(*thunk)) {
+          None => return self.diag.fail(format!("thunk of `{}.{name}` out of range", desc.name)),
           Some(thunk) if !thunk.fvlocs.is_empty() => {
-            return self.diag.fail(format!("a method thunk of `{}` captures variables", desc.name));
+            return self.diag.fail(format!("`{}.{name}` captures variables", desc.name));
           }
           Some(_) => {}
         }
@@ -289,27 +289,25 @@ impl OwnedType {
   }
 
   fn from_desc(desc: &TypeDesc, thunks: &NativeThunkSet, diag: &Diagnostic) -> Result<Self> {
+    let callables = || desc.methods.iter().chain(desc.functions.iter());
     let members: Vec<vm::member_desc> = desc
-      .members
+      .fields
       .iter()
-      .map(|(name, slot)| vm::member_desc {
-        name: name.as_ptr().cast(),
-        len: name.len() as u32,
-        slot: u32::from(*slot),
-      })
+      .chain(callables().map(|(name, _)| name))
+      .map(|name| vm::member_desc { name: name.as_ptr().cast(), len: name.len() as u32 })
       .collect();
-    // The validator has checked every method thunk index.
-    let methods: Vec<*mut vm::thunk> =
-      desc.methods.iter().map(|id| thunks.thunks[usize::from(*id)].as_ptr()).collect();
+    // The validator has checked every member thunk index.
+    let closures: Vec<*mut vm::thunk> =
+      callables().map(|(_, id)| thunks.thunks[usize::from(*id)].as_ptr()).collect();
     let ptr = unsafe {
       vm::vm_type_alloc(
         desc.name.as_ptr().cast(),
         desc.name.len() as u32,
-        desc.nfields.into(),
         members.as_ptr(),
-        members.len(),
-        methods.as_ptr(),
-        methods.len(),
+        desc.fields.len() as u32,
+        desc.methods.len() as u32,
+        desc.functions.len() as u32,
+        closures.as_ptr(),
       )
     };
     let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm type"))?;
@@ -529,7 +527,7 @@ mod tests {
     assert!(validator.validate(&[thunk(vec![loadtype], vec![])], &[]).is_err());
     assert!(
       validator
-        .validate(&[thunk(vec![loadtype], vec![])], &[TypeDesc::new("T", &[], &[]).unwrap()])
+        .validate(&[thunk(vec![loadtype], vec![])], &[TypeDesc::new("T", &[], &[], &[]).unwrap()])
         .is_ok()
     );
   }

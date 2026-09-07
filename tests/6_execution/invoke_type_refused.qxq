@@ -1,0 +1,6 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: not an instance
+*)
+type P = struct {x} with fn get(self) self.x end end;
+let t = P;
+t.get(P{1})
