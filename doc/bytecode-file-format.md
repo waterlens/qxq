@@ -70,14 +70,17 @@ declared in the image. `LoadType` addresses it by index.
 | --------------- | --------------- | --------------- | --------------- | --------------- |
 | \#Type | | | ntypes | # of type descriptions encoded by ULEB128 |
 
-Each type description lists its declared name, then its member names and the
-slots they resolve to. The declared fields occupy slots `0..nfields` and the
-methods occupy `nfields..nslots`, both in declaration order.
+Each type description lists its declared name, its member names and the slots
+they resolve to, then the thunk of each method. The declared fields occupy
+slots `0..nfields` and the methods the slots after them, both in declaration
+order. A method thunk captures nothing, so the VM builds the type value once,
+from the description and the closure of each method thunk.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |
 | Name | | | name | length encoded by ULEB128, then the UTF-8 name |
 | \#Field | | | nfields | # of declared fields encoded by ULEB128 |
-| \#Slot | | | nslots | # of member slots encoded by ULEB128 |
 | \#Member | | | nmembers | # of member entries encoded by ULEB128 |
 | Members | | | | (slot, length, UTF-8 name) with slot and length encoded by ULEB128 |
+| \#Method | | | nmethods | # of methods encoded by ULEB128 |
+| Methods | | | | the thunk table index of each method, encoded by ULEB128 |

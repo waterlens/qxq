@@ -36,29 +36,24 @@ day.get_year() + day.get_month() + day.get_day()
    ret          r1
 
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::6 captured::[]
+   thunk::__top_thunk__ params::0 regs::5 captured::[]
    constants::[
      @0: "get_year"
      @1: "get_month"
      @2: "get_day"
    ]
    loadtype     r0, @0
-   clos         r1, fn0
-   clos         r2, fn1
-   clos         r3, fn2
-   wrap         r0, tag::type, #4
-   move         r1, r0
-   loadi        r2, #2026
-   loadi        r3, #1
-   loadi        r4, #2
-   wrap         r1, tag::struct, #4
-   move         r4, r1
-   invoke       r2, r4, @0
-   move         r5, r1
-   invoke       r3, r5, @1
-   add.dd       r2, r2, r3
-   move         r5, r1
-   invoke       r3, r5, @2
-   add.dd       r2, r2, r3
-   ret          r2
+   loadi        r1, #2026
+   loadi        r2, #1
+   loadi        r3, #2
+   wrap         r0, tag::struct, #4
+   move         r3, r0
+   invoke       r1, r3, @0
+   move         r4, r0
+   invoke       r2, r4, @1
+   add.dd       r1, r1, r2
+   move         r4, r0
+   invoke       r2, r4, @2
+   add.dd       r1, r1, r2
+   ret          r1
 *)

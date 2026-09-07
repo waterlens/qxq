@@ -7,7 +7,7 @@ use slotmap::SlotMap;
 use crate::{
   bytecode::{
     Bytecode, BytecodeCtx, ConstantId, FloatBits, FreeVarId, Label, Location, Op8, RegId,
-    SmallConstantId, Tag, TrapId, TypeDesc,
+    SmallConstantId, Tag, TrapId, TypeDesc, TypeId,
   },
   diagnostic::{Diagnostic, Result},
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, Init, SynTree},
@@ -47,27 +47,8 @@ pub struct CodeGenCtx<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Binding {
   Var(Location),
-  /// A struct type: its runtime value and the image description it constructs.
-  Type(Location, u16),
   /// A method of the recursion group, reached through the current `self`.
   Method,
-}
-
-impl Binding {
-  fn loc(self) -> Option<Location> {
-    match self {
-      Binding::Var(loc) | Binding::Type(loc, _) => Some(loc),
-      Binding::Method => None,
-    }
-  }
-
-  fn captured(self, id: FreeVarId) -> Self {
-    match self {
-      Binding::Var(_) => Binding::Var(Location::FreeVar(id)),
-      Binding::Type(_, t) => Binding::Type(Location::FreeVar(id), t),
-      Binding::Method => Binding::Method,
-    }
-  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -239,16 +220,23 @@ impl<'a> Scope<'a> {
   fn enter_function(
     &mut self,
     self_name: &Option<TokenStr<'a>>,
-    captured: &[(TokenStr<'a>, Binding)],
+    captured: &[(TokenStr<'a>, Location)],
     rec_group: &[TokenStr<'a>],
   ) -> Result<()> {
     self.enter();
     if let Some(self_name) = self_name {
       self.insert(self_name, Binding::Var(Location::FreeVar(FreeVarId(0))));
     }
-    for (i, (name, binding)) in captured.iter().enumerate() {
-      let i: u16 = i.try_into().map_err(|_| self.diagnostic.error("free variable id overflow"))?;
-      self.insert(name, binding.captured(FreeVarId(i + 1)));
+    let mut free: u16 = 0;
+    for (name, loc) in captured {
+      let loc = if loc.in_frame() {
+        free =
+          free.checked_add(1).ok_or_else(|| self.diagnostic.error("free variable id overflow"))?;
+        Location::FreeVar(FreeVarId(free))
+      } else {
+        *loc
+      };
+      self.insert(name, Binding::Var(loc));
     }
     for name in rec_group {
       self.insert(name, Binding::Method);
@@ -429,10 +417,17 @@ impl<'a> CodeGenCtx<'a> {
     bc.push(Bytecode::loadfree(r.into(), i.into()));
   }
 
+  fn reify_type(&mut self, bc: &mut BytecodeCtx, r: RegId, t: TypeId) {
+    bc.push(Bytecode::loadtype(r.into(), t.into()));
+  }
+
+  /// The thunk index as instructions and type descriptions carry it.
+  fn thunk_id(&self, id: usize) -> Result<u16> {
+    id.try_into().map_err(|_| self.diagnostic.error("exceeding maximum number of functions"))
+  }
+
   fn reify_closure(&mut self, bc: &mut BytecodeCtx, r: RegId, id: usize) -> Result<()> {
-    let id =
-      id.try_into().map_err(|_| self.diagnostic.error("exceeding maximium number of functions"))?;
-    bc.push(Bytecode::clos(r.into(), id));
+    bc.push(Bytecode::clos(r.into(), self.thunk_id(id)?.into()));
     Ok(())
   }
 
@@ -542,6 +537,11 @@ impl<'a> CodeGenCtx<'a> {
         self.reify_freevar(bc, r, i);
         Ok(self.get_temporary())
       }
+      Loc(Type(t)) => {
+        let r = self.allocate_temporary()?;
+        self.reify_type(bc, r, t);
+        Ok(self.get_temporary())
+      }
       Loc(Temporary) => Ok(self.get_temporary()),
       Unit => {
         let r = self.allocate_temporary()?;
@@ -581,7 +581,7 @@ impl<'a> CodeGenCtx<'a> {
     match loc {
       Temporary => Ok(Some(self.allocate_temporary()?)),
       Slot(r) => Ok(Some(r)),
-      FreeVar(_) => Ok(None),
+      FreeVar(_) | Type(_) => Ok(None),
     }
   }
 
@@ -604,6 +604,7 @@ impl<'a> CodeGenCtx<'a> {
       (Slot(r), Value::Loc(Slot(r2))) if r == r2 => Ok(Some(r)),
       (FreeVar(i), Value::Loc(FreeVar(j))) if i == j => Ok(None),
       (FreeVar(_), _) => self.diagnostic.fatal("storing into a captured variable is not supported"),
+      (Type(_), _) => self.diagnostic.fatal("storing into a type is not supported"),
       (_, _) => match self.is_register_destination(loc)? {
         Some(r) => {
           match opr {
@@ -613,6 +614,7 @@ impl<'a> CodeGenCtx<'a> {
               bc.push(Bytecode::mov(r.into(), r2.into()));
             }
             Value::Loc(FreeVar(i)) => self.reify_freevar(bc, r, i),
+            Value::Loc(Type(t)) => self.reify_type(bc, r, t),
             Value::Unit => self.reify_raw_value(bc, r, val::Val::null()),
             Value::BoolLiteral(b) => self.reify_raw_value(bc, r, val::Val::from_bool(b)),
             Value::IntLiteral(i) => self.reify_int_literal(bc, r, i),
@@ -1269,7 +1271,7 @@ impl<'a> CodeGenCtx<'a> {
       FloatLiteral(f, _) => Some(Value::FloatLiteral(*f)),
       StrLiteral(s, _) => Some(Value::StrLiteral(s)),
       Ident(token_str, _) => match self.scope.get_bound(token_str) {
-        Some(Binding::Var(loc) | Binding::Type(loc, _)) => Some(Value::Loc(loc)),
+        Some(Binding::Var(loc)) => Some(Value::Loc(loc)),
         Some(Binding::Method) => {
           self.emit_expr(bc, expr, data, control, next)?;
           None
@@ -1316,7 +1318,7 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_store(bc, Value::StrLiteral(s), data, control, next)?;
       }
       Ident(token_str, _) => match self.scope.get_bound(token_str) {
-        Some(Binding::Var(loc) | Binding::Type(loc, _)) => {
+        Some(Binding::Var(loc)) => {
           self.emit_store(bc, Value::Loc(loc), data, control, next)?;
         }
         Some(Binding::Method) => {
@@ -1436,6 +1438,7 @@ impl<'a> CodeGenCtx<'a> {
             | DataDest::Loc(Location::Slot(_))
             | DataDest::Loc(Location::Temporary)
             | DataDest::Loc(Location::FreeVar(_))
+            | DataDest::Loc(Location::Type(_))
             | DataDest::RetValue => {
               self.wrap_object(bc, Tag::TUPLE, tuple_reg, len)?;
               self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)?;
@@ -1481,8 +1484,8 @@ impl<'a> CodeGenCtx<'a> {
     let mut through_self = false;
     for fv in freevars {
       match self.scope.get_bound(fv) {
+        Some(Binding::Var(loc)) => captured.push((*fv, loc)),
         Some(Binding::Method) => through_self = true,
-        Some(binding) => captured.push((*fv, binding)),
         None if SourceBuiltin::from_name(fv.0).is_some() => {}
         None => {
           return self.diagnostic.fail(format!("unable to find captured variable: {}", fv.0));
@@ -1492,14 +1495,13 @@ impl<'a> CodeGenCtx<'a> {
     // A method named inside a nested closure needs the enclosing `self`.
     let self_name = TokenStr::new("self");
     if through_self && !captured.iter().any(|(n, _)| *n == self_name) {
-      let binding = self
-        .scope
-        .get_bound(&self_name)
-        .ok_or_else(|| self.diagnostic.error("no `self` to reach a method through"))?;
-      captured.push((self_name, binding));
+      let Some(Binding::Var(loc)) = self.scope.get_bound(&self_name) else {
+        return self.diagnostic.fail("no `self` to reach a method through");
+      };
+      captured.push((self_name, loc));
     }
     let fvlocs: Vec<Location> =
-      captured.iter().map(|(_, b)| b.loc().expect("captured binding has a location")).collect();
+      captured.iter().map(|(_, loc)| *loc).filter(|loc| loc.in_frame()).collect();
     debug_assert!(!fvlocs.contains(&Location::Temporary));
 
     self.scope.enter_function(name, &captured, &self.rec_group)?;
@@ -1549,23 +1551,32 @@ impl<'a> CodeGenCtx<'a> {
     let id =
       bc.add_type(desc).ok_or_else(|| self.diagnostic.error("too many type declarations"))?;
 
-    // The runtime type value is built in place: the description handle, then
-    // one closure per method, wrapped together.
-    let r = self.allocate_named(name.0)?;
-    bc.push(Bytecode::loadtype(r.into(), id.into()));
+    // The type is in scope in its methods, which capture nothing.
+    self.scope.insert(name, Binding::Var(Location::Type(id)));
     let outer = std::mem::replace(&mut self.rec_group, decls.iter().map(|d| d.0).collect());
-    for (_, params, body, info) in decls.iter() {
-      let reg = self.allocate_temporary()?;
+    let mut thunks = Vec::with_capacity(decls.len());
+    for (mname, params, body, info) in decls.iter() {
+      if let Some(fv) = self.captured_variable(*info) {
+        return self
+          .diagnostic
+          .fail(format!("method `{}` of `{}` captures `{}`", mname.0, name.0, fv.0));
+      }
       let fid = self.emit_function(bc, &None, params, body, *info)?;
-      self.reify_closure(bc, reg, fid)?;
+      thunks.push(self.thunk_id(fid)?);
     }
     self.rec_group = outer;
-    for _ in decls.iter() {
-      reg_pop!(self);
-    }
-    self.wrap_object(bc, Tag::TYPE, r, 1 + decls.len())?;
-    self.scope.insert(name, Binding::Type(Location::Slot(r), id));
+    bc.set_type_methods(id, thunks.into_boxed_slice());
     self.emit_store(bc, Value::Unit, data, control, next)
+  }
+
+  /// The first free variable a function could only reach by capturing.
+  fn captured_variable(&self, info: InfoKey) -> Option<TokenStr<'a>> {
+    let freevars = &self.information.get(info).unwrap().freevars;
+    freevars.iter().copied().find(|fv| match self.scope.get_bound(fv) {
+      Some(Binding::Var(loc)) => loc.in_frame(),
+      Some(Binding::Method) => true,
+      None => false,
+    })
   }
 
   // Labels select their field; positional initializers take the first field
@@ -1615,7 +1626,7 @@ impl<'a> CodeGenCtx<'a> {
     let Expr::Ident(tname, _) = ty else {
       return self.diagnostic.fail("a constructor needs a type name");
     };
-    let Some(Binding::Type(tloc, id)) = self.scope.get_bound(tname) else {
+    let Some(Binding::Var(tloc @ Location::Type(id))) = self.scope.get_bound(tname) else {
       return self.diagnostic.fail(format!("`{}` is not a struct type", tname.0));
     };
     let desc = bc.type_desc(id);

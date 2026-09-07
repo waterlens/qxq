@@ -74,6 +74,7 @@ fn main() {
     .allowlist_type("status_t")
     .allowlist_type("heap")
     .allowlist_type("thunk")
+    .allowlist_type("object")
     .allowlist_type("type_desc")
     .allowlist_type("member_desc")
     .allowlist_var("dispatch")

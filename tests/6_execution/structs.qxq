@@ -35,20 +35,19 @@ type Pair = struct {left, right}
 end;
 let r = r + if Pair{1, 2}.both() == 2003 then 0 else 128 end;
 
-(* every execution of a declaration makes a type value with its own closures
-   over one shared description; instances share their type's closures *)
 type Two = struct {p, q} end;
 let make = fn (k)
-  type T = struct {v} with fn get(self) self.v + k end end;
-  Two{T{1}, T{2}}
+  type T = struct {v, k} with fn get(self) self.v + self.k end end;
+  Two{T{1, k}, T{2, k}}
 end;
 let r = r + if make(10).p.get() + make(20).q.get() == 11 + 22 then 0 else 256 end;
-let two = make(0);
-assert_eq(two.p.get, two.q.get);
+assert_eq(make(1).p.get, make(2).q.get);
 
-(* a captured type constructs inside a closure *)
 let build = fn (n) P{n, n, n} end;
 let r = r + if build(4).sum() == 444 then 0 else 512 end;
+
+type Node = struct {v} with fn dup(self) Node{self.v} end end;
+let r = r + if Node{7}.dup().v == 7 then 0 else 1024 end;
 
 r
 

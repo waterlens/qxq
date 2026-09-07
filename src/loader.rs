@@ -82,7 +82,6 @@ impl<R: Read> Loader<R> {
     let name = self.diag.context(name, "invalid UTF-8 type name")?.to_string();
     cursor += len;
     let nfields = read(&mut cursor) as u16;
-    let nslots = read(&mut cursor) as u16;
     let nmembers = read(&mut cursor);
     let mut members = Vec::with_capacity(nmembers as usize);
     for _ in 0..nmembers {
@@ -93,7 +92,9 @@ impl<R: Read> Loader<R> {
       cursor += len;
       members.push((name.to_string(), slot));
     }
-    Ok((TypeDesc { name, nfields, nslots, members: members.into_boxed_slice() }, cursor))
+    let nmethods = read(&mut cursor);
+    let methods = (0..nmethods).map(|_| read(&mut cursor) as u16).collect();
+    Ok((TypeDesc { name, nfields, members: members.into_boxed_slice(), methods }, cursor))
   }
 
   fn load_thunk(&self, data: &[u8], heap: &mut OwnedHeap) -> Result<Thunk> {

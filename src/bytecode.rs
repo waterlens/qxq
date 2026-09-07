@@ -273,11 +273,29 @@ impl From<FreeVarId> for Op16 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeId(pub u16);
+
+impl From<TypeId> for Op16 {
+  fn from(id: TypeId) -> Self {
+    id.0.into()
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Location {
   Temporary,
   Slot(RegId),
   FreeVar(FreeVarId),
+  /// A struct type: an image constant, loaded where it is used.
+  Type(TypeId),
+}
+
+impl Location {
+  /// Whether the location lives in a frame; a constant does not.
+  pub fn in_frame(self) -> bool {
+    !matches!(self, Location::Type(_))
+  }
 }
 
 impl Display for Location {
@@ -287,6 +305,7 @@ impl Display for Location {
       Temporary => write!(f, "?t"),
       Slot(r) => write!(f, "r{}", r.0),
       FreeVar(fv) => write!(f, "^{}", fv.0),
+      Type(t) => write!(f, "@{}", t.0),
     }
   }
 }
@@ -786,15 +805,19 @@ pub struct Thunk {
 
 /// Image-owned description of a struct type. Member names map to slots of one
 /// array: the declared fields first, then the methods in declaration order.
+/// The VM builds the type value from it once: the description, then the
+/// closure of each method's thunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDesc {
   pub name: String,
   pub nfields: u16,
-  pub nslots: u16,
   pub members: Box<[(String, u16)]>,
+  /// The thunk of each method, in slot order.
+  pub methods: Box<[u16]>,
 }
 
 impl TypeDesc {
+  /// A description whose method thunks are still to be set.
   pub fn new(name: &str, fields: &[&str], methods: &[&str]) -> Result<Self, String> {
     let mut members: IndexMap<String, u16> = IndexMap::new();
     for (slot, name) in fields.iter().chain(methods).enumerate() {
@@ -805,8 +828,8 @@ impl TypeDesc {
     Ok(Self {
       name: name.to_string(),
       nfields: fields.len() as u16,
-      nslots: (fields.len() + methods.len()) as u16,
       members: members.into_iter().collect(),
+      methods: Box::new([]),
     })
   }
 
@@ -983,14 +1006,19 @@ impl BytecodeCtx {
     }
   }
 
-  pub fn add_type(&mut self, desc: TypeDesc) -> Option<u16> {
+  pub fn add_type(&mut self, desc: TypeDesc) -> Option<TypeId> {
     let id = u16::try_from(self.types.len()).ok()?;
     self.types.push(desc);
-    Some(id)
+    Some(TypeId(id))
   }
 
-  pub fn type_desc(&self, id: u16) -> &TypeDesc {
-    &self.types[id as usize]
+  pub fn type_desc(&self, id: TypeId) -> &TypeDesc {
+    &self.types[usize::from(id.0)]
+  }
+
+  /// Set once the method bodies are compiled, with the type already in scope.
+  pub fn set_type_methods(&mut self, id: TypeId, methods: Box<[u16]>) {
+    self.types[usize::from(id.0)].methods = methods;
   }
 
   pub fn push_thunk(&mut self, name: &str, fvlocs: Box<[Location]>, nparams: u8) {

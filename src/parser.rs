@@ -784,6 +784,8 @@ impl<'a> Parser<'a> {
       }
     }
     let _ = self.expect_paired_close(Paired::Brace, true)?;
+    // The type is in scope in its own methods.
+    self.declare_local(name);
 
     // A method body may name a binder of its recursion group declared later,
     // so free variables are settled only once every method has been parsed.
@@ -810,7 +812,6 @@ impl<'a> Parser<'a> {
       method_exprs.push(&*arena.alloc(ExprCon::Fn { name: Some(mname), params, body, info }));
     }
 
-    self.declare_local(name);
     let decl = arena.alloc(ExprCon::StructDecl {
       name,
       fields: arena.alloc_slice_copy(&fields),

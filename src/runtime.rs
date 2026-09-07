@@ -77,7 +77,7 @@ fn run(
   append_entry_thunk(&mut thunks, &diag)?;
 
   let mut native_thunks = NativeThunkSet::new(&thunks, &diag)?;
-  let mut native_types = OwnedType::from_descs(&types, &diag)?;
+  let mut native_types = OwnedType::from_descs(&types, &native_thunks, &diag)?;
   let mut result = 0;
   let stack_slots = STACK_HEADROOM_SLOTS + max_nregs;
   let status = unsafe {
@@ -135,12 +135,25 @@ impl ImageValidator {
 
     for thunk in thunks {
       for loc in thunk.fvlocs.iter() {
-        if matches!(loc, Location::Temporary) {
-          return self.diag.fail("temporary location in thunk capture list");
+        if matches!(loc, Location::Temporary | Location::Type(_)) {
+          return self.diag.fail("temporary or type location in thunk capture list");
         }
       }
       for bc in thunk.code.iter() {
         self.validate_bytecode(*bc, thunk, types)?;
+      }
+    }
+
+    // A method thunk serves as its own closure, so it captures nothing.
+    for desc in types {
+      for method in desc.methods.iter() {
+        match thunks.get(usize::from(*method)) {
+          None => return self.diag.fail(format!("method thunk of `{}` out of range", desc.name)),
+          Some(thunk) if !thunk.fvlocs.is_empty() => {
+            return self.diag.fail(format!("a method thunk of `{}` captures variables", desc.name));
+          }
+          Some(_) => {}
+        }
       }
     }
 
@@ -168,6 +181,7 @@ impl ImageValidator {
       Invoke if !string(c) => illegal("member is not a string constant"),
       Invoke if b != a + FRAME_HEADER_SIZE => illegal("call region not after destination"),
       WObj if !Tag::from(b as u8).is_words() => illegal("wrap tag is not a words object"),
+      WObj if Tag::from(b as u8) == Tag::TYPE => illegal("type values come from the image"),
       LoadR if !Val::from_raw(b as u64).is_trivial() => illegal("nontrivial raw value"),
       _ => Ok(()),
     }
@@ -243,6 +257,7 @@ fn encode_capture_locations(
       Location::Slot(reg) => Ok(vm::capture_loc { kind: 0, index: reg.0.into() }),
       Location::FreeVar(fv) => Ok(vm::capture_loc { kind: 1, index: fv.0 }),
       Location::Temporary => diag.fail("temporary location in thunk capture list"),
+      Location::Type(_) => diag.fail("type location in thunk capture list"),
     })
     .collect()
 }
@@ -255,19 +270,25 @@ impl Drop for OwnedThunk {
   }
 }
 
-/// SAFETY: `#[repr(transparent)]` over `NonNull<vm::type_desc>`, so a
-/// `Vec<OwnedType>` is handed to the VM as `*mut *mut vm::type_desc`.
+/// A type value, owned outside the VM heap like the thunks.
+///
+/// SAFETY: `#[repr(transparent)]` over `NonNull<vm::object>`, so a
+/// `Vec<OwnedType>` is handed to the VM as `*mut *mut vm::object`.
 #[repr(transparent)]
 struct OwnedType {
-  ptr: NonNull<vm::type_desc>,
+  ptr: NonNull<vm::object>,
 }
 
 impl OwnedType {
-  fn from_descs(descs: &[TypeDesc], diag: &Diagnostic) -> Result<Vec<Self>> {
-    descs.iter().map(|desc| Self::from_desc(desc, diag)).collect()
+  fn from_descs(
+    descs: &[TypeDesc],
+    thunks: &NativeThunkSet,
+    diag: &Diagnostic,
+  ) -> Result<Vec<Self>> {
+    descs.iter().map(|desc| Self::from_desc(desc, thunks, diag)).collect()
   }
 
-  fn from_desc(desc: &TypeDesc, diag: &Diagnostic) -> Result<Self> {
+  fn from_desc(desc: &TypeDesc, thunks: &NativeThunkSet, diag: &Diagnostic) -> Result<Self> {
     let members: Vec<vm::member_desc> = desc
       .members
       .iter()
@@ -277,14 +298,18 @@ impl OwnedType {
         slot: u32::from(*slot),
       })
       .collect();
+    // The validator has checked every method thunk index.
+    let methods: Vec<*mut vm::thunk> =
+      desc.methods.iter().map(|id| thunks.thunks[usize::from(*id)].as_ptr()).collect();
     let ptr = unsafe {
       vm::vm_type_alloc(
         desc.name.as_ptr().cast(),
         desc.name.len() as u32,
         desc.nfields.into(),
-        desc.nslots.into(),
         members.as_ptr(),
         members.len(),
+        methods.as_ptr(),
+        methods.len(),
       )
     };
     let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm type"))?;

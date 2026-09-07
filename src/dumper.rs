@@ -63,6 +63,7 @@ impl Dumper {
             thunk_data.push(id);
           }
           Location::Temporary => return self.diag.fail("temporary location in thunk"),
+          Location::Type(_) => return self.diag.fail("type location in thunk"),
         }
       }
 
@@ -110,12 +111,15 @@ impl Dumper {
     uleb8::encode_uleb128(ty.name.len() as u64, data);
     data.extend_from_slice(ty.name.as_bytes());
     uleb8::encode_uleb128(ty.nfields.into(), data);
-    uleb8::encode_uleb128(ty.nslots.into(), data);
     uleb8::encode_uleb128(ty.members.len() as u64, data);
     for (name, slot) in ty.members.iter() {
       uleb8::encode_uleb128((*slot).into(), data);
       uleb8::encode_uleb128(name.len() as u64, data);
       data.extend_from_slice(name.as_bytes());
+    }
+    uleb8::encode_uleb128(ty.methods.len() as u64, data);
+    for method in ty.methods.iter() {
+      uleb8::encode_uleb128((*method).into(), data);
     }
   }
 }
