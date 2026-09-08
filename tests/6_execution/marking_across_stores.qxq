@@ -1,0 +1,26 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+(* A list moves between a field and a register while many cycles run. *)
+type Box = struct {v} end;
+let rec build = fn (n) if n > 0 then (n, build(n - 1)) else () end end;
+let rec sum = fn (l) if l == () then 0 else l.1 + sum(l.2) end end;
+let rec churn = fn (n)
+  if n > 0 then churn(n - 1) + churn(n - 1) else Box{n}.v + 1 end
+end;
+let box = Box{build(20)};
+let step = fn (held)
+  let l = box.v;
+  box.v <- ();
+  let c = churn(8);
+  box.v <- l;
+  let d = churn(8);
+  sum(box.v) + sum(held) + c + d
+end;
+let rec run = fn (k, held)
+  if k > 0 then run(k - 1, held) + run(k - 1, held) else step(held) end
+end;
+run(7, build(10))
+
+(* EXPECT:
+   99456
+*)
