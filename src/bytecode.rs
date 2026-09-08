@@ -337,27 +337,6 @@ impl From<Tag> for Op8 {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct TrapId(u8);
-
-impl TrapId {
-  pub const HALT: Self = TrapId(2);
-  pub const PRINT_REGS: Self = TrapId(4);
-  pub const PRINT_REGS_HEX: Self = TrapId(5);
-  pub const ASSERT_EQ: Self = TrapId(6);
-  pub const PRINT_OBJ: Self = TrapId(7);
-  pub const HEAP_STAT: Self = TrapId(8);
-  pub const FILE_OPEN: Self = TrapId(9);
-  pub const FILE_CLOSE: Self = TrapId(10);
-  pub const FILE_EDIT: Self = TrapId(11);
-}
-
-impl From<TrapId> for Op8 {
-  fn from(x: TrapId) -> Self {
-    x.0.into()
-  }
-}
-
 impl TryFrom<usize> for Op8 {
   type Error = ();
   fn try_from(value: usize) -> Result<Self, Self::Error> {
@@ -705,7 +684,7 @@ impl Operands {
 pub struct Bytecode(pub Operator, pub Operands);
 
 define_bytecode! {
-  Trap   (ABC, OpABC, op)   fn trap(dst: Op8, o1: Op8, o2: Op8)   { dst, o1, o2 } => ("{:<12} #{}, r{}, r{}", "trap", op.dst, op.o1, op.o2),
+  Halt   (N)                fn halt()                             {}              => ("{:<12}", "halt"),
   Nop    (N)                fn nop()                              {}              => ("{:<12}", "nop"),
   Exta   (A, OpA, op)       fn exta(o1: Op24)                     { o1 }          => ("{:<12} #{}", "exta", op.o1),
   LoadI  (ABS, OpABS, op)   fn loadi(dst: Op8, o1: OpS16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadi", op.dst, op.o1),
@@ -720,6 +699,7 @@ define_bytecode! {
   Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "apply", op.dst, op.o1),
   Invoke (ABC, OpABC, op)   fn invoke(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, @{}", "invoke", op.dst, op.o1, op.o2),
   Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, fn{}", "call", op.dst, op.o1),
+  Native (AB, OpAB, op)     fn native(o1: Op16)                   { dst: 0.into(), o1 } => ("{:<12} #{}", "native", op.o1),
   Retu   (N)                fn retu()                             {}              => ("{:<12}", "retu"),
   Ret    (ABC, OpABC, op)   fn ret(src: Op8)                      { dst: src, o1: 0.into(), o2: 0.into() } => ("{:<12} r{}", "ret", op.dst),
   Retn   (AB, OpAB, op)     fn retn(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, #{}", "retn", op.dst, op.o1),
@@ -810,8 +790,8 @@ pub struct Thunk {
 pub struct TypeDesc {
   pub name: String,
   pub fields: Box<[String]>,
-  pub methods: Box<[(String, u16)]>,
-  pub functions: Box<[(String, u16)]>,
+  pub methods: Box<[(String, Option<u16>)]>,
+  pub functions: Box<[(String, Option<u16>)]>,
 }
 
 impl TypeDesc {
@@ -828,8 +808,8 @@ impl TypeDesc {
         return Err(format!("duplicate member `{name}`"));
       }
     }
-    let members = |names: &[&str]| -> Box<[(String, u16)]> {
-      names.iter().map(|n| (n.to_string(), 0)).collect()
+    let members = |names: &[&str]| -> Box<[(String, Option<u16>)]> {
+      names.iter().map(|n| (n.to_string(), None)).collect()
     };
     Ok(Self {
       name: name.to_string(),
@@ -1018,7 +998,12 @@ impl BytecodeCtx {
   }
 
   /// Set once the member bodies are compiled, with the type already in scope.
-  pub fn set_type_thunks(&mut self, id: TypeId, methods: &[u16], functions: &[u16]) {
+  pub fn set_type_thunks(
+    &mut self,
+    id: TypeId,
+    methods: &[Option<u16>],
+    functions: &[Option<u16>],
+  ) {
     let desc = &mut self.types[usize::from(id.0)];
     let members = desc.methods.iter_mut().chain(desc.functions.iter_mut());
     for (member, thunk) in members.zip(methods.iter().chain(functions)) {

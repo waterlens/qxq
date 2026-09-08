@@ -86,9 +86,9 @@ impl<R: Read> Loader<R> {
       value
     };
     let text = |cursor: &mut usize| self.read_str(data, cursor).map(str::to_string);
-    let members = |cursor: &mut usize| -> Result<Box<[(String, u16)]>> {
+    let members = |cursor: &mut usize| -> Result<Box<[(String, Option<u16>)]>> {
       (0..read(cursor))
-        .map(|_| -> Result<(String, u16)> { Ok((text(cursor)?, read(cursor) as u16)) })
+        .map(|_| Ok((text(cursor)?, read(cursor).checked_sub(1).map(|t| t as u16))))
         .collect()
     };
     let name = text(&mut cursor)?;

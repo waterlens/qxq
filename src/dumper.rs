@@ -121,7 +121,7 @@ impl Dumper {
       uleb8::encode_uleb128(members.len() as u64, data);
       for (name, thunk) in members.iter() {
         text(name, data);
-        uleb8::encode_uleb128((*thunk).into(), data);
+        uleb8::encode_uleb128(thunk.map_or(0, |t| u64::from(t) + 1), data);
       }
     }
   }

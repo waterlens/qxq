@@ -1,0 +1,7 @@
+(* RUN: {qxq|cargo run --} --dump - %s | {qxq|cargo run --} --load - *)
+let check = Builtin.assert_eq;
+check(1, 1);
+2
+(* EXPECT:
+   2
+*)

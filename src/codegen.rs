@@ -7,7 +7,7 @@ use slotmap::SlotMap;
 use crate::{
   bytecode::{
     Bytecode, BytecodeCtx, ConstantId, FloatBits, FreeVarId, Label, Location, Op8, RegId,
-    SmallConstantId, Tag, TrapId, TypeDesc, TypeId,
+    SmallConstantId, Tag, TypeDesc, TypeId,
   },
   diagnostic::{Diagnostic, Result},
   parser::{Expr, ExprRef, ExprsRef, Info, InfoKey, Init, MemberFn, SynTree},
@@ -35,6 +35,7 @@ pub struct CodeGenCtx<'a> {
   diagnostic: Rc<Diagnostic>,
   stack_frame: Stack<'a>,
   scope: Scope<'a>,
+  prelude: &'a [ExprRef<'a, InfoKey>],
   tree: ExprRef<'a, InfoKey>,
   information: SlotMap<InfoKey, Info<'a>>,
   /// The members of the type whose bodies are being compiled.
@@ -111,68 +112,6 @@ enum CmpOperand {
 enum ArithOperand {
   Reg(RegId),
   Const(SmallConstantId),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum SourceBuiltin {
-  PrintRaw,
-  PrintRawHex,
-  AssertEq,
-  PrintObject,
-  PrintHeapStat,
-  Open,
-  Close,
-  Edit,
-}
-
-impl SourceBuiltin {
-  fn from_name(name: &str) -> Option<Self> {
-    match name {
-      "print_raw" => Some(Self::PrintRaw),
-      "print_raw_hex" => Some(Self::PrintRawHex),
-      "assert_eq" => Some(Self::AssertEq),
-      "print_object" => Some(Self::PrintObject),
-      "print_heap_stat" => Some(Self::PrintHeapStat),
-      "open" => Some(Self::Open),
-      "close" => Some(Self::Close),
-      "edit" => Some(Self::Edit),
-      _ => None,
-    }
-  }
-
-  fn name(self) -> &'static str {
-    match self {
-      Self::PrintRaw => "print_raw",
-      Self::PrintRawHex => "print_raw_hex",
-      Self::AssertEq => "assert_eq",
-      Self::PrintObject => "print_object",
-      Self::PrintHeapStat => "print_heap_stat",
-      Self::Open => "open",
-      Self::Close => "close",
-      Self::Edit => "edit",
-    }
-  }
-
-  fn arity(self) -> usize {
-    match self {
-      Self::PrintHeapStat => 0,
-      Self::PrintRaw | Self::PrintRawHex | Self::PrintObject | Self::Open | Self::Close => 1,
-      Self::AssertEq | Self::Edit => 2,
-    }
-  }
-
-  fn trap_id(self) -> TrapId {
-    match self {
-      Self::PrintRaw => TrapId::PRINT_REGS,
-      Self::PrintRawHex => TrapId::PRINT_REGS_HEX,
-      Self::AssertEq => TrapId::ASSERT_EQ,
-      Self::PrintObject => TrapId::PRINT_OBJ,
-      Self::PrintHeapStat => TrapId::HEAP_STAT,
-      Self::Open => TrapId::FILE_OPEN,
-      Self::Close => TrapId::FILE_CLOSE,
-      Self::Edit => TrapId::FILE_EDIT,
-    }
-  }
 }
 
 struct ValInfo<'a> {
@@ -334,8 +273,17 @@ impl<'a> CodeGenCtx<'a> {
     let mut information = tree.information;
     let self_expr =
       &*arena.alloc(Expr::Ident(TokenStr::new("self"), information.insert(Info::default())));
-    let tree = tree.root;
-    Self { diagnostic, stack_frame, scope, tree, information, rec_group: vec![], self_expr }
+    let (prelude, tree) = (tree.prelude, tree.root);
+    Self {
+      diagnostic,
+      stack_frame,
+      scope,
+      prelude,
+      tree,
+      information,
+      rec_group: vec![],
+      self_expr,
+    }
   }
 
   fn allocate_temporary(&mut self) -> Result<RegId> {
@@ -1156,78 +1104,6 @@ impl<'a> CodeGenCtx<'a> {
     })
   }
 
-  fn emit_source_builtin_apply(
-    &mut self,
-    bc: &mut BytecodeCtx,
-    builtin: SourceBuiltin,
-    args: ExprsRef<'a, InfoKey>,
-    data: DataDest,
-    control: ControlDest,
-    next: Control,
-  ) -> Result<()> {
-    let expected = builtin.arity();
-    if args.len() != expected {
-      let plural = if expected == 1 { "" } else { "s" };
-      return self
-        .diagnostic
-        .fatal(&format!("expected {expected} argument{plural} for {}", builtin.name()));
-    }
-
-    let (regs, n_temps) = self.eval_any_loc_args(bc, args)?;
-
-    match builtin {
-      SourceBuiltin::PrintRaw | SourceBuiltin::PrintRawHex => {
-        let start = regs[0];
-        let end =
-          start.0.checked_add(1).ok_or_else(|| self.diagnostic.error("register range overflow"))?;
-        self.clean_any_loc_args(n_temps);
-        bc.push(Bytecode::trap(builtin.trap_id().into(), start.into(), end.into()));
-        self.emit_store(bc, Value::Unit, data, control, next)?;
-      }
-      SourceBuiltin::AssertEq => {
-        let lhs = regs[0];
-        let rhs = regs[1];
-        self.clean_any_loc_args(n_temps);
-        bc.push(Bytecode::trap(builtin.trap_id().into(), lhs.into(), rhs.into()));
-        self.emit_store(bc, Value::Unit, data, control, next)?;
-      }
-      SourceBuiltin::PrintObject => {
-        let value = regs[0];
-        self.clean_any_loc_args(n_temps);
-        bc.push(Bytecode::trap(builtin.trap_id().into(), value.into(), 0u8.into()));
-        self.emit_store(bc, Value::Unit, data, control, next)?;
-      }
-      SourceBuiltin::PrintHeapStat => {
-        self.clean_any_loc_args(n_temps);
-        bc.push(Bytecode::trap(builtin.trap_id().into(), 0u8.into(), 0u8.into()));
-        self.emit_store(bc, Value::Unit, data, control, next)?;
-      }
-      SourceBuiltin::Open => {
-        let path = regs[0];
-        self.clean_any_loc_args(n_temps);
-        self.emit_with_dest(bc, data, control, next, |_, bc, dst| {
-          bc.push(Bytecode::trap(builtin.trap_id().into(), path.into(), dst.into()));
-          Ok(())
-        })?;
-      }
-      SourceBuiltin::Close => {
-        let path = regs[0];
-        self.clean_any_loc_args(n_temps);
-        bc.push(Bytecode::trap(builtin.trap_id().into(), path.into(), 0u8.into()));
-        self.emit_store(bc, Value::Unit, data, control, next)?;
-      }
-      SourceBuiltin::Edit => {
-        let offset = regs[0];
-        let byte = regs[1];
-        self.clean_any_loc_args(n_temps);
-        bc.push(Bytecode::trap(builtin.trap_id().into(), offset.into(), byte.into()));
-        self.emit_store(bc, Value::Unit, data, control, next)?;
-      }
-    }
-
-    Ok(())
-  }
-
   fn emit_op(
     &mut self,
     bc: &mut BytecodeCtx,
@@ -1364,11 +1240,6 @@ impl<'a> CodeGenCtx<'a> {
           if let Some(Binding::Function(id)) = bound {
             return self.emit_function_apply(bc, id, token_str, args, data, control, next);
           }
-          if bound.is_none()
-            && let Some(builtin) = SourceBuiltin::from_name(token_str.0)
-          {
-            return self.emit_source_builtin_apply(bc, builtin, args, data, control, next);
-          }
         }
 
         let func_reg = self.allocate_temporary()?;
@@ -1395,10 +1266,7 @@ impl<'a> CodeGenCtx<'a> {
         [expr] => self.emit_expr(bc, expr, data, control, next)?,
         [exprs @ .., last_expr] => {
           for expr in exprs {
-            let l = bc.fresh_label();
-            let c = Control::Pos(l);
-            self.emit_expr(bc, expr, DataDest::Effect, ControlDest::Uncond(c), c)?;
-            bc.push_label(l);
+            self.emit_effect(bc, expr)?;
           }
           self.emit_expr(bc, last_expr, data, control, next)?;
         }
@@ -1493,7 +1361,6 @@ impl<'a> CodeGenCtx<'a> {
         Some(Binding::Var(loc)) => captured.push((*fv, loc)),
         Some(Binding::Method) => through_self = true,
         Some(Binding::Function(_)) => {}
-        None if SourceBuiltin::from_name(fv.0).is_some() => {}
         None => {
           return self.diagnostic.fail(format!("unable to find captured variable: {}", fv.0));
         }
@@ -1575,7 +1442,7 @@ impl<'a> CodeGenCtx<'a> {
     tname: &TokenStr<'a>,
     members: &[MemberFn<'a, InfoKey>],
     group: Vec<(TokenStr<'a>, Binding)>,
-  ) -> Result<Vec<u16>> {
+  ) -> Result<Vec<Option<u16>>> {
     let outer = std::mem::replace(&mut self.rec_group, group);
     let mut thunks = Vec::with_capacity(members.len());
     for member in members {
@@ -1583,8 +1450,11 @@ impl<'a> CodeGenCtx<'a> {
         let (mname, tname) = (member.name.0, tname.0);
         return self.diagnostic.fail(format!("`{mname}` of `{tname}` captures `{}`", fv.0));
       }
-      let fid = self.emit_function(bc, &None, member.params, member.body, member.info)?;
-      thunks.push(self.thunk_id(fid)?);
+      let fid = member
+        .body
+        .map(|body| self.emit_function(bc, &None, member.params, body, member.info))
+        .transpose()?;
+      thunks.push(fid.map(|id| self.thunk_id(id)).transpose()?);
     }
     self.rec_group = outer;
     Ok(thunks)
@@ -1844,8 +1714,19 @@ impl<'a> CodeGenCtx<'a> {
     self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
   }
 
+  fn emit_effect(&mut self, bc: &mut BytecodeCtx, expr: ExprRef<'a, InfoKey>) -> Result<()> {
+    let l = bc.fresh_label();
+    let c = Control::Pos(l);
+    self.emit_expr(bc, expr, DataDest::Effect, ControlDest::Uncond(c), c)?;
+    bc.push_label(l);
+    Ok(())
+  }
+
   pub fn emit_tree(&mut self, bc: &mut BytecodeCtx) -> Result<()> {
     self.scope.enter();
+    for decl in self.prelude {
+      self.emit_effect(bc, decl)?;
+    }
     self.emit_expr(
       bc,
       self.tree,

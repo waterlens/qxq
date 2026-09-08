@@ -1,22 +1,80 @@
 (* RUN: {qxq|cargo run --} --inspect --no-tree %s *)
 
-let path = "p";
-let offset = open(path);
-let wrote = edit(offset, 65);
-close(path)
+let f = File.open("p");
+f.edit(0, 65);
+f.close()
 
 (* EXPECT:
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::4 captured::[]
+   thunk::fn params::1 regs::4 captured::[]
    constants::[
-     @0: "p"
+     @0: "fsize"
+     @1: "handle"
    ]
-   loadc        r0, @0
-   trap         #9, r0, r1
-   loadi        r3, #65
-   trap         #11, r1, r3
-   loadr        r2, unit
-   trap         #10, r0, r0
-   loadr        r3, unit
+   loadty       r1, @0
+   loadfld      r1, r1, @0
+   loadfld      r3, r0, @1
+   apply        r1, #1
+   ret          r1
+
+   --- Thunk ---
+   thunk::fn params::3 regs::8 captured::[]
+   constants::[
+     @0: "fedit"
+     @1: "handle"
+   ]
+   loadty       r3, @0
+   loadfld      r3, r3, @0
+   loadfld      r5, r0, @1
+   move         r6, r1
+   move         r7, r2
+   apply        r3, #3
    ret          r3
+
+   --- Thunk ---
+   thunk::fn params::1 regs::4 captured::[]
+   constants::[
+     @0: "fclose"
+     @1: "handle"
+   ]
+   loadty       r1, @0
+   loadfld      r1, r1, @0
+   loadfld      r3, r0, @1
+   apply        r1, #1
+   ret          r1
+
+   --- Thunk ---
+   thunk::fn params::1 regs::6 captured::[]
+   constants::[
+     @0: "fopen"
+   ]
+   loadty       r1, @1
+   loadty       r3, @0
+   loadfld      r3, r3, @0
+   move         r5, r0
+   apply        r3, #1
+   move         r2, r3
+   wrap         r1, tag::struct, #2
+   ret          r1
+
+   --- Thunk ---
+   thunk::__top_thunk__ params::0 regs::6 captured::[]
+   constants::[
+     @0: "open"
+     @1: "p"
+     @2: "edit"
+     @3: "close"
+   ]
+   loadty       r1, @1
+   loadfld      r1, r1, @0
+   loadc        r3, @1
+   apply        r1, #1
+   move         r0, r1
+   move         r3, r0
+   loadi        r4, #0
+   loadi        r5, #65
+   invoke       r1, r3, @2
+   move         r3, r0
+   invoke       r1, r3, @3
+   ret          r1
 *)

@@ -1,7 +1,7 @@
 (* RUN: {qxq|cargo run --} %s *)
 
-let open = fn (x) x end;
-open(1)
+let File = fn (x) x end;
+File(1)
 
 (* EXPECT:
    1

@@ -74,7 +74,8 @@ Each type description lists its declared name, its fields, then its methods
 and its functions with their thunks, every group in declaration order. A field
 occupies the slot of its position in an instance. A member thunk captures
 nothing, so the VM builds the type value once, from the description and the
-closure of each method and function.
+closure of each method and function. A member without a thunk is native: the
+VM supplies its closure by name.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |
@@ -82,6 +83,6 @@ closure of each method and function.
 | \#Field | | | nfields | # of declared fields encoded by ULEB128 |
 | Fields | | | | the name of each field, length encoded by ULEB128 then UTF-8 |
 | \#Method | | | nmethods | # of methods encoded by ULEB128 |
-| Methods | | | | (name, thunk table index) per method, the index encoded by ULEB128 |
+| Methods | | | | (name, thunk table index + 1) per method, encoded by ULEB128, 0 for a native member |
 | \#Function | | | nfunctions | # of functions encoded by ULEB128 |
-| Functions | | | | (name, thunk table index) per function, as for methods |
+| Functions | | | | (name, thunk table index + 1) per function, as for methods |

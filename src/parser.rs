@@ -181,7 +181,7 @@ impl<I> ToSexp for Init<'_, I> {
 pub struct MemberFn<'a, I> {
   pub name: TokenStr<'a>,
   pub params: &'a [TokenStr<'a>],
-  pub body: ExprRef<'a, I>,
+  pub body: Option<ExprRef<'a, I>>,
   pub info: I,
 }
 
@@ -191,17 +191,24 @@ impl<I> MemberFn<'_, I> {
     self.params.first().is_some_and(|p| p.0 == "self")
   }
 
-  /// `(method name (params) body)` or `(function ...)`, with the body rendered.
-  fn sexp_parts<'pool>(&self, body: Sexp<'pool>, pool: &'pool SexpPool) -> Vec<Sexp<'pool>> {
+  /// `(method name (params) body)` or `(function ...)`, with the body
+  /// rendered; a native member has none.
+  fn sexp_parts<'pool>(
+    &self,
+    body: Option<Sexp<'pool>>,
+    pool: &'pool SexpPool,
+  ) -> Vec<Sexp<'pool>> {
     let kind = if self.is_method() { "method" } else { "function" };
     let params = self.params.iter().map(|x| pool.atom(x.as_ref())).collect::<Vec<_>>();
-    vec![pool.atom(kind), pool.atom(self.name.as_ref()), pool.list(params), body]
+    let mut parts = vec![pool.atom(kind), pool.atom(self.name.as_ref()), pool.list(params)];
+    parts.extend(body);
+    parts
   }
 }
 
 impl<I> ToSexp for MemberFn<'_, I> {
   fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
-    pool.list(self.sexp_parts(self.body.to_sexp(pool), pool))
+    pool.list(self.sexp_parts(self.body.map(|body| body.to_sexp(pool)), pool))
   }
 }
 
@@ -340,7 +347,7 @@ fn freevars_sexp<'pool>(
 
 impl ToSexp for InfoMember<'_> {
   fn to_sexp<'pool>(&self, pool: &'pool SexpPool) -> Sexp<'pool> {
-    let body = InfoExpr { expr: self.member.body, map: self.map }.to_sexp(pool);
+    let body = self.member.body.map(|expr| InfoExpr { expr, map: self.map }.to_sexp(pool));
     let mut parts = self.member.sexp_parts(body, pool);
     parts.extend(freevars_sexp(self.map, self.member.info, pool));
     pool.list(parts)
@@ -498,8 +505,18 @@ impl ToSexp for Info<'_> {
 }
 
 pub struct SynTree<'a, I> {
+  pub prelude: &'a [ExprRef<'a, I>],
   pub root: ExprRef<'a, I>,
   pub information: SlotMap<InfoKey, Info<'a>>,
+}
+
+const PRELUDE: &str = include_str!("prelude.qxq");
+
+/// A prelude declaration and the names its members reach for.
+struct PreludeDecl<'a> {
+  name: TokenStr<'a>,
+  decl: ExprRef<'a, InfoKey>,
+  uses: Vec<TokenStr<'a>>,
 }
 
 impl<I> std::fmt::Display for SynTree<'_, I> {
@@ -767,17 +784,21 @@ impl<'a> Parser<'a> {
 
   fn parse_function<'t>(&'t mut self, name: Option<TokenStr<'a>>) -> PeekExpr<'a> {
     let (params, body, freevars) = self.parse_function_parts(name)?;
+    let Some(body) = body else {
+      return self.diag.fail("expected function body");
+    };
     self.propagate_freevars(&freevars);
     let info = self.new_info(freevars);
     Ok(PeekResult { inner: self.arena.alloc(ExprCon::Fn { name, params, body, info }) })
   }
 
-  /// Parses `(params) body end` in a fresh function context and returns the
-  /// sorted free variables without propagating them to the parent.
+  /// Parses `(params) body end`, or `(params)` alone, in a fresh function
+  /// context and returns the sorted free variables without propagating them
+  /// to the parent.
   fn parse_function_parts<'t>(
     &'t mut self,
     name: Option<TokenStr<'a>>,
-  ) -> Result<(&'a [TokenStr<'a>], ExprRef<'a, InfoKey>, Vec<TokenStr<'a>>)> {
+  ) -> Result<(&'a [TokenStr<'a>], Option<ExprRef<'a, InfoKey>>, Vec<TokenStr<'a>>)> {
     self.enter_function(name);
     let _ = self.expect_paired_open(Paired::Parenthesis)?;
 
@@ -793,12 +814,16 @@ impl<'a> Parser<'a> {
       }
     }
     let _ = self.expect_paired_close(Paired::Parenthesis, false)?;
-    self.skip_newlines();
 
-    let body = self.parse_exprs()?;
-    let _ = self.expect_keyword(Keyword::End, true)?;
+    let body = if self.peek_keyword(Keyword::With, true) || self.peek_keyword(Keyword::End, true) {
+      None
+    } else {
+      let body = self.parse_exprs()?;
+      let _ = self.expect_keyword(Keyword::End, true)?;
+      Some(body.inner)
+    };
     let freevars = self.pop_function();
-    Ok((self.arena.alloc_slice_copy(&params), body.inner, freevars))
+    Ok((self.arena.alloc_slice_copy(&params), body, freevars))
   }
 
   fn parse_struct_decl<'t>(&'t mut self) -> PeekExpr<'a> {
@@ -1290,12 +1315,52 @@ impl<'a> Parser<'a> {
     })
   }
 
+  /// Parses each prelude declaration in a function context of its own, so
+  /// that the names it reaches for are the free variables left there.
+  fn parse_prelude(&mut self) -> Result<Vec<PreludeDecl<'a>>> {
+    let source = std::mem::replace(
+      &mut self.tokenizer,
+      Tokenizer::new(self.arena, PRELUDE, Rc::clone(&self.diag)),
+    );
+    let mut decls = vec![];
+    while self.peek_keyword(Keyword::Type, true) {
+      self.enter_function(None);
+      let decl = self.parse_expr()?.inner;
+      let uses = self.pop_function();
+      let Expr::StructDecl { name, .. } = decl else { unreachable!() };
+      decls.push(PreludeDecl { name: *name, decl, uses });
+      if self.peek_operator(";", false) {
+        self.skip_token();
+      }
+    }
+    self.expect_reach_eof()?;
+    self.tokenizer = source;
+    self.token = None;
+    Ok(decls)
+  }
+
+  /// The prelude declarations the program reaches, in declaration order.
+  fn select_prelude(&mut self, decls: Vec<PreludeDecl<'a>>) -> &'a [ExprRef<'a, InfoKey>] {
+    let mut needed = std::mem::take(&mut self.func_stack[0].freevars);
+    let mut selected = vec![];
+    for decl in decls.into_iter().rev() {
+      if needed.contains(&decl.name) {
+        needed.extend(decl.uses);
+        selected.push(decl.decl);
+      }
+    }
+    selected.reverse();
+    self.arena.alloc_slice_copy(&selected)
+  }
+
   pub fn parse(mut self) -> Result<SynTree<'a, InfoKey>> {
+    let decls = self.parse_prelude()?;
     let root = self.parse_exprs()?;
     self.skip_newlines();
     self.expect_reach_eof()?;
+    let prelude = self.select_prelude(decls);
     let information = self.information;
-    Ok(SynTree { root: root.inner, information })
+    Ok(SynTree { prelude, root: root.inner, information })
   }
 }
 

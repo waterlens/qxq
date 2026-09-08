@@ -60,6 +60,7 @@ fn main() {
     .allowlist_function("vm_thunk_free")
     .allowlist_function("vm_type_alloc")
     .allowlist_function("vm_type_free")
+    .allowlist_function("vm_native_thunk")
     .allowlist_function("vm_const_from_i64")
     .allowlist_function("vm_const_from_f64")
     .allowlist_function("vm_heap_alloc")

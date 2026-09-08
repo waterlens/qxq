@@ -1,0 +1,43 @@
+(* RUN: {qxq|cargo run --} --inspect --no-tree %s *)
+
+let v = 42;
+Builtin.print_raw(v);
+Builtin.print_raw_hex(v);
+Builtin.assert_eq(v, 42);
+Builtin.print_object("hi");
+Builtin.heap_stat()
+
+(* EXPECT:
+   --- Thunk ---
+   thunk::__top_thunk__ params::0 regs::5 captured::[]
+   constants::[
+     @0: "print_raw"
+     @1: "print_raw_hex"
+     @2: "assert_eq"
+     @3: "print_object"
+     @4: "hi"
+     @5: "heap_stat"
+   ]
+   loadi        r0, #42
+   loadty       r1, @0
+   loadfld      r1, r1, @0
+   move         r3, r0
+   apply        r1, #1
+   loadty       r1, @0
+   loadfld      r1, r1, @1
+   move         r3, r0
+   apply        r1, #1
+   loadty       r1, @0
+   loadfld      r1, r1, @2
+   move         r3, r0
+   loadi        r4, #42
+   apply        r1, #2
+   loadty       r1, @0
+   loadfld      r1, r1, @3
+   loadc        r3, @4
+   apply        r1, #1
+   loadty       r1, @0
+   loadfld      r1, r1, @5
+   apply        r1, #0
+   ret          r1
+*)

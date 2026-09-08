@@ -1,0 +1,18 @@
+type Builtin = struct {}
+  with fn assert_eq(a, b)
+  with fn print_raw(v)
+  with fn print_raw_hex(v)
+  with fn print_object(v)
+  with fn heap_stat()
+  with fn fopen(path)
+  with fn fsize(handle)
+  with fn fedit(handle, offset, byte)
+  with fn fclose(handle)
+end;
+
+type File = struct {handle}
+  with fn open(path) File{Builtin.fopen(path)} end
+  with fn size(self) Builtin.fsize(self.handle) end
+  with fn edit(self, offset, byte) Builtin.fedit(self.handle, offset, byte) end
+  with fn close(self) Builtin.fclose(self.handle) end
+end

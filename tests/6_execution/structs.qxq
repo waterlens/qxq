@@ -41,7 +41,7 @@ let make = fn (k)
   Two{T{1, k}, T{2, k}}
 end;
 let r = r + if make(10).p.get() + make(20).q.get() == 11 + 22 then 0 else 256 end;
-assert_eq(make(1).p.get, make(2).q.get);
+Builtin.assert_eq(make(1).p.get, make(2).q.get);
 
 let build = fn (n) P{n, n, n} end;
 let r = r + if build(4).sum() == 444 then 0 else 512 end;

@@ -2,7 +2,7 @@ use std::{ffi::CStr, ptr::NonNull, rc::Rc};
 
 use crate::{
   bytecode::{
-    BinaryRepr, Bytecode, BytecodeImage, Location, Operands, Operator, Tag, Thunk, TrapId, TypeDesc,
+    BinaryRepr, Bytecode, BytecodeImage, Location, Operands, Operator, Tag, Thunk, TypeDesc,
   },
   diagnostic::{Diagnostic, Result},
   val::Val,
@@ -106,11 +106,7 @@ fn append_entry_thunk(thunks: &mut Vec<Thunk>, diag: &Diagnostic) -> Result<()> 
     (thunks.len() - 1).try_into().map_err(|_| diag.error("too many functions to execute"))?;
   thunks.push(Thunk {
     name: "__entry__".to_string(),
-    code: vec![
-      Bytecode::call(0u8.into(), top_idx.into()),
-      Bytecode::trap(TrapId::HALT.into(), 0u8.into(), 0u8.into()),
-    ]
-    .into(),
+    code: vec![Bytecode::call(0u8.into(), top_idx.into()), Bytecode::halt()].into(),
     fvlocs: Box::new([]),
     nparams: 0,
     nregs: 0,
@@ -147,6 +143,7 @@ impl ImageValidator {
     // A member thunk serves as its own closure, so it captures nothing.
     for desc in types {
       for (name, thunk) in desc.methods.iter().chain(desc.functions.iter()) {
+        let Some(thunk) = thunk else { continue };
         match thunks.get(usize::from(*thunk)) {
           None => return self.diag.fail(format!("thunk of `{}.{name}` out of range", desc.name)),
           Some(thunk) if !thunk.fvlocs.is_empty() => {
@@ -183,6 +180,7 @@ impl ImageValidator {
       WObj if !Tag::from(b as u8).is_words() => illegal("wrap tag is not a words object"),
       WObj if Tag::from(b as u8) == Tag::TYPE => illegal("type values come from the image"),
       LoadR if !Val::from_raw(b as u64).is_trivial() => illegal("nontrivial raw value"),
+      Native => illegal("native thunks come from the vm"),
       _ => Ok(()),
     }
   }
@@ -297,8 +295,13 @@ impl OwnedType {
       .map(|name| vm::member_desc { name: name.as_ptr().cast(), len: name.len() as u32 })
       .collect();
     // The validator has checked every member thunk index.
-    let closures: Vec<*mut vm::thunk> =
-      callables().map(|(_, id)| thunks.thunks[usize::from(*id)].as_ptr()).collect();
+    let closures = callables()
+      .map(|(name, thunk)| match thunk {
+        Some(id) => Ok(thunks.thunks[usize::from(*id)].as_ptr()),
+        None => native_thunk(name)
+          .ok_or_else(|| diag.error(format!("no native for `{}.{name}`", desc.name))),
+      })
+      .collect::<Result<Vec<_>>>()?;
     let ptr = unsafe {
       vm::vm_type_alloc(
         desc.name.as_ptr().cast(),
@@ -313,6 +316,11 @@ impl OwnedType {
     let ptr = NonNull::new(ptr).ok_or_else(|| diag.error("failed to allocate vm type"))?;
     Ok(Self { ptr })
   }
+}
+
+fn native_thunk(name: &str) -> Option<*mut vm::thunk> {
+  let ptr = unsafe { vm::vm_native_thunk(name.as_ptr().cast(), name.len() as u32) };
+  (!ptr.is_null()).then_some(ptr)
 }
 
 impl Drop for OwnedType {
