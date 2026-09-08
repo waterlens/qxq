@@ -1,4 +1,3 @@
-(* SKIP: segfaults once enough closures and structs have been allocated *)
 (* RUN: {qxq|cargo run --} %s *)
 
 type P = struct {x} with fn get(self) self.x end end;

@@ -1,0 +1,28 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+(* A fresh frame must not scan what an earlier frame left in its registers. *)
+type P = struct {x} end;
+let rec probe = fn (n)
+  let a = (n, n, n, n, n, n, n, n);
+  let b = (n, n, n, n, n, n, n, n);
+  let c = (n, n, n, n, n, n, n, n);
+  let d = (n, n, n, n, n, n, n, n);
+  let e = (n, n, n, n, n, n, n, n);
+  let f = (n, n, n, n, n, n, n, n);
+  let g = (n, n, n, n, n, n, n, n);
+  if n > 0 then probe(n - 1) + a.1 else 0 end
+end;
+let rec fan = fn (n)
+  let x = if n > 0 then fan(n - 1) else 0 end;
+  if n > 0 then fan(n - 1) + x else (n, n, n).1 + P{n}.x end
+end;
+let rec cycle = fn (k)
+  let r = probe(15);
+  let s = fan(13);
+  if k > 0 then cycle(k - 1) + r + s else r + s end
+end;
+cycle(6)
+
+(* EXPECT:
+   840
+*)
