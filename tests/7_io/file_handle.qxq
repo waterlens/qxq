@@ -1,0 +1,9 @@
+(* RUN: {qxq|cargo run --} %s && rm -f /tmp/qxq_file_handle.bin *)
+
+let f = File.open("/tmp/qxq_file_handle.bin");
+f.close();
+f
+
+(* EXPECT:
+   File{handle = <opaque>}
+*)

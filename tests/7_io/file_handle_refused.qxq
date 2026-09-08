@@ -1,0 +1,4 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: not a file
+*)
+Builtin.fclose(1)

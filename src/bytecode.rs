@@ -19,6 +19,7 @@ impl Tag {
   pub const STRUCT: Self = Tag(4);
   pub const THUNK: Self = Tag(5);
   pub const STR: Self = Tag(6);
+  pub const OPAQUE: Self = Tag(7);
 
   /// Words objects, whose every slot is a value, precede the exotic layouts.
   pub fn is_words(self) -> bool {
@@ -61,6 +62,7 @@ impl Display for Tag {
       Self::STRUCT => "struct",
       Self::THUNK => "thunk",
       Self::STR => "str",
+      Self::OPAQUE => "opaque",
       _ => return write!(f, "tag::{}", self.0),
     };
     write!(f, "tag::{name}")
