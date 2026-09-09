@@ -136,7 +136,7 @@ impl ImageValidator {
         }
       }
       for (i, bc) in thunk.code.iter().enumerate() {
-        self.validate_bytecode(*bc, &thunk.code[i + 1..], thunk, types)?;
+        self.validate_bytecode(*bc, &thunk.code[i + 1..], thunk, thunks.len(), types)?;
       }
     }
 
@@ -162,6 +162,7 @@ impl ImageValidator {
     bytecode: Bytecode,
     following: &[Bytecode],
     thunk: &Thunk,
+    nthunks: usize,
     types: &[TypeDesc],
   ) -> Result<()> {
     use Operator::*;
@@ -201,6 +202,7 @@ impl ImageValidator {
       Invoke | InvokeInd if b != a + FRAME_HEADER_SIZE => {
         illegal("call region not after destination")
       }
+      Call if b >= nthunks => illegal("thunk out of range"),
       WObj if !Tag::from(b as u8).is_words() => illegal("wrap tag is not a words object"),
       WObj if Tag::from(b as u8) == Tag::TYPE => illegal("type values come from the image"),
       LoadR if !Val::from_raw(b as u64).is_trivial() => illegal("nontrivial raw value"),

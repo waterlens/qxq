@@ -836,6 +836,11 @@ impl TypeDesc {
   pub fn method(&self, name: &str) -> Option<usize> {
     self.methods.iter().position(|(m, _)| m == name)
   }
+
+  /// The thunk of the function, once it is compiled.
+  pub fn function_thunk(&self, name: &str) -> Option<u16> {
+    self.functions.iter().find(|(f, _)| f == name).and_then(|(_, thunk)| *thunk)
+  }
 }
 
 impl ThunkCtx {

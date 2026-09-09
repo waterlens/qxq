@@ -64,21 +64,18 @@ f.close()
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::6 captured::[]
    constants::[
-     @0: "open"
-     @1: "p"
-     @2: "edit"
-     @3: "close"
+     @0: "p"
+     @1: "edit"
+     @2: "close"
    ]
-   loadty       r1, ty1
-   loadmem      r1, r1, @0
-   loadc        r3, @1
-   apply        r1, #1
+   loadc        r3, @0
+   call         r1, fn3
    move         r0, r1
    move         r3, r0
    loadi        r4, #0
    loadi        r5, #65
-   invoke       r1, r3, @2
+   invoke       r1, r3, @1
    move         r3, r0
-   invoke       r1, r3, @3
+   invoke       r1, r3, @2
    ret          r1
 *)

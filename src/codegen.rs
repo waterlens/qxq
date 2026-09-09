@@ -1838,6 +1838,30 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
+    let args_len = self.emit_call_args(bc, args)?;
+    bc.push(Bytecode::apply(func_reg.into(), args_len.into()));
+    self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
+  }
+
+  /// Calls a thunk of the image directly; the VM fills the closure slot.
+  fn emit_call(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    thunk: u16,
+    args: ExprsRef<'a, InfoKey>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let dst = self.allocate_temporary()?;
+    self.emit_call_args(bc, args)?;
+    bc.push(Bytecode::call(dst.into(), thunk.into()));
+    self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
+  }
+
+  /// Lays out a call region above its closure slot: the return address, then
+  /// the arguments, popped again so that the slot is left as the result.
+  fn emit_call_args(&mut self, bc: &mut BytecodeCtx, args: ExprsRef<'a, InfoKey>) -> Result<u16> {
     let _frame_ra = self.allocate_temporary()?;
     let mut args_regs = Vec::with_capacity(args.len());
     for _ in 0..args.len() {
@@ -1852,12 +1876,11 @@ impl<'a> CodeGenCtx<'a> {
       reg_pop!(self);
     }
     reg_pop!(self);
-    bc.push(Bytecode::apply(func_reg.into(), args_len.into()));
-    self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
+    Ok(args_len)
   }
 
-  /// Calls a function of a type: its closure comes from the type value and
-  /// takes no receiver.
+  /// Calls a function of a type, which takes no receiver: its thunk directly
+  /// once compiled, else its closure from the type value.
   fn emit_function_apply(
     &mut self,
     bc: &mut BytecodeCtx,
@@ -1868,6 +1891,9 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
+    if let Some(thunk) = bc.type_desc(id).function_thunk(name.0) {
+      return self.emit_call(bc, thunk, args, data, control, next);
+    }
     let func_reg = self.allocate_temporary()?;
     self.reify_function(bc, func_reg, id, name)?;
     self.emit_apply(bc, func_reg, args, data, control, next)

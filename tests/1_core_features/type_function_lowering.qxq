@@ -50,21 +50,15 @@ Counter.twice(2).n + Counter.zero().add(1).n
    thunk::__top_thunk__ params::0 regs::6 captured::[]
    constants::[
      @0: "n"
-     @1: "twice"
-     @2: "zero"
-     @3: "add"
+     @1: "add"
    ]
-   loadty       r0, ty0
-   loadmem      r0, r0, @1
    loadi        r2, #2
-   apply        r0, #1
+   call         r0, fn2
    loadmem      r0, r0, @0
-   loadty       r4, ty0
-   loadmem      r4, r4, @2
-   apply        r4, #0
+   call         r4, fn1
    move         r3, r4
    loadi        r4, #1
-   invoke       r1, r3, @3
+   invoke       r1, r3, @1
    loadmem      r1, r1, @0
    add.dd       r0, r0, r1
    ret          r0
