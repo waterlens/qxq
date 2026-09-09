@@ -50,7 +50,7 @@ let o = ABC{1, 2, 3};
    loadind      r2, r2, #1
    exta         #1
    add.dd       r1, r1, r2
-   loadfld      r2, r0, @1
+   loadmem      r2, r0, @1
    add.dd       r1, r1, r2
    ret          r1
 *)

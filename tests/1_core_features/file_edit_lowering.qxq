@@ -11,7 +11,7 @@ f.close()
      @0: "fsize"
    ]
    loadty       r1, @0
-   loadfld      r1, r1, @0
+   loadmem      r1, r1, @0
    loadslot     r3, r0, #0
    exta         #1
    apply        r1, #1
@@ -23,7 +23,7 @@ f.close()
      @0: "fedit"
    ]
    loadty       r3, @0
-   loadfld      r3, r3, @0
+   loadmem      r3, r3, @0
    loadslot     r5, r0, #0
    exta         #1
    move         r6, r1
@@ -37,7 +37,7 @@ f.close()
      @0: "fclose"
    ]
    loadty       r1, @0
-   loadfld      r1, r1, @0
+   loadmem      r1, r1, @0
    loadslot     r3, r0, #0
    exta         #1
    apply        r1, #1
@@ -50,7 +50,7 @@ f.close()
    ]
    loadty       r1, @1
    loadty       r3, @0
-   loadfld      r3, r3, @0
+   loadmem      r3, r3, @0
    move         r5, r0
    apply        r3, #1
    move         r2, r3
@@ -66,7 +66,7 @@ f.close()
      @3: "close"
    ]
    loadty       r1, @1
-   loadfld      r1, r1, @0
+   loadmem      r1, r1, @0
    loadc        r3, @1
    apply        r1, #1
    move         r0, r1

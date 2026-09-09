@@ -31,9 +31,9 @@ Counter.twice(2).n + Counter.zero().add(1).n
      @1: "zero"
    ]
    loadty       r4, @0
-   loadfld      r4, r4, @0
+   loadmem      r4, r4, @0
    loadty       r8, @0
-   loadfld      r8, r8, @1
+   loadmem      r8, r8, @1
    apply        r8, #0
    move         r6, r8
    move         r7, r0
@@ -52,17 +52,17 @@ Counter.twice(2).n + Counter.zero().add(1).n
      @3: "add"
    ]
    loadty       r0, @0
-   loadfld      r0, r0, @1
+   loadmem      r0, r0, @1
    loadi        r2, #2
    apply        r0, #1
-   loadfld      r0, r0, @0
+   loadmem      r0, r0, @0
    loadty       r4, @0
-   loadfld      r4, r4, @2
+   loadmem      r4, r4, @2
    apply        r4, #0
    move         r3, r4
    loadi        r4, #1
    invoke       r1, r3, @3
-   loadfld      r1, r1, @0
+   loadmem      r1, r1, @0
    add.dd       r0, r0, r1
    ret          r0
 *)

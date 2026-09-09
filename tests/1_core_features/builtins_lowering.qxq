@@ -20,24 +20,24 @@ Builtin.heap_stat()
    ]
    loadi        r0, #42
    loadty       r1, @0
-   loadfld      r1, r1, @0
+   loadmem      r1, r1, @0
    move         r3, r0
    apply        r1, #1
    loadty       r1, @0
-   loadfld      r1, r1, @1
+   loadmem      r1, r1, @1
    move         r3, r0
    apply        r1, #1
    loadty       r1, @0
-   loadfld      r1, r1, @2
+   loadmem      r1, r1, @2
    move         r3, r0
    loadi        r4, #42
    apply        r1, #2
    loadty       r1, @0
-   loadfld      r1, r1, @3
+   loadmem      r1, r1, @3
    loadc        r3, @4
    apply        r1, #1
    loadty       r1, @0
-   loadfld      r1, r1, @5
+   loadmem      r1, r1, @5
    apply        r1, #0
    ret          r1
 *)

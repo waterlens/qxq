@@ -393,7 +393,7 @@ impl<'a> CodeGenCtx<'a> {
   ) -> Result<()> {
     self.reify_type(bc, r, id);
     let m = self.member_constant(bc, name)?;
-    bc.push(Bytecode::loadfield(r.into(), r.into(), m));
+    bc.push(Bytecode::loadmem(r.into(), r.into(), m));
     Ok(())
   }
 
@@ -1655,7 +1655,7 @@ impl<'a> CodeGenCtx<'a> {
     next: Control,
   ) -> Result<()> {
     let access = self.member_access(bc, receiver, member)?;
-    self.emit_load_field(bc, receiver, access, data, control, next)
+    self.emit_load_member(bc, receiver, access, data, control, next)
   }
 
   fn emit_index(
@@ -1668,7 +1668,7 @@ impl<'a> CodeGenCtx<'a> {
     next: Control,
   ) -> Result<()> {
     let access = self.index_access(bc, receiver, index)?;
-    self.emit_load_field(bc, receiver, access, data, control, next)
+    self.emit_load_member(bc, receiver, access, data, control, next)
   }
 
   // The receiver is evaluated before the value; the assignment itself is unit.
@@ -1693,7 +1693,7 @@ impl<'a> CodeGenCtx<'a> {
     let (regs, n_temps) = self.eval_any_loc_args(bc, &[receiver, value])?;
     let (recv, src) = (regs[0].into(), regs[1].into());
     match access {
-      MemberAccess::Named(m) => bc.push(Bytecode::setfield(src, recv, m)),
+      MemberAccess::Named(m) => bc.push(Bytecode::setmem(src, recv, m)),
       MemberAccess::Slot(id, k) => {
         bc.push(Bytecode::setslot(src, recv, k));
         bc.push(Bytecode::exta(id.0.into()));
@@ -1707,7 +1707,7 @@ impl<'a> CodeGenCtx<'a> {
     self.emit_store(bc, Value::Unit, data, control, next)
   }
 
-  fn emit_load_field(
+  fn emit_load_member(
     &mut self,
     bc: &mut BytecodeCtx,
     receiver: ExprRef<'a, InfoKey>,
@@ -1721,7 +1721,7 @@ impl<'a> CodeGenCtx<'a> {
     self.clean_any_loc_args(n_temps);
     self.emit_with_dest(bc, data, control, next, |_, bc, r| {
       match access {
-        MemberAccess::Named(m) => bc.push(Bytecode::loadfield(r.into(), recv.into(), m)),
+        MemberAccess::Named(m) => bc.push(Bytecode::loadmem(r.into(), recv.into(), m)),
         MemberAccess::Slot(id, k) => {
           bc.push(Bytecode::loadslot(r.into(), recv.into(), k));
           bc.push(Bytecode::exta(id.0.into()));

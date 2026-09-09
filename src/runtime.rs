@@ -184,9 +184,7 @@ impl ImageValidator {
     match operator {
       LoadFree if b > thunk.fvlocs.len() => illegal("free variable out of range"),
       LoadType if b >= types.len() => illegal("type out of range"),
-      LoadField | SetField if !string(c) && !position(c) => {
-        illegal("member is not a string or int")
-      }
+      LoadMem | SetMem if !string(c) && !position(c) => illegal("member is not a string or int"),
       LoadSlot | SetSlot | LoadInd | SetInd if !typed_field() => {
         illegal("field is not in the type of the exta")
       }
@@ -536,11 +534,11 @@ mod tests {
       constants: constants.into(),
     };
     let string = OwnedHeap::new(&diag).unwrap().alloc_str("x").unwrap();
-    let setfield = Bytecode::setfield(0.into(), 1.into(), 0.into());
-    assert!(validator.validate(&[thunk(vec![setfield], vec![])], &[]).is_err());
-    assert!(validator.validate(&[thunk(vec![setfield], vec![Val::from_f64(1.0)])], &[]).is_err());
-    assert!(validator.validate(&[thunk(vec![setfield], vec![Val::from_i32(1)])], &[]).is_ok());
-    assert!(validator.validate(&[thunk(vec![setfield], vec![string])], &[]).is_ok());
+    let setmem = Bytecode::setmem(0.into(), 1.into(), 0.into());
+    assert!(validator.validate(&[thunk(vec![setmem], vec![])], &[]).is_err());
+    assert!(validator.validate(&[thunk(vec![setmem], vec![Val::from_f64(1.0)])], &[]).is_err());
+    assert!(validator.validate(&[thunk(vec![setmem], vec![Val::from_i32(1)])], &[]).is_ok());
+    assert!(validator.validate(&[thunk(vec![setmem], vec![string])], &[]).is_ok());
     let invoke = Bytecode::invoke(0.into(), 2.into(), 0.into());
     assert!(validator.validate(&[thunk(vec![invoke], vec![string])], &[]).is_ok());
     assert!(validator.validate(&[thunk(vec![invoke], vec![Val::from_i32(1)])], &[]).is_err());
