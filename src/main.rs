@@ -90,7 +90,14 @@ fn print_tree<T: std::fmt::Display>(tree: T) {
   println!("{tree}");
 }
 
-fn print_thunks(image: &bytecode::BytecodeImage) {
+fn print_image(image: &bytecode::BytecodeImage) {
+  if !image.types().is_empty() {
+    println!("--- Type ---");
+    for ty in image.types() {
+      println!("{ty}");
+    }
+    println!();
+  }
   println!("--- Thunk ---");
   print!(
     "{}",
@@ -305,7 +312,7 @@ fn run_repl(diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
                 let image = bc.finalize();
                 let finalize_dur = finalize_start.elapsed();
                 if config.inspect {
-                  print_thunks(&image);
+                  print_image(&image);
                   if config.elapsed {
                     print_repl_timings(&ReplTimings {
                       parse: parse_dur,
@@ -409,7 +416,7 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
           loader.load(heap)?
         };
         if cli.inspect {
-          print_thunks(&image);
+          print_image(&image);
         } else {
           println!("{}", runtime::execute(image, Rc::clone(&diag))?);
         }
@@ -445,7 +452,7 @@ fn run(cli: Cli, diag: Rc<diagnostic::Diagnostic>) -> Result<()> {
         }
       } else {
         if cli.inspect {
-          print_thunks(&image);
+          print_image(&image);
         } else {
           println!("{}", runtime::execute(image, Rc::clone(&diag))?);
         }

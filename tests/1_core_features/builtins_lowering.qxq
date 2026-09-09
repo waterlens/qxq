@@ -8,6 +8,9 @@ Builtin.print_object("hi");
 Builtin.heap_stat()
 
 (* EXPECT:
+   --- Type ---
+   type::Builtin fields::[] methods::[] functions::[assert_eq as native, print_raw as native, print_raw_hex as native, print_object as native, heap_stat as native, fopen as native, fsize as native, fedit as native, fclose as native]
+
    --- Thunk ---
    thunk::__top_thunk__ params::0 regs::5 captured::[]
    constants::[
@@ -19,24 +22,24 @@ Builtin.heap_stat()
      @5: "heap_stat"
    ]
    loadi        r0, #42
-   loadty       r1, @0
+   loadty       r1, ty0
    loadmem      r1, r1, @0
    move         r3, r0
    apply        r1, #1
-   loadty       r1, @0
+   loadty       r1, ty0
    loadmem      r1, r1, @1
    move         r3, r0
    apply        r1, #1
-   loadty       r1, @0
+   loadty       r1, ty0
    loadmem      r1, r1, @2
    move         r3, r0
    loadi        r4, #42
    apply        r1, #2
-   loadty       r1, @0
+   loadty       r1, ty0
    loadmem      r1, r1, @3
    loadc        r3, @4
    apply        r1, #1
-   loadty       r1, @0
+   loadty       r1, ty0
    loadmem      r1, r1, @5
    apply        r1, #0
    ret          r1

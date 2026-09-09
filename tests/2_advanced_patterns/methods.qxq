@@ -11,6 +11,9 @@ day.get_year() + day.get_month() + day.get_day()
 (* EXPECT:
    --- Syntax Tree ---
    (block (type Date (struct (fields year month day) (method get_year (self) (member self year)) (method get_month (self) (member self month)) (method get_day (self) (member self day)))) (let day (construct Date (init year 2026) (init _ 1) (init day 2))) (+ (+ (member-apply day get_year) (member-apply day get_month)) (member-apply day get_day)))
+   --- Type ---
+   type::Date fields::[year, month, day] methods::[get_year as fn0, get_month as fn1, get_day as fn2] functions::[]
+
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
    loadslot     r1, r0, #0
@@ -36,7 +39,7 @@ day.get_year() + day.get_month() + day.get_day()
      @1: "get_month"
      @2: "get_day"
    ]
-   loadty       r0, @0
+   loadty       r0, ty0
    loadi        r1, #2026
    loadi        r2, #1
    loadi        r3, #2

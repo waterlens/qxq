@@ -309,7 +309,7 @@ impl Display for Location {
       Temporary => write!(f, "?t"),
       Slot(r) => write!(f, "r{}", r.0),
       FreeVar(fv) => write!(f, "^{}", fv.0),
-      Type(t) => write!(f, "@{}", t.0),
+      Type(t) => write!(f, "ty{}", t.0),
     }
   }
 }
@@ -695,7 +695,7 @@ define_bytecode! {
   LoaduI (AB, OpAB, op)     fn loadui(dst: Op8, o1: Op16)         { dst, o1 }     => ("{:<12} r{}, #{}", "loadui", op.dst, op.o1),
   LoadR  (AB, OpAB, op)     fn loadr(dst: Op8, raw: Op16)         { dst, o1: raw } => ("{:<12} r{}, {}", "loadr", op.dst, RawImm(u16::from(op.o1))),
   LoadC  (AB, OpAB, op)     fn loadc(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, @{}", "loadc", op.dst, op.o1),
-  LoadType (AB, OpAB, op)   fn loadtype(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, @{}", "loadty", op.dst, op.o1),
+  LoadType (AB, OpAB, op)   fn loadtype(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, ty{}", "loadty", op.dst, op.o1),
   LoadFree (AB, OpAB, op)   fn loadfree(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, ^{}", "loadfv", op.dst, op.o1),
   LoadMem (ABC, OpABC, op)  fn loadmem(dst: Op8, o1: Op8, o2: Op8)   { dst, o1, o2 } => ("{:<12} r{}, r{}, @{}", "loadmem", op.dst, op.o1, op.o2),
   SetMem (ABC, OpABC, op)   fn setmem(src: Op8, o1: Op8, o2: Op8)    { dst: src, o1, o2 } => ("{:<12} r{}, r{}, @{}", "setmem", op.dst, op.o1, op.o2),
@@ -949,6 +949,32 @@ impl Display for Thunk {
       writeln!(f, "{code}")?;
     }
     Ok(())
+  }
+}
+
+impl Display for TypeDesc {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn members(
+      f: &mut fmt::Formatter<'_>,
+      label: &str,
+      members: &[(String, Option<u16>)],
+    ) -> fmt::Result {
+      write!(f, " {label}::[")?;
+      for (i, (name, thunk)) in members.iter().enumerate() {
+        if i != 0 {
+          f.write_str(", ")?;
+        }
+        match thunk {
+          Some(index) => write!(f, "{name} as fn{index}")?,
+          None => write!(f, "{name} as native")?,
+        }
+      }
+      f.write_str("]")
+    }
+
+    write!(f, "type::{} fields::[{}]", self.name, self.fields.join(", "))?;
+    members(f, "methods", &self.methods)?;
+    members(f, "functions", &self.functions)
   }
 }
 

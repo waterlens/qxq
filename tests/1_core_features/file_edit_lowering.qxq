@@ -5,12 +5,16 @@ f.edit(0, 65);
 f.close()
 
 (* EXPECT:
+   --- Type ---
+   type::Builtin fields::[] methods::[] functions::[assert_eq as native, print_raw as native, print_raw_hex as native, print_object as native, heap_stat as native, fopen as native, fsize as native, fedit as native, fclose as native]
+   type::File fields::[handle] methods::[size as fn0, edit as fn1, close as fn2] functions::[open as fn3]
+
    --- Thunk ---
    thunk::fn params::1 regs::4 captured::[]
    constants::[
      @0: "fsize"
    ]
-   loadty       r1, @0
+   loadty       r1, ty0
    loadmem      r1, r1, @0
    loadslot     r3, r0, #0
    exta         #1
@@ -22,7 +26,7 @@ f.close()
    constants::[
      @0: "fedit"
    ]
-   loadty       r3, @0
+   loadty       r3, ty0
    loadmem      r3, r3, @0
    loadslot     r5, r0, #0
    exta         #1
@@ -36,7 +40,7 @@ f.close()
    constants::[
      @0: "fclose"
    ]
-   loadty       r1, @0
+   loadty       r1, ty0
    loadmem      r1, r1, @0
    loadslot     r3, r0, #0
    exta         #1
@@ -48,8 +52,8 @@ f.close()
    constants::[
      @0: "fopen"
    ]
-   loadty       r1, @1
-   loadty       r3, @0
+   loadty       r1, ty1
+   loadty       r3, ty0
    loadmem      r3, r3, @0
    move         r5, r0
    apply        r3, #1
@@ -65,7 +69,7 @@ f.close()
      @2: "edit"
      @3: "close"
    ]
-   loadty       r1, @1
+   loadty       r1, ty1
    loadmem      r1, r1, @0
    loadc        r3, @1
    apply        r1, #1

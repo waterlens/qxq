@@ -8,9 +8,12 @@ Counter.twice(2).n + Counter.zero().add(1).n
 (* EXPECT:
    --- Syntax Tree ---
    (block (type Counter (struct (fields n) (method add (self k) (construct Counter (init _ (+ (member self n) k)))) (function zero () (construct Counter (init _ 0))) (function twice (k) (member-apply (member-apply Counter add (zero) k) add k)))) (+ (member (member-apply Counter twice 2) n) (member (member-apply (member-apply Counter zero) add 1) n)))
+   --- Type ---
+   type::Counter fields::[n] methods::[add as fn0] functions::[zero as fn1, twice as fn2]
+
    --- Thunk ---
    thunk::fn params::2 regs::5 captured::[]
-   loadty       r2, @0
+   loadty       r2, ty0
    loadslot     r4, r0, #0
    exta         #0
    add.dd       r3, r4, r1
@@ -19,7 +22,7 @@ Counter.twice(2).n + Counter.zero().add(1).n
 
    --- Thunk ---
    thunk::fn params::0 regs::2 captured::[]
-   loadty       r0, @0
+   loadty       r0, ty0
    loadi        r1, #0
    wrap         r0, tag::struct, #2
    ret          r0
@@ -30,9 +33,9 @@ Counter.twice(2).n + Counter.zero().add(1).n
      @0: "add"
      @1: "zero"
    ]
-   loadty       r4, @0
+   loadty       r4, ty0
    loadmem      r4, r4, @0
-   loadty       r8, @0
+   loadty       r8, ty0
    loadmem      r8, r8, @1
    apply        r8, #0
    move         r6, r8
@@ -51,12 +54,12 @@ Counter.twice(2).n + Counter.zero().add(1).n
      @2: "zero"
      @3: "add"
    ]
-   loadty       r0, @0
+   loadty       r0, ty0
    loadmem      r0, r0, @1
    loadi        r2, #2
    apply        r0, #1
    loadmem      r0, r0, @0
-   loadty       r4, @0
+   loadty       r4, ty0
    loadmem      r4, r4, @2
    apply        r4, #0
    move         r3, r4

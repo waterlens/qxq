@@ -9,6 +9,9 @@ c.twice(2) + c.later()(3)
 (* EXPECT:
    --- Syntax Tree ---
    (block (type Counter (struct (fields n) (method add (self k) (+ (member self n) k)) (method twice (self k) (+ (add k) (member-apply self add k))) (method later (self) (fn (k) (add k))))) (let c (construct Counter (init n 1))) (+ (member-apply c twice 2) ((member-apply c later) 3)))
+   --- Type ---
+   type::Counter fields::[n] methods::[add as fn0, twice as fn1, later as fn3] functions::[]
+
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
    loadslot     r2, r0, #0
@@ -51,7 +54,7 @@ c.twice(2) + c.later()(3)
      @0: "twice"
      @1: "later"
    ]
-   loadty       r0, @0
+   loadty       r0, ty0
    loadi        r1, #1
    wrap         r0, tag::struct, #2
    move         r3, r0
