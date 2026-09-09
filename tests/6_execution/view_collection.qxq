@@ -1,0 +1,20 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+(* Views in a register and in a field stay valid while many cycles run, and
+   print as their type. *)
+type ABC = struct {a, b, c} end;
+type BC = struct {b, c} with fn sum(self) self.b + self.c end end;
+type Box = struct {v} end;
+let o = ABC{1, 2, 3};
+let held = o : BC;
+let box = Box{ABC{4, 5, 6} : BC};
+let rec churn = fn (n)
+  if n > 0 then churn(n - 1) + churn(n - 1) else (ABC{n, n + 1, n + 2} : BC).sum() end
+end;
+let s = churn(16);
+box.v <- (box.v : ABC) : BC;
+(s, held.sum(), box.v.sum(), held, box)
+
+(* EXPECT:
+   (196608, 5, 11, BC{b = 2, c = 3}, Box{v = BC{b = 5, c = 6}})
+*)

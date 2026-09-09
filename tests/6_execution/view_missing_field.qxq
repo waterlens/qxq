@@ -1,0 +1,6 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: cannot view ABC as XY: no field x
+*)
+type ABC = struct {a, b, c} end;
+type XY = struct {x, y} end;
+(ABC{1, 2, 3} : XY).x

@@ -1,0 +1,5 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: not an instance
+*)
+type BC = struct {b, c} end;
+((1, 2) : BC).b

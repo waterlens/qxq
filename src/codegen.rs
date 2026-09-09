@@ -42,6 +42,9 @@ pub struct CodeGenCtx<'a> {
   rec_group: Vec<(TokenStr<'a>, Binding)>,
   /// The receiver through which method references are lowered.
   self_expr: ExprRef<'a, InfoKey>,
+  /// The type whose method body is being compiled: `self` is an instance or
+  /// a view of it, so its fields are reached by position.
+  method_type: Option<TypeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +115,12 @@ enum CmpOperand {
 enum ArithOperand {
   Reg(RegId),
   Const(SmallConstantId),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MemberAccess {
+  Typed(TypeId, Op8),
+  Named(Op8),
 }
 
 struct ValInfo<'a> {
@@ -283,6 +292,7 @@ impl<'a> CodeGenCtx<'a> {
       information,
       rec_group: vec![],
       self_expr,
+      method_type: None,
     }
   }
 
@@ -1340,6 +1350,9 @@ impl<'a> CodeGenCtx<'a> {
       Assign { target, value, info: _ } => {
         self.emit_assign(bc, target, value, data, control, next)?;
       }
+      View { receiver, ty, info: _ } => {
+        self.emit_view(bc, receiver, ty, data, control, next)?;
+      }
     }
     Ok(())
   }
@@ -1428,22 +1441,24 @@ impl<'a> CodeGenCtx<'a> {
       .map(|m| (m.name, Binding::Method))
       .chain(function_group.iter().copied())
       .collect();
-    let method_thunks = self.emit_member_thunks(bc, name, methods, method_group)?;
-    let function_thunks = self.emit_member_thunks(bc, name, functions, function_group)?;
+    let method_thunks = self.emit_member_thunks(bc, name, methods, method_group, Some(id))?;
+    let function_thunks = self.emit_member_thunks(bc, name, functions, function_group, None)?;
     bc.set_type_thunks(id, &method_thunks, &function_thunks);
     self.emit_store(bc, Value::Unit, data, control, next)
   }
 
   /// Compiles the bodies of one member group as closed thunks, with `group`
-  /// in scope.
+  /// in scope; `method_type` is the type of `self` in a group of methods.
   fn emit_member_thunks(
     &mut self,
     bc: &mut BytecodeCtx,
     tname: &TokenStr<'a>,
     members: &[MemberFn<'a, InfoKey>],
     group: Vec<(TokenStr<'a>, Binding)>,
+    method_type: Option<TypeId>,
   ) -> Result<Vec<Option<u16>>> {
     let outer = std::mem::replace(&mut self.rec_group, group);
+    let outer_type = std::mem::replace(&mut self.method_type, method_type);
     let mut thunks = Vec::with_capacity(members.len());
     for member in members {
       if let Some(fv) = self.captured_variable(member.info) {
@@ -1457,6 +1472,7 @@ impl<'a> CodeGenCtx<'a> {
       thunks.push(fid.map(|id| self.thunk_id(id)).transpose()?);
     }
     self.rec_group = outer;
+    self.method_type = outer_type;
     Ok(thunks)
   }
 
@@ -1567,6 +1583,63 @@ impl<'a> CodeGenCtx<'a> {
     Ok(small.into())
   }
 
+  /// The type a receiver is known to be an instance or a view of: a view of
+  /// a type bound in scope, or `self` in a method of the type.  The VM checks
+  /// the header of the receiver against it, so the knowledge only picks the
+  /// instruction; a receiver of another type is still resolved by name.
+  fn receiver_type(&self, receiver: ExprRef<'a, InfoKey>) -> Option<TypeId> {
+    match receiver {
+      Expr::View { ty: Expr::Ident(tname, _), .. } => match self.scope.get_bound(tname) {
+        Some(Binding::Var(Location::Type(id))) => Some(id),
+        _ => None,
+      },
+      Expr::Ident(name, _) if name.0 == "self" => self.method_type,
+      _ => None,
+    }
+  }
+
+  /// A field of the type the receiver is known to have, by position.
+  fn typed_field(
+    &self,
+    bc: &BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    field: impl FnOnce(&TypeDesc) -> Option<usize>,
+  ) -> Option<(TypeId, Op8)> {
+    let id = self.receiver_type(receiver)?;
+    let k = field(bc.type_desc(id))?;
+    Some((id, u8::try_from(k).ok()?.into()))
+  }
+
+  /// How a member is addressed: field `k` of a known type, or a constant
+  /// naming or numbering it for a lookup at run time.
+  fn member_access(
+    &self,
+    bc: &mut BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    member: &TokenStr<'a>,
+  ) -> Result<MemberAccess> {
+    if let Some((id, k)) = self.typed_field(bc, receiver, |desc| desc.field(member.0)) {
+      return Ok(MemberAccess::Typed(id, k));
+    }
+    Ok(MemberAccess::Named(self.member_constant(bc, member)?))
+  }
+
+  fn index_access(
+    &self,
+    bc: &mut BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    index: u32,
+  ) -> Result<MemberAccess> {
+    let position = |desc: &TypeDesc| {
+      let k = usize::try_from(index).ok()?.checked_sub(1)?;
+      (k < desc.fields.len()).then_some(k)
+    };
+    if let Some((id, k)) = self.typed_field(bc, receiver, position) {
+      return Ok(MemberAccess::Typed(id, k));
+    }
+    Ok(MemberAccess::Named(self.position_constant(bc, index)?))
+  }
+
   fn emit_member(
     &mut self,
     bc: &mut BytecodeCtx,
@@ -1576,8 +1649,8 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
-    let m = self.member_constant(bc, member)?;
-    self.emit_load_field(bc, receiver, m, data, control, next)
+    let access = self.member_access(bc, receiver, member)?;
+    self.emit_load_field(bc, receiver, access, data, control, next)
   }
 
   fn emit_index(
@@ -1589,8 +1662,8 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
-    let m = self.position_constant(bc, index)?;
-    self.emit_load_field(bc, receiver, m, data, control, next)
+    let access = self.index_access(bc, receiver, index)?;
+    self.emit_load_field(bc, receiver, access, data, control, next)
   }
 
   // The receiver is evaluated before the value; the assignment itself is unit.
@@ -1603,13 +1676,24 @@ impl<'a> CodeGenCtx<'a> {
     control: ControlDest,
     next: Control,
   ) -> Result<()> {
-    let (receiver, m) = match target {
-      Expr::Member { receiver, member, info: _ } => (*receiver, self.member_constant(bc, member)?),
-      Expr::Index { receiver, index, info: _ } => (*receiver, self.position_constant(bc, *index)?),
+    let (receiver, access) = match target {
+      Expr::Member { receiver, member, info: _ } => {
+        (*receiver, self.member_access(bc, receiver, member)?)
+      }
+      Expr::Index { receiver, index, info: _ } => {
+        (*receiver, self.index_access(bc, receiver, *index)?)
+      }
       _ => self.diagnostic.ice("assignment target is not a field"),
     };
     let (regs, n_temps) = self.eval_any_loc_args(bc, &[receiver, value])?;
-    bc.push(Bytecode::setfield(regs[1].into(), regs[0].into(), m));
+    let (recv, src) = (regs[0].into(), regs[1].into());
+    match access {
+      MemberAccess::Named(m) => bc.push(Bytecode::setfield(src, recv, m)),
+      MemberAccess::Typed(id, k) => {
+        bc.push(Bytecode::setind(src, recv, k));
+        bc.push(Bytecode::exta(id.0.into()));
+      }
+    }
     self.clean_any_loc_args(n_temps);
     self.emit_store(bc, Value::Unit, data, control, next)
   }
@@ -1618,7 +1702,7 @@ impl<'a> CodeGenCtx<'a> {
     &mut self,
     bc: &mut BytecodeCtx,
     receiver: ExprRef<'a, InfoKey>,
-    m: Op8,
+    access: MemberAccess,
     data: DataDest,
     control: ControlDest,
     next: Control,
@@ -1627,7 +1711,33 @@ impl<'a> CodeGenCtx<'a> {
     let recv = regs[0];
     self.clean_any_loc_args(n_temps);
     self.emit_with_dest(bc, data, control, next, |_, bc, r| {
-      bc.push(Bytecode::loadfield(r.into(), recv.into(), m));
+      match access {
+        MemberAccess::Named(m) => bc.push(Bytecode::loadfield(r.into(), recv.into(), m)),
+        MemberAccess::Typed(id, k) => {
+          bc.push(Bytecode::loadind(r.into(), recv.into(), k));
+          bc.push(Bytecode::exta(id.0.into()));
+        }
+      }
+      Ok(())
+    })
+  }
+
+  // Both operands are evaluated, the receiver first; the type is checked at
+  // run time, as it may be any expression.
+  fn emit_view(
+    &mut self,
+    bc: &mut BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    ty: ExprRef<'a, InfoKey>,
+    data: DataDest,
+    control: ControlDest,
+    next: Control,
+  ) -> Result<()> {
+    let (regs, n_temps) = self.eval_any_loc_args(bc, &[receiver, ty])?;
+    let (recv, tyr) = (regs[0], regs[1]);
+    self.clean_any_loc_args(n_temps);
+    self.emit_with_dest(bc, data, control, next, |_, bc, r| {
+      bc.push(Bytecode::view(r.into(), recv.into(), tyr.into()));
       Ok(())
     })
   }

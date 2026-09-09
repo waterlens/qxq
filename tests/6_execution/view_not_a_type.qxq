@@ -1,0 +1,5 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: not a type
+*)
+type ABC = struct {a, b, c} end;
+(ABC{1, 2, 3} : 1).a

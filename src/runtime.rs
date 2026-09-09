@@ -135,8 +135,8 @@ impl ImageValidator {
           return self.diag.fail("temporary or type location in thunk capture list");
         }
       }
-      for bc in thunk.code.iter() {
-        self.validate_bytecode(*bc, thunk, types)?;
+      for (i, bc) in thunk.code.iter().enumerate() {
+        self.validate_bytecode(*bc, thunk.code.get(i + 1).copied(), thunk, types)?;
       }
     }
 
@@ -157,7 +157,13 @@ impl ImageValidator {
     Ok(())
   }
 
-  fn validate_bytecode(&self, bytecode: Bytecode, thunk: &Thunk, types: &[TypeDesc]) -> Result<()> {
+  fn validate_bytecode(
+    &self,
+    bytecode: Bytecode,
+    next: Option<Bytecode>,
+    thunk: &Thunk,
+    types: &[TypeDesc],
+  ) -> Result<()> {
     use Operator::*;
     // Operands as the VM decodes them: A, B and C in encoding order.
     let Bytecode(operator, operands) = bytecode;
@@ -168,6 +174,12 @@ impl ImageValidator {
     };
     let string = |i: usize| thunk.constants.get(i).is_some_and(|v| v.is_ptr());
     let position = |i: usize| thunk.constants.get(i).is_some_and(|v| v.is_int());
+    let typed_field = || match next {
+      Some(Bytecode(Exta, Operands::A(op))) => {
+        types.get(u32::from(op.o1) as usize).is_some_and(|t| c < t.fields.len())
+      }
+      _ => false,
+    };
     let illegal = |what: &str| self.diag.fail(format!("illegal instruction: {what}: {bytecode}"));
     match operator {
       LoadFree if b > thunk.fvlocs.len() => illegal("free variable out of range"),
@@ -175,6 +187,7 @@ impl ImageValidator {
       LoadField | SetField if !string(c) && !position(c) => {
         illegal("member is not a string or int")
       }
+      LoadInd | SetInd if !typed_field() => illegal("field is not in the type of the exta"),
       Invoke if !string(c) => illegal("member is not a string constant"),
       Invoke if b != a + FRAME_HEADER_SIZE => illegal("call region not after destination"),
       WObj if !Tag::from(b as u8).is_words() => illegal("wrap tag is not a words object"),

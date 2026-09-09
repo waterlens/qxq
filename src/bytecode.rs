@@ -17,13 +17,14 @@ impl Tag {
   pub const MAP: Self = Tag(2);
   pub const TYPE: Self = Tag(3);
   pub const STRUCT: Self = Tag(4);
-  pub const THUNK: Self = Tag(5);
-  pub const STR: Self = Tag(6);
-  pub const OPAQUE: Self = Tag(7);
+  pub const VIEW: Self = Tag(5);
+  pub const THUNK: Self = Tag(6);
+  pub const STR: Self = Tag(7);
+  pub const OPAQUE: Self = Tag(8);
 
   /// Words objects, whose every slot is a value, precede the exotic layouts.
   pub fn is_words(self) -> bool {
-    self < Self::THUNK
+    self < Self::VIEW
   }
 }
 
@@ -60,6 +61,7 @@ impl Display for Tag {
       Self::MAP => "map",
       Self::TYPE => "type",
       Self::STRUCT => "struct",
+      Self::VIEW => "view",
       Self::THUNK => "thunk",
       Self::STR => "str",
       Self::OPAQUE => "opaque",
@@ -697,6 +699,9 @@ define_bytecode! {
   LoadFree (AB, OpAB, op)   fn loadfree(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, ^{}", "loadfv", op.dst, op.o1),
   LoadField (ABC, OpABC, op) fn loadfield(dst: Op8, o1: Op8, o2: Op8) { dst, o1, o2 } => ("{:<12} r{}, r{}, @{}", "loadfld", op.dst, op.o1, op.o2),
   SetField (ABC, OpABC, op) fn setfield(src: Op8, o1: Op8, o2: Op8) { dst: src, o1, o2 } => ("{:<12} r{}, r{}, @{}", "setfld", op.dst, op.o1, op.o2),
+  LoadInd (ABC, OpABC, op)  fn loadind(dst: Op8, o1: Op8, k: Op8)   { dst, o1, o2: k } => ("{:<12} r{}, r{}, #{}", "loadind", op.dst, op.o1, op.o2),
+  SetInd (ABC, OpABC, op)   fn setind(src: Op8, o1: Op8, k: Op8)    { dst: src, o1, o2: k } => ("{:<12} r{}, r{}, #{}", "setind", op.dst, op.o1, op.o2),
+  View   (ABC, OpABC, op)   fn view(dst: Op8, o1: Op8, ty: Op8)     { dst, o1, o2: ty } => ("{:<12} r{}, r{}, r{}", "view", op.dst, op.o1, op.o2),
   Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<12} r{}, r{}", "move", op.dst, op.o1),
   Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "apply", op.dst, op.o1),
   Invoke (ABC, OpABC, op)   fn invoke(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, @{}", "invoke", op.dst, op.o1, op.o2),

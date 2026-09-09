@@ -160,6 +160,13 @@ pub enum Expr<'a, I> {
     value: ExprRef<'a, I>,
     info: I,
   },
+  /// `receiver : ty` sees a struct instance as the type `ty` evaluates to: the
+  /// result has the fields and methods of that type, read through the instance.
+  View {
+    receiver: ExprRef<'a, I>,
+    ty: ExprRef<'a, I>,
+    info: I,
+  },
 }
 
 /// One constructor initializer: `label = expr`, or a positional `expr`.
@@ -284,6 +291,9 @@ impl<I> ToSexp for Expr<'_, I> {
       Assign { target, value, info: _ } => {
         pool.list(&[pool.atom("<-"), target.to_sexp(pool), value.to_sexp(pool)])
       }
+      View { receiver, ty, info: _ } => {
+        pool.list(&[pool.atom("view"), receiver.to_sexp(pool), ty.to_sexp(pool)])
+      }
     }
   }
 }
@@ -321,7 +331,8 @@ impl<I> Expr<'_, I> {
       | Member { info: i, .. }
       | MemberApply { info: i, .. }
       | Index { info: i, .. }
-      | Assign { info: i, .. } => i,
+      | Assign { info: i, .. }
+      | View { info: i, .. } => i,
     }
   }
 }
@@ -480,6 +491,12 @@ impl<'a> ToSexp for InfoExpr<'a> {
         parts.push(pool.atom("<-"));
         parts.push(InfoExpr { expr: target, map: self.map }.to_sexp(pool));
         parts.push(InfoExpr { expr: value, map: self.map }.to_sexp(pool));
+        false
+      }
+      View { receiver, ty, info: _ } => {
+        parts.push(pool.atom("view"));
+        parts.push(InfoExpr { expr: receiver, map: self.map }.to_sexp(pool));
+        parts.push(InfoExpr { expr: ty, map: self.map }.to_sexp(pool));
         false
       }
     };
@@ -1200,6 +1217,12 @@ impl<'a> Parser<'a> {
           self.compose(old_lhs, rhs.inner)
         } else if op_str == "<-" {
           self.assign(old_lhs, rhs.inner)?
+        } else if op_str == ":" {
+          arena.alloc(ExprCon::View {
+            receiver: old_lhs,
+            ty: rhs.inner,
+            info: self.new_empty_info(),
+          })
         } else {
           arena.alloc(ExprCon::OpApply {
             op: arena.alloc(ExprCon::Op(op_str.into(), self.new_empty_info())),

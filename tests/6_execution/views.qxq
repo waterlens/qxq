@@ -1,0 +1,52 @@
+(* RUN: {qxq|cargo run --} %s *)
+
+let r = 0;
+
+(* a view has the fields of its type, read from any instance that has them *)
+type ABC = struct {a, b, c} end;
+type XYBC = struct {x, y, b, c} end;
+type BC = struct {b, c}
+  with fn sum(self) self.b + self.c end
+  with fn bump(self) self.b <- self.b + 1; self end
+end;
+type B = struct {b} end;
+let o = ABC{1, 2, 3};
+let p = XYBC{10, 20, 30, 40};
+let r = r + if (o : BC).b + (p : BC).c == 42 then 0 else 1 end;
+
+(* the methods of the type run on a view as on an instance *)
+let r = r + if (o : BC).sum() == 5 then 0 else 2 end;
+let r = r + if (p : BC).sum() == 70 then 0 else 4 end;
+let r = r + if BC{5, 6}.sum() == 11 then 0 else 8 end;
+
+(* a method applied to a foreign receiver still finds the fields by name *)
+let r = r + if BC.sum(o) == 5 then 0 else 16 end;
+
+(* an instance is its own view; a view of a view sees the instance *)
+Builtin.assert_eq(o : ABC, o);
+let r = r + if ((p : BC) : B).b == 30 then 0 else 32 end;
+
+(* writes and positions go through the view to the instance *)
+(o : BC).b <- 200;
+let r = r + if o.b == 200 then 0 else 64 end;
+let r = r + if (p : BC).2 == 40 then 0 else 128 end;
+let v = p : BC;
+let r = r + if v.bump().sum() == 71 then 0 else 256 end;
+let r = r + if p.b == 31 then 0 else 512 end;
+
+(* the type is any expression with a type value *)
+let t = if o.a == 1 then BC else B end;
+let r = r + if (o : t).b == 200 then 0 else 1024 end;
+
+(* a view is a value: it passes through functions and rests in fields *)
+let f = fn (w) w.sum() end;
+let r = r + if f(o : BC) == 203 then 0 else 2048 end;
+type Box = struct {v} end;
+let box = Box{o : BC};
+let r = r + if box.v.b == 200 then 0 else 4096 end;
+
+r
+
+(* EXPECT:
+   0
+*)

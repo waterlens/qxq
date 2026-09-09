@@ -9,11 +9,11 @@ f.close()
    thunk::fn params::1 regs::4 captured::[]
    constants::[
      @0: "fsize"
-     @1: "handle"
    ]
    loadty       r1, @0
    loadfld      r1, r1, @0
-   loadfld      r3, r0, @1
+   loadind      r3, r0, #0
+   exta         #1
    apply        r1, #1
    ret          r1
 
@@ -21,11 +21,11 @@ f.close()
    thunk::fn params::3 regs::8 captured::[]
    constants::[
      @0: "fedit"
-     @1: "handle"
    ]
    loadty       r3, @0
    loadfld      r3, r3, @0
-   loadfld      r5, r0, @1
+   loadind      r5, r0, #0
+   exta         #1
    move         r6, r1
    move         r7, r2
    apply        r3, #3
@@ -35,11 +35,11 @@ f.close()
    thunk::fn params::1 regs::4 captured::[]
    constants::[
      @0: "fclose"
-     @1: "handle"
    ]
    loadty       r1, @0
    loadfld      r1, r1, @0
-   loadfld      r3, r0, @1
+   loadind      r3, r0, #0
+   exta         #1
    apply        r1, #1
    ret          r1
 
