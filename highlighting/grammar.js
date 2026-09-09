@@ -28,6 +28,7 @@ module.exports = grammar({
       $.struct_expression,
       $.member_expression,
       $.let_binding,
+      $.with_expression,
       $.type_declaration,
       $.function_definition,
       $.if_expression,
@@ -105,6 +106,16 @@ module.exports = grammar({
       field('value', $._expression)
     ),
 
+    with_expression: $ => seq(
+      'with',
+      field('name', $.identifier),
+      alias(':', $.operator),
+      field('type', $._expression),
+      'in',
+      field('body', $._block),
+      'end'
+    ),
+
     type_declaration: $ => seq(
       'type',
       field('name', $.identifier),
@@ -126,8 +137,7 @@ module.exports = grammar({
       'fn',
       field('name', $.identifier),
       field('parameters', $.parameters),
-      field('body', $._block),
-      'end'
+      choice(';', seq(field('body', $._block), 'end'))
     ),
 
     function_definition: $ => seq(

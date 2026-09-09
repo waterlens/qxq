@@ -4,7 +4,7 @@ use crate::sexp::{Sexp, SexpPool, ToSexp};
 use crate::tokenizer::{Keyword, Paired, Token, TokenStr, TokenTag, Tokenizer};
 use bumpalo::Bump;
 use hashbrown::HashMap;
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use slotmap::SlotMap;
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -167,6 +167,14 @@ pub enum Expr<'a, I> {
     ty: ExprRef<'a, I>,
     info: I,
   },
+  /// `with name : ty in body end` binds `name` to the view `name : ty` while
+  /// `body` runs, so its members there are those of the type `ty`.
+  With {
+    name: TokenStr<'a>,
+    view: ExprRef<'a, I>,
+    body: ExprRef<'a, I>,
+    info: I,
+  },
 }
 
 /// One constructor initializer: `label = expr`, or a positional `expr`.
@@ -294,6 +302,12 @@ impl<I> ToSexp for Expr<'_, I> {
       View { receiver, ty, info: _ } => {
         pool.list(&[pool.atom("view"), receiver.to_sexp(pool), ty.to_sexp(pool)])
       }
+      With { name, view, body, info: _ } => pool.list(&[
+        pool.atom("with"),
+        pool.atom(name.as_ref()),
+        view.to_sexp(pool),
+        body.to_sexp(pool),
+      ]),
     }
   }
 }
@@ -332,7 +346,8 @@ impl<I> Expr<'_, I> {
       | MemberApply { info: i, .. }
       | Index { info: i, .. }
       | Assign { info: i, .. }
-      | View { info: i, .. } => i,
+      | View { info: i, .. }
+      | With { info: i, .. } => i,
     }
   }
 }
@@ -499,6 +514,13 @@ impl<'a> ToSexp for InfoExpr<'a> {
         parts.push(InfoExpr { expr: ty, map: self.map }.to_sexp(pool));
         false
       }
+      With { name, view, body, info: _ } => {
+        parts.push(pool.atom("with"));
+        parts.push(pool.atom(name.as_ref()));
+        parts.push(InfoExpr { expr: view, map: self.map }.to_sexp(pool));
+        parts.push(InfoExpr { expr: body, map: self.map }.to_sexp(pool));
+        false
+      }
     };
 
     parts.extend(freevars_sexp(self.map, *self.expr.get_info(), pool));
@@ -562,9 +584,17 @@ pub struct PeekResult<'a, T> {
 type PeekToken<'a> = Result<PeekResult<'a, Token<'a>>>;
 type PeekExpr<'a> = Result<PeekResult<'a, Expr<'a, InfoKey>>>;
 
+/// What a scope binds a name to: a value, or the view a `with` opens, which
+/// a `let` in its body may not rebind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Local {
+  Value,
+  View,
+}
+
 #[derive(Default)]
 struct FunctionCtx<'a> {
-  scopes: Vec<IndexSet<TokenStr<'a>>>,
+  scopes: Vec<IndexMap<TokenStr<'a>, Local>>,
   local_counts: HashMap<TokenStr<'a>, u32>,
   freevars: IndexSet<TokenStr<'a>>,
   self_name: Option<TokenStr<'a>>,
@@ -582,7 +612,7 @@ impl<'a> Parser<'a> {
 
   fn enter_function(&mut self, name: Option<TokenStr<'a>>) {
     self.func_stack.push(FunctionCtx {
-      scopes: vec![IndexSet::new()],
+      scopes: vec![IndexMap::new()],
       local_counts: HashMap::new(),
       freevars: IndexSet::new(),
       self_name: name,
@@ -606,13 +636,13 @@ impl<'a> Parser<'a> {
   }
 
   fn enter_scope(&mut self) {
-    self.func_stack.last_mut().expect("no active function").scopes.push(IndexSet::new());
+    self.func_stack.last_mut().expect("no active function").scopes.push(IndexMap::new());
   }
 
   fn leave_scope(&mut self) {
     let ctx = self.func_stack.last_mut().expect("no active function");
     if let Some(scope) = ctx.scopes.pop() {
-      for name in scope {
+      for (name, _) in scope {
         if let Some(count) = ctx.local_counts.get_mut(&name) {
           *count -= 1;
           if *count == 0 {
@@ -624,12 +654,30 @@ impl<'a> Parser<'a> {
   }
 
   fn declare_local(&mut self, name: TokenStr<'a>) {
+    self.declare(name, Local::Value);
+  }
+
+  fn declare(&mut self, name: TokenStr<'a>, local: Local) {
     if let Some(ctx) = self.func_stack.last_mut()
       && let Some(scope) = ctx.scopes.last_mut()
-      && scope.insert(name)
+      && scope.insert(name, local).is_none()
     {
       *ctx.local_counts.entry(name).or_insert(0) += 1;
     }
+  }
+
+  /// Whether `name` denotes the view of a `with` here, through any function
+  /// that captures it.
+  fn is_viewed(&self, name: TokenStr<'a>) -> bool {
+    for ctx in self.func_stack.iter().rev() {
+      if let Some(local) = ctx.scopes.iter().rev().find_map(|scope| scope.get(&name)) {
+        return *local == Local::View;
+      }
+      if ctx.self_name == Some(name) {
+        return false;
+      }
+    }
+    false
   }
 
   fn use_var(&mut self, name: TokenStr<'a>) {
@@ -809,9 +857,9 @@ impl<'a> Parser<'a> {
     Ok(PeekResult { inner: self.arena.alloc(ExprCon::Fn { name, params, body, info }) })
   }
 
-  /// Parses `(params) body end`, or `(params)` alone, in a fresh function
-  /// context and returns the sorted free variables without propagating them
-  /// to the parent.
+  /// Parses `(params) body end`, or `(params);` for a member without a body,
+  /// in a fresh function context and returns the sorted free variables
+  /// without propagating them to the parent.
   fn parse_function_parts<'t>(
     &'t mut self,
     name: Option<TokenStr<'a>>,
@@ -832,7 +880,8 @@ impl<'a> Parser<'a> {
     }
     let _ = self.expect_paired_close(Paired::Parenthesis, false)?;
 
-    let body = if self.peek_keyword(Keyword::With, true) || self.peek_keyword(Keyword::End, true) {
+    let body = if self.peek_operator(";", false) {
+      self.skip_token();
       None
     } else {
       let body = self.parse_exprs()?;
@@ -841,6 +890,34 @@ impl<'a> Parser<'a> {
     };
     let freevars = self.pop_function();
     Ok((self.arena.alloc_slice_copy(&params), body, freevars))
+  }
+
+  /// Parses `name : ty in body end` after `with`: `name` in the head is the
+  /// enclosing binding, and the body sees the view in its place.
+  fn parse_with<'t>(&'t mut self) -> PeekExpr<'a> {
+    let arena = self.arena;
+    let tok = self.next_ident(false)?;
+    let name = TokenStr::from_span(tok.inner.span);
+    self.use_var(name);
+    let receiver = arena.alloc(ExprCon::Ident(name, self.new_empty_info()));
+    let _ = self.expect_operator(":", false)?;
+    let ty = self.parse_expr()?;
+    let _ = self.expect_keyword(Keyword::In, true)?;
+    self.enter_scope();
+    self.declare(name, Local::View);
+    let body = self.parse_exprs();
+    self.leave_scope();
+    let body = body?;
+    let _ = self.expect_keyword(Keyword::End, true)?;
+    let view = arena.alloc(ExprCon::View { receiver, ty: ty.inner, info: self.new_empty_info() });
+    Ok(PeekResult {
+      inner: arena.alloc(ExprCon::With {
+        name,
+        view,
+        body: body.inner,
+        info: self.new_empty_info(),
+      }),
+    })
   }
 
   fn parse_struct_decl<'t>(&'t mut self) -> PeekExpr<'a> {
@@ -1055,6 +1132,7 @@ impl<'a> Parser<'a> {
       }
       Kw(kw) => match kw {
         Keyword::Fn => self.parse_function(None)?.inner,
+        Keyword::With => self.parse_with()?.inner,
         Keyword::Type => self.parse_struct_decl()?.inner,
         Keyword::Let => {
           let is_rec = self.peek_keyword(Keyword::Rec, false);
@@ -1063,6 +1141,9 @@ impl<'a> Parser<'a> {
           }
           let name_tok = self.next_ident(false)?;
           let name = TokenStr::from_span(name_tok.inner.span);
+          if self.is_viewed(name) {
+            return self.diag.fail(format!("cannot rebind {} inside with", name.0));
+          }
 
           let _ = self.expect_operator("=", false)?;
 

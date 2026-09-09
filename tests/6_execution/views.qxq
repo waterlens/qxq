@@ -45,6 +45,31 @@ type Box = struct {v} end;
 let box = Box{o : BC};
 let r = r + if box.v.b == 200 then 0 else 4096 end;
 
+(* with binds the view for a block; after it the instance is back *)
+let s = with o : BC in o.b <- o.b + 1; o.sum() + o.2 end;
+let r = r + if s == 207 then 0 else 8192 end;
+let r = r + if o.a * 1000 + o.b == 1201 then 0 else 16384 end;
+
+(* blocks nest, and the view is a value inside them *)
+let r = r + if with p : BC in with p : B in p.b end + p.c end == 71 then 0 else 32768 end;
+let r = r + if with o : BC in f(o) end == 204 then 0 else 65536 end;
+
+(* a closure keeps the view it captured *)
+let g = with o : BC in fn () o.b end end;
+let r = r + if g() == 201 then 0 else 131072 end;
+
+(* a binding made in the block ends with it *)
+let t = 7;
+let r = r + if with o : BC in let t = o.b; t end + t == 208 then 0 else 262144 end;
+
+(* a body may begin with the block *)
+type Q = struct {b, c, d}
+  with fn total(self) with self : BC in self.sum() end + self.d end
+end;
+let r = r + if Q{1, 2, 3}.total() == 6 then 0 else 524288 end;
+let h = fn (w) with w : BC in w.sum() end end;
+let r = r + if h(p) == 71 then 0 else 1048576 end;
+
 r
 
 (* EXPECT:

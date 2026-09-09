@@ -247,3 +247,27 @@ p.1 <- a + b
       left: (identifier)
       (operator)
       right: (identifier))))
+
+==================
+With Expression
+==================
+with o : BC in
+  o.b <- 1;
+  o.sum()
+end
+---
+
+(source_file
+  (with_expression
+    name: (identifier)
+    (operator)
+    type: (identifier)
+    body: (assignment_expression
+      target: (member_expression
+        object: (identifier)
+        member: (identifier))
+      value: (number))
+    body: (call_expression
+      (member_expression
+        object: (identifier)
+        member: (identifier)))))

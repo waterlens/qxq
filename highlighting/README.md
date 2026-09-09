@@ -65,7 +65,7 @@ vim.filetype.add({
 
 ## Features
 
-- **Keywords:** `let` (and `rec`), `fn` / `end`, `if` / `then` / `else` / `end`.
+- **Keywords:** `let` (and `rec`), `fn` / `end`, `if` / `then` / `else` / `end`, `with` / `in` / `end`.
 - **Nested Comments:** Supports OCaml-style nested comments `(* ... (* ... *) ... *)`.
 - **Literals:**
     - Numbers: Hexadecimal (`0x`), Octal (`0o`), Binary (`0b`), and Decimal.

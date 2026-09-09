@@ -5,11 +5,14 @@ type BC = struct {b, c}
   with fn set(self, v) self.b <- v end
 end;
 let o = ABC{1, 2, 3};
-(o : BC).c <- 4;
-(o : BC).sum() + (o : BC).2 + o.b
+let s = with o : BC in
+  o.c <- 4;
+  o.sum() + o.2 + o.b
+end;
+(o : BC).b + s
 (* EXPECT:
    --- Syntax Tree ---
-   (block (type ABC (struct (fields a b c))) (type BC (struct (fields b c) (method sum (self) (+ (member self b) (member self c))) (method set (self v) (<- (member self b) v)))) (let o (construct ABC (init _ 1) (init _ 2) (init _ 3))) (<- (member (view o BC) c) 4) (+ (+ (member-apply (view o BC) sum) (index (view o BC) 2)) (member o b)))
+   (block (type ABC (struct (fields a b c))) (type BC (struct (fields b c) (method sum (self) (+ (member self b) (member self c))) (method set (self v) (<- (member self b) v)))) (let o (construct ABC (init _ 1) (init _ 2) (init _ 3))) (let s (with o (view o BC) (block (<- (member o c) 4) (+ (+ (member-apply o sum) (index o 2)) (member o b))))) (+ (member (view o BC) b) s))
    --- Type ---
    type::ABC fields::[a, b, c] methods::[] functions::[]
    type::BC fields::[b, c] methods::[sum as fn0, set as fn1] functions::[]
@@ -31,7 +34,7 @@ let o = ABC{1, 2, 3};
    ret          r2
 
    --- Thunk ---
-   thunk::__top_thunk__ params::0 regs::5 captured::[]
+   thunk::__top_thunk__ params::0 regs::6 captured::[]
    constants::[
      @0: "sum"
      @1: "b"
@@ -41,20 +44,22 @@ let o = ABC{1, 2, 3};
    loadi        r2, #2
    loadi        r3, #3
    wrap         r0, tag::struct, #4
-   loadty       r1, ty1
-   view         r1, r0, r1
-   loadi        r2, #4
-   setind       r2, r1, #1
+   loadty       r3, ty1
+   view         r2, r0, r3
+   loadi        r3, #4
+   setind       r3, r2, #1
    exta         #1
-   loadty       r4, ty1
-   view         r3, r0, r4
-   invoke       r1, r3, @0
+   move         r5, r2
+   invoke       r3, r5, @0
+   loadind      r4, r2, #1
+   exta         #1
+   add.dd       r3, r3, r4
+   loadind      r4, r2, #0
+   exta         #1
+   add.dd       r1, r3, r4
    loadty       r2, ty1
    view         r2, r0, r2
-   loadind      r2, r2, #1
-   exta         #1
-   add.dd       r1, r1, r2
-   loadmem      r2, r0, @1
-   add.dd       r1, r1, r2
-   ret          r1
+   loadmem      r2, r2, @1
+   add.dd       r2, r2, r1
+   ret          r2
 *)

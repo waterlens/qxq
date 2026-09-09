@@ -59,6 +59,7 @@ HIGHLIGHT_SCM_CONTENT = """
 "type" @keyword
 "struct" @keyword
 "with" @keyword
+"in" @keyword
 
 ; Literals
 (number) @number
@@ -72,6 +73,8 @@ HIGHLIGHT_SCM_CONTENT = """
 ; Identifiers
 (identifier) @variable
 (let_binding name: (identifier) @variable.definition)
+(with_expression name: (identifier) @variable.definition)
+(with_expression type: (identifier) @type)
 (function_definition (parameters (identifier) @variable.parameter))
 (call_expression (identifier) @function.call)
 (type_declaration name: (identifier) @type)

@@ -165,6 +165,7 @@ pub enum Keyword {
   Let,
   Rec,
   With,
+  In,
   And,
   Is,
   If,
@@ -201,6 +202,7 @@ impl std::fmt::Display for Keyword {
       Let => write!(f, "let"),
       Rec => write!(f, "rec"),
       With => write!(f, "with"),
+      In => write!(f, "in"),
       And => write!(f, "and"),
       Is => write!(f, "is"),
       If => write!(f, "if"),
@@ -270,6 +272,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf::phf_map! {
   "let" => Keyword::Let,
   "rec" => Keyword::Rec,
   "with" => Keyword::With,
+  "in" => Keyword::In,
   "and" => Keyword::And,
   "is" => Keyword::Is,
   "if" => Keyword::If,
@@ -736,6 +739,7 @@ mod tests {
     test_tokenize("let", &[t(Kw(Keyword::Let), "let")]);
     test_tokenize("rec", &[t(Kw(Keyword::Rec), "rec")]);
     test_tokenize("with", &[t(Kw(Keyword::With), "with")]);
+    test_tokenize("in", &[t(Kw(Keyword::In), "in")]);
     test_tokenize("if", &[t(Kw(Keyword::If), "if")]);
     test_tokenize("else", &[t(Kw(Keyword::Else), "else")]);
     test_tokenize("then", &[t(Kw(Keyword::Then), "then")]);

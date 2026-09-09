@@ -1,0 +1,6 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} --inspect %s
+   cannot rebind o inside with
+*)
+type BC = struct {b, c} end;
+let o = BC{1, 2};
+with o : BC in fn () let o = 3; o end end

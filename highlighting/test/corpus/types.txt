@@ -94,3 +94,33 @@ t.1.2;
       (number)
       (number))
     member: (number)))
+
+==================
+Members Without a Body
+==================
+type Builtin = struct {}
+  with fn assert_eq(a, b);
+  with fn heap_stat();
+  with fn size(self) self.n end
+end
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    body: (struct_type
+      (method_definition
+        name: (identifier)
+        parameters: (parameters
+          (identifier)
+          (identifier)))
+      (method_definition
+        name: (identifier)
+        parameters: (parameters))
+      (method_definition
+        name: (identifier)
+        parameters: (parameters
+          (identifier))
+        body: (member_expression
+          object: (identifier)
+          member: (identifier))))))

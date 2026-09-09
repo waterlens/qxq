@@ -50,10 +50,22 @@ pub struct CodeGenCtx<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Binding {
   Var(Location),
+  /// A variable `with` binds to a view of the type.
+  View(Location, TypeId),
   /// A method of the type being compiled, reached through the current `self`.
   Method,
   /// A function of the type being compiled, reached through the type.
   Function(TypeId),
+}
+
+impl Binding {
+  /// Where a variable lives; a method or a function has no location.
+  fn location(self) -> Option<Location> {
+    match self {
+      Binding::Var(loc) | Binding::View(loc, _) => Some(loc),
+      Binding::Method | Binding::Function(_) => None,
+    }
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -153,17 +165,22 @@ impl<'a> Stack<'a> {
   }
 }
 
-/// Lexical bindings. Each function owns one layer; anything from an enclosing
-/// function is visible only when captured into that layer.
+/// Lexical bindings in layers: one for each function, then one for each block
+/// open inside it. Anything from an enclosing function is visible only when
+/// captured into the function's own layer.
 struct Scope<'a> {
   diagnostic: Rc<Diagnostic>,
-  symbols: IndexMap<TokenStr<'a>, Vec<Binding>>,
+  /// The bindings of each name, innermost last, each with the depth of the
+  /// function that made it.
+  symbols: IndexMap<TokenStr<'a>, Vec<(usize, Binding)>>,
   bound: Vec<IndexSet<TokenStr<'a>>>,
+  /// The number of functions open.
+  depth: usize,
 }
 
 impl<'a> Scope<'a> {
   fn new(diagnostic: Rc<Diagnostic>) -> Self {
-    Self { diagnostic, symbols: IndexMap::new(), bound: vec![] }
+    Self { diagnostic, symbols: IndexMap::new(), bound: vec![], depth: 0 }
   }
 
   fn enter(&mut self) {
@@ -173,23 +190,22 @@ impl<'a> Scope<'a> {
   fn enter_function(
     &mut self,
     self_name: &Option<TokenStr<'a>>,
-    captured: &[(TokenStr<'a>, Location)],
+    captured: &[(TokenStr<'a>, Binding)],
     rec_group: &[(TokenStr<'a>, Binding)],
   ) -> Result<()> {
+    self.depth += 1;
     self.enter();
     if let Some(self_name) = self_name {
       self.insert(self_name, Binding::Var(Location::FreeVar(FreeVarId(0))));
     }
     let mut free: u16 = 0;
-    for (name, loc) in captured {
-      let loc = if loc.in_frame() {
-        free =
-          free.checked_add(1).ok_or_else(|| self.diagnostic.error("free variable id overflow"))?;
-        Location::FreeVar(FreeVarId(free))
-      } else {
-        *loc
+    for (name, binding) in captured {
+      let binding = match *binding {
+        Binding::Var(loc) => Binding::Var(self.capture(loc, &mut free)?),
+        Binding::View(loc, id) => Binding::View(self.capture(loc, &mut free)?, id),
+        binding => binding,
       };
-      self.insert(name, Binding::Var(loc));
+      self.insert(name, binding);
     }
     for (name, binding) in rec_group {
       self.insert(name, *binding);
@@ -197,10 +213,26 @@ impl<'a> Scope<'a> {
     Ok(())
   }
 
+  /// Where a captured variable lives in the function: the next free variable
+  /// when it was in the enclosing frame.
+  fn capture(&self, loc: Location, free: &mut u16) -> Result<Location> {
+    if !loc.in_frame() {
+      return Ok(loc);
+    }
+    *free =
+      free.checked_add(1).ok_or_else(|| self.diagnostic.error("free variable id overflow"))?;
+    Ok(Location::FreeVar(FreeVarId(*free)))
+  }
+
   fn leave(&mut self) {
     for name in self.bound.pop().expect("bound stack underflow: check if enter was called") {
       self.symbols.get_mut(&name).and_then(Vec::pop).expect("bound variable has no bindings");
     }
+  }
+
+  fn leave_function(&mut self) {
+    self.leave();
+    self.depth -= 1;
   }
 
   fn insert(&mut self, name: &TokenStr<'a>, binding: Binding) {
@@ -210,15 +242,12 @@ impl<'a> Scope<'a> {
     if !self.bound.last_mut().unwrap().insert(*name) {
       bindings.pop();
     }
-    bindings.push(binding);
+    bindings.push((self.depth, binding));
   }
 
   fn get_bound(&self, name: &TokenStr<'a>) -> Option<Binding> {
-    if self.bound.last()?.contains(name) {
-      self.symbols.get(name).and_then(|bindings| bindings.last().copied())
-    } else {
-      None
-    }
+    let &(depth, binding) = self.symbols.get(name)?.last()?;
+    (depth == self.depth).then_some(binding)
   }
 }
 
@@ -1175,7 +1204,7 @@ impl<'a> CodeGenCtx<'a> {
       FloatLiteral(f, _) => Some(Value::FloatLiteral(*f)),
       StrLiteral(s, _) => Some(Value::StrLiteral(s)),
       Ident(token_str, _) => match self.scope.get_bound(token_str) {
-        Some(Binding::Var(loc)) => Some(Value::Loc(loc)),
+        Some(Binding::Var(loc) | Binding::View(loc, _)) => Some(Value::Loc(loc)),
         Some(Binding::Method | Binding::Function(_)) => {
           self.emit_expr(bc, expr, data, control, next)?;
           None
@@ -1222,7 +1251,7 @@ impl<'a> CodeGenCtx<'a> {
         self.emit_store(bc, Value::StrLiteral(s), data, control, next)?;
       }
       Ident(token_str, _) => match self.scope.get_bound(token_str) {
-        Some(Binding::Var(loc)) => {
+        Some(Binding::Var(loc) | Binding::View(loc, _)) => {
           self.emit_store(bc, Value::Loc(loc), data, control, next)?;
         }
         Some(Binding::Method) => {
@@ -1357,6 +1386,28 @@ impl<'a> CodeGenCtx<'a> {
       View { receiver, ty, info: _ } => {
         self.emit_view(bc, receiver, ty, data, control, next)?;
       }
+      With { name, view, body, info: _ } => {
+        // Pin a register when the destination is a temporary so that it stays
+        // below the registers of the block.
+        let data = if data == DataDest::Loc(Location::Temporary) {
+          let r = self.allocate_temporary()?;
+          DataDest::Loc(Location::Slot(r))
+        } else {
+          data
+        };
+        let regs = free_reg!(self);
+        let r = self.allocate_named(name.0)?;
+        self.emit_expr_to(bc, view, r)?;
+        let binding = match self.view_type(view) {
+          Some(id) => Binding::View(Location::Slot(r), id),
+          None => Binding::Var(Location::Slot(r)),
+        };
+        self.scope.enter();
+        self.scope.insert(name, binding);
+        self.emit_expr(bc, body, data, control, next)?;
+        self.scope.leave();
+        frame_top!(self).regs.truncate(regs);
+      }
     }
     Ok(())
   }
@@ -1375,7 +1426,7 @@ impl<'a> CodeGenCtx<'a> {
     let mut through_self = false;
     for fv in freevars {
       match self.scope.get_bound(fv) {
-        Some(Binding::Var(loc)) => captured.push((*fv, loc)),
+        Some(binding @ (Binding::Var(_) | Binding::View(..))) => captured.push((*fv, binding)),
         Some(Binding::Method) => through_self = true,
         Some(Binding::Function(_)) => {}
         None => {
@@ -1389,10 +1440,13 @@ impl<'a> CodeGenCtx<'a> {
       let Some(Binding::Var(loc)) = self.scope.get_bound(&self_name) else {
         return self.diagnostic.fail("no `self` to reach a method through");
       };
-      captured.push((self_name, loc));
+      captured.push((self_name, Binding::Var(loc)));
     }
-    let fvlocs: Vec<Location> =
-      captured.iter().map(|(_, loc)| *loc).filter(|loc| loc.in_frame()).collect();
+    let fvlocs: Vec<Location> = captured
+      .iter()
+      .filter_map(|(_, binding)| binding.location())
+      .filter(|loc| loc.in_frame())
+      .collect();
     debug_assert!(!fvlocs.contains(&Location::Temporary));
 
     self.scope.enter_function(name, &captured, &self.rec_group)?;
@@ -1412,7 +1466,7 @@ impl<'a> CodeGenCtx<'a> {
     bc.set_nregs(frame_top!(self).max_regs as u8);
     let id = bc.pop_thunk();
     self.leave_frame();
-    self.scope.leave();
+    self.scope.leave_function();
     Ok(id)
   }
 
@@ -1484,7 +1538,7 @@ impl<'a> CodeGenCtx<'a> {
   fn captured_variable(&self, info: InfoKey) -> Option<TokenStr<'a>> {
     let freevars = &self.information.get(info).unwrap().freevars;
     freevars.iter().copied().find(|fv| match self.scope.get_bound(fv) {
-      Some(Binding::Var(loc)) => loc.in_frame(),
+      Some(Binding::Var(loc) | Binding::View(loc, _)) => loc.in_frame(),
       Some(Binding::Method) => true,
       Some(Binding::Function(_)) | None => false,
     })
@@ -1587,18 +1641,24 @@ impl<'a> CodeGenCtx<'a> {
     Ok(small.into())
   }
 
+  /// The type a view is of, when it is a type bound in scope.
+  fn view_type(&self, view: ExprRef<'a, InfoKey>) -> Option<TypeId> {
+    let Expr::View { ty: Expr::Ident(tname, _), .. } = view else { return None };
+    match self.scope.get_bound(tname) {
+      Some(Binding::Var(Location::Type(id))) => Some(id),
+      _ => None,
+    }
+  }
+
   /// The type a receiver is known to be an instance of, `self` in a method of
-  /// the type, or a view of, the result of `:` with a type bound in scope.
-  /// The VM checks the first slot of the receiver against it, so the
-  /// knowledge only picks the instruction; a receiver of another type is
-  /// still resolved by name.
+  /// the type, or a view of, a variable bound by `with`. The VM checks the
+  /// first slot of the receiver against it, so the knowledge only picks the
+  /// instruction; a receiver of another type is still resolved by name.
   fn receiver_type(&self, receiver: ExprRef<'a, InfoKey>) -> Option<(TypeId, bool)> {
-    match receiver {
-      Expr::View { ty: Expr::Ident(tname, _), .. } => match self.scope.get_bound(tname) {
-        Some(Binding::Var(Location::Type(id))) => Some((id, true)),
-        _ => None,
-      },
-      Expr::Ident(name, _) if name.0 == "self" => self.method_type.map(|id| (id, false)),
+    let Expr::Ident(name, _) = receiver else { return None };
+    match self.scope.get_bound(name) {
+      Some(Binding::View(_, id)) => Some((id, true)),
+      _ if name.0 == "self" => self.method_type.map(|id| (id, false)),
       _ => None,
     }
   }
@@ -1846,7 +1906,7 @@ impl<'a> CodeGenCtx<'a> {
   }
 
   pub fn emit_tree(&mut self, bc: &mut BytecodeCtx) -> Result<()> {
-    self.scope.enter();
+    self.scope.enter_function(&None, &[], &[])?;
     for decl in self.prelude {
       self.emit_effect(bc, decl)?;
     }
@@ -1857,7 +1917,7 @@ impl<'a> CodeGenCtx<'a> {
       ControlDest::Uncond(Control::Return),
       Control::End,
     )?;
-    self.scope.leave();
+    self.scope.leave_function();
     bc.set_nregs(frame_top!(self).max_regs as u8);
     Ok(())
   }

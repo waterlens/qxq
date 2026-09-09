@@ -1,0 +1,7 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: no such member
+*)
+type ABC = struct {a, b, c} end;
+type BC = struct {b, c} end;
+let o = ABC{1, 2, 3};
+with o : BC in o.a end

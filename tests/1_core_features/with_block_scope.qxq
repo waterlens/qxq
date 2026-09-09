@@ -1,0 +1,7 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} --inspect %s
+   undeclared identifier: y
+*)
+type BC = struct {b, c} end;
+let o = BC{1, 2};
+let s = with o : BC in let y = o.b; y end;
+y
