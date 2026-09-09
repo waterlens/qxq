@@ -77,13 +77,16 @@ nothing, so the VM builds the type value once, from the description and the
 closure of each method and function. A member without a thunk is native: the
 VM supplies its closure by name.
 
-`LoadInd` and `SetInd` address a field by its position in a type whose index
-in this table follows in an `Exta` word; the loader checks the position
-against that type, and an instance keeps its type value in its first slot, so
-a matching slot lets the VM use the position as is. `View` sees an instance as
-another type by mapping the positions of that type's fields onto the slots of
-the instance; the view keeps that type in its first slot too, so the same
-typed accesses and the methods of that type work through it.
+`LoadSlot`, `SetSlot`, `LoadInd` and `SetInd` address a field by its position
+in a type whose index in this table follows in an `Exta` word; the loader
+checks the position against that type. An instance keeps its type value in its
+first slot, so `LoadSlot` and `SetSlot` use the position as is once that slot
+matches. `View` sees an instance as another type by mapping the positions of
+that type's fields onto the slots of the instance; the view keeps that type in
+its first slot too, and `LoadInd` and `SetInd` read the position through its
+table. Either pair takes the other case, and then any other receiver by name,
+on a slower path, so the methods of a type run on its instances and its views
+alike.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |

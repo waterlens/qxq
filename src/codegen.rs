@@ -117,9 +117,13 @@ enum ArithOperand {
   Const(SmallConstantId),
 }
 
+/// A member operand: field `k` of the type the receiver is an instance of
+/// (`Slot`) or a view of (`Ind`), or a constant naming or numbering it for a
+/// lookup by name.
 #[derive(Debug, Clone, Copy)]
 enum MemberAccess {
-  Typed(TypeId, Op8),
+  Slot(TypeId, Op8),
+  Ind(TypeId, Op8),
   Named(Op8),
 }
 
@@ -1583,17 +1587,18 @@ impl<'a> CodeGenCtx<'a> {
     Ok(small.into())
   }
 
-  /// The type a receiver is known to be an instance or a view of: a view of
-  /// a type bound in scope, or `self` in a method of the type.  The VM checks
-  /// the header of the receiver against it, so the knowledge only picks the
-  /// instruction; a receiver of another type is still resolved by name.
-  fn receiver_type(&self, receiver: ExprRef<'a, InfoKey>) -> Option<TypeId> {
+  /// The type a receiver is known to be an instance of, `self` in a method of
+  /// the type, or a view of, the result of `:` with a type bound in scope.
+  /// The VM checks the first slot of the receiver against it, so the
+  /// knowledge only picks the instruction; a receiver of another type is
+  /// still resolved by name.
+  fn receiver_type(&self, receiver: ExprRef<'a, InfoKey>) -> Option<(TypeId, bool)> {
     match receiver {
       Expr::View { ty: Expr::Ident(tname, _), .. } => match self.scope.get_bound(tname) {
-        Some(Binding::Var(Location::Type(id))) => Some(id),
+        Some(Binding::Var(Location::Type(id))) => Some((id, true)),
         _ => None,
       },
-      Expr::Ident(name, _) if name.0 == "self" => self.method_type,
+      Expr::Ident(name, _) if name.0 == "self" => self.method_type.map(|id| (id, false)),
       _ => None,
     }
   }
@@ -1604,10 +1609,10 @@ impl<'a> CodeGenCtx<'a> {
     bc: &BytecodeCtx,
     receiver: ExprRef<'a, InfoKey>,
     field: impl FnOnce(&TypeDesc) -> Option<usize>,
-  ) -> Option<(TypeId, Op8)> {
-    let id = self.receiver_type(receiver)?;
-    let k = field(bc.type_desc(id))?;
-    Some((id, u8::try_from(k).ok()?.into()))
+  ) -> Option<MemberAccess> {
+    let (id, view) = self.receiver_type(receiver)?;
+    let k = u8::try_from(field(bc.type_desc(id))?).ok()?.into();
+    Some(if view { MemberAccess::Ind(id, k) } else { MemberAccess::Slot(id, k) })
   }
 
   /// How a member is addressed: field `k` of a known type, or a constant
@@ -1618,8 +1623,8 @@ impl<'a> CodeGenCtx<'a> {
     receiver: ExprRef<'a, InfoKey>,
     member: &TokenStr<'a>,
   ) -> Result<MemberAccess> {
-    if let Some((id, k)) = self.typed_field(bc, receiver, |desc| desc.field(member.0)) {
-      return Ok(MemberAccess::Typed(id, k));
+    if let Some(access) = self.typed_field(bc, receiver, |desc| desc.field(member.0)) {
+      return Ok(access);
     }
     Ok(MemberAccess::Named(self.member_constant(bc, member)?))
   }
@@ -1634,8 +1639,8 @@ impl<'a> CodeGenCtx<'a> {
       let k = usize::try_from(index).ok()?.checked_sub(1)?;
       (k < desc.fields.len()).then_some(k)
     };
-    if let Some((id, k)) = self.typed_field(bc, receiver, position) {
-      return Ok(MemberAccess::Typed(id, k));
+    if let Some(access) = self.typed_field(bc, receiver, position) {
+      return Ok(access);
     }
     Ok(MemberAccess::Named(self.position_constant(bc, index)?))
   }
@@ -1689,7 +1694,11 @@ impl<'a> CodeGenCtx<'a> {
     let (recv, src) = (regs[0].into(), regs[1].into());
     match access {
       MemberAccess::Named(m) => bc.push(Bytecode::setfield(src, recv, m)),
-      MemberAccess::Typed(id, k) => {
+      MemberAccess::Slot(id, k) => {
+        bc.push(Bytecode::setslot(src, recv, k));
+        bc.push(Bytecode::exta(id.0.into()));
+      }
+      MemberAccess::Ind(id, k) => {
         bc.push(Bytecode::setind(src, recv, k));
         bc.push(Bytecode::exta(id.0.into()));
       }
@@ -1713,7 +1722,11 @@ impl<'a> CodeGenCtx<'a> {
     self.emit_with_dest(bc, data, control, next, |_, bc, r| {
       match access {
         MemberAccess::Named(m) => bc.push(Bytecode::loadfield(r.into(), recv.into(), m)),
-        MemberAccess::Typed(id, k) => {
+        MemberAccess::Slot(id, k) => {
+          bc.push(Bytecode::loadslot(r.into(), recv.into(), k));
+          bc.push(Bytecode::exta(id.0.into()));
+        }
+        MemberAccess::Ind(id, k) => {
           bc.push(Bytecode::loadind(r.into(), recv.into(), k));
           bc.push(Bytecode::exta(id.0.into()));
         }

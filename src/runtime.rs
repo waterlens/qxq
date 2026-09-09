@@ -187,7 +187,9 @@ impl ImageValidator {
       LoadField | SetField if !string(c) && !position(c) => {
         illegal("member is not a string or int")
       }
-      LoadInd | SetInd if !typed_field() => illegal("field is not in the type of the exta"),
+      LoadSlot | SetSlot | LoadInd | SetInd if !typed_field() => {
+        illegal("field is not in the type of the exta")
+      }
       Invoke if !string(c) => illegal("member is not a string constant"),
       Invoke if b != a + FRAME_HEADER_SIZE => illegal("call region not after destination"),
       WObj if !Tag::from(b as u8).is_words() => illegal("wrap tag is not a words object"),

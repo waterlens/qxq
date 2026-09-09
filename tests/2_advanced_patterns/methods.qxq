@@ -13,19 +13,19 @@ day.get_year() + day.get_month() + day.get_day()
    (block (type Date (struct (fields year month day) (method get_year (self) (member self year)) (method get_month (self) (member self month)) (method get_day (self) (member self day)))) (let day (construct Date (init year 2026) (init _ 1) (init day 2))) (+ (+ (member-apply day get_year) (member-apply day get_month)) (member-apply day get_day)))
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
-   loadind      r1, r0, #0
+   loadslot     r1, r0, #0
    exta         #0
    ret          r1
 
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
-   loadind      r1, r0, #1
+   loadslot     r1, r0, #1
    exta         #0
    ret          r1
 
    --- Thunk ---
    thunk::fn params::1 regs::2 captured::[]
-   loadind      r1, r0, #2
+   loadslot     r1, r0, #2
    exta         #0
    ret          r1
 

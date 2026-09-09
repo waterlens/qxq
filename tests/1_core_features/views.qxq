@@ -12,16 +12,16 @@ let o = ABC{1, 2, 3};
    (block (type ABC (struct (fields a b c))) (type BC (struct (fields b c) (method sum (self) (+ (member self b) (member self c))) (method set (self v) (<- (member self b) v)))) (let o (construct ABC (init _ 1) (init _ 2) (init _ 3))) (<- (member (view o BC) c) 4) (+ (+ (member-apply (view o BC) sum) (index (view o BC) 2)) (member o b)))
    --- Thunk ---
    thunk::fn params::1 regs::3 captured::[]
-   loadind      r1, r0, #0
+   loadslot     r1, r0, #0
    exta         #1
-   loadind      r2, r0, #1
+   loadslot     r2, r0, #1
    exta         #1
    add.dd       r1, r1, r2
    ret          r1
 
    --- Thunk ---
    thunk::fn params::2 regs::3 captured::[]
-   setind       r1, r0, #0
+   setslot      r1, r0, #0
    exta         #1
    loadr        r2, unit
    ret          r2

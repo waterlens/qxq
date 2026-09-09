@@ -699,6 +699,8 @@ define_bytecode! {
   LoadFree (AB, OpAB, op)   fn loadfree(dst: Op8, o1: Op16)       { dst, o1 }     => ("{:<12} r{}, ^{}", "loadfv", op.dst, op.o1),
   LoadField (ABC, OpABC, op) fn loadfield(dst: Op8, o1: Op8, o2: Op8) { dst, o1, o2 } => ("{:<12} r{}, r{}, @{}", "loadfld", op.dst, op.o1, op.o2),
   SetField (ABC, OpABC, op) fn setfield(src: Op8, o1: Op8, o2: Op8) { dst: src, o1, o2 } => ("{:<12} r{}, r{}, @{}", "setfld", op.dst, op.o1, op.o2),
+  LoadSlot (ABC, OpABC, op) fn loadslot(dst: Op8, o1: Op8, k: Op8)  { dst, o1, o2: k } => ("{:<12} r{}, r{}, #{}", "loadslot", op.dst, op.o1, op.o2),
+  SetSlot (ABC, OpABC, op)  fn setslot(src: Op8, o1: Op8, k: Op8)   { dst: src, o1, o2: k } => ("{:<12} r{}, r{}, #{}", "setslot", op.dst, op.o1, op.o2),
   LoadInd (ABC, OpABC, op)  fn loadind(dst: Op8, o1: Op8, k: Op8)   { dst, o1, o2: k } => ("{:<12} r{}, r{}, #{}", "loadind", op.dst, op.o1, op.o2),
   SetInd (ABC, OpABC, op)   fn setind(src: Op8, o1: Op8, k: Op8)    { dst: src, o1, o2: k } => ("{:<12} r{}, r{}, #{}", "setind", op.dst, op.o1, op.o2),
   View   (ABC, OpABC, op)   fn view(dst: Op8, o1: Op8, ty: Op8)     { dst, o1, o2: ty } => ("{:<12} r{}, r{}, r{}", "view", op.dst, op.o1, op.o2),
