@@ -38,7 +38,7 @@ test-all:
 # Benchmark bench/*.qxq with hyperfine using the release binary. To compare other
 # binaries, pass them comma-separated: `just bench path/to/other/qxq` or `just bench a,b`
 bench extra="": release
-    @hyperfine -N -w 2 -r 10 -L bin target/release/qxq{{ if extra != "" { "," + extra } else { "" } }} -L file fib,tak,method,float '{bin} bench/{file}.qxq'
+    @hyperfine -N -w 2 -r 10 -L bin target/release/qxq{{ if extra != "" { "," + extra } else { "" } }} -L file fib,tak,method,float,view_field,with_field,view_method,with_method '{bin} bench/{file}.qxq'
 
 # Regenerate the review-only vm assembly dumps (needs zig 0.15.1 on PATH)
 asm:

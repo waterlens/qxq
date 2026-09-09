@@ -1,0 +1,11 @@
+type AC = struct {a, c} end;
+type XABC = struct {x, a, b, c} end;
+let o = XABC{0, 1, 2, 3};
+with o : AC in
+  let rec run = fn (n)
+    let s = o.a + o.c + o.a + o.c + o.a + o.c + o.a + o.c;
+    let s = s + o.a + o.c + o.a + o.c + o.a + o.c + o.a + o.c;
+    if n > 0 then run(n - 1) + run(n - 1) else s end
+  end;
+  run(20)
+end

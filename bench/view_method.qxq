@@ -1,0 +1,11 @@
+type AC = struct {a, c}
+  with fn sum(self) self.a + self.c end
+end;
+type XABC = struct {x, a, b, c} end;
+let v = XABC{0, 1, 2, 3} : AC;
+let rec run = fn (n)
+  let s = v.sum() + v.sum() + v.sum() + v.sum();
+  let s = s + v.sum() + v.sum() + v.sum() + v.sum();
+  if n > 0 then run(n - 1) + run(n - 1) else s end
+end;
+run(20)
