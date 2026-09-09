@@ -6,8 +6,17 @@ type Date = struct {year, month, day}
   with fn get_day(self) self.day end
 end;
 let day = Date{year = 2026, 1, day = 2};
-day.get_year() + day.get_month() + day.get_day()
+
+(* a method reached through another type's method is found by name *)
+type A = struct {v}
+  with fn get(self) self.v end
+  with fn twice(self) self.get() * 2 end
+end;
+type B = struct {v} with fn get(self) self.v + 100 end end;
+let b = B{1};
+
+(day.get_year() + day.get_month() + day.get_day(), A{1}.twice(), A.twice(b), with b : B in b.get() end)
 
 (* EXPECT:
-   2029
+   (2029, 2, 202, 101)
 *)

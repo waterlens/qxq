@@ -86,7 +86,12 @@ that type's fields onto the slots of the instance; the view keeps that type in
 its first slot too, and `LoadInd` and `SetInd` read the position through its
 table. Either pair takes the other case, and then any other receiver by name,
 on a slower path, so the methods of a type run on its instances and its views
-alike.
+alike. `InvokeInd` calls a method by its position among the methods of the
+type in its `Exta` word: the closure comes from that type value once the first
+slot of the receiver matches, and from the receiver by the method's name
+otherwise. An `Apply` of the same destination follows the `Exta`; the call is
+made without executing it, but the return sequence reads the word before the
+return address for the call region, and finds it there.
 
 | Name | Content | Length (Byte) | Field Name in Source Code | Comment |
 | --------------- | --------------- | --------------- | --------------- | --------------- |

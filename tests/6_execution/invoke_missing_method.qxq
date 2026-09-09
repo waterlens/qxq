@@ -1,0 +1,9 @@
+(* RUN-EXPECT-ERROR: {qxq|cargo run --} %s
+   panic: no such member
+*)
+type A = struct {v}
+  with fn get(self) self.v end
+  with fn twice(self) self.get() * 2 end
+end;
+type C = struct {v} end;
+A.twice(C{1})

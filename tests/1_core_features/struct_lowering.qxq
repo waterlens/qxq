@@ -21,26 +21,26 @@ c.twice(2) + c.later()(3)
 
    --- Thunk ---
    thunk::fn params::2 regs::7 captured::[]
-   constants::[
-     @0: "add"
-   ]
    move         r4, r0
    move         r5, r1
-   invoke       r2, r4, @0
+   invokeind    r2, r4, #0
+   exta         #0
+   apply        r2, #1
    move         r5, r0
    move         r6, r1
-   invoke       r3, r5, @0
+   invokeind    r3, r5, #0
+   exta         #0
+   apply        r3, #1
    add.dd       r2, r2, r3
    ret          r2
 
    --- Thunk ---
    thunk::fn params::1 regs::5 captured::[r0 as ^1]
-   constants::[
-     @0: "add"
-   ]
    loadfv       r3, ^1
    move         r4, r0
-   invoke       r1, r3, @0
+   invokeind    r1, r3, #0
+   exta         #0
+   apply        r1, #1
    ret          r1
 
    --- Thunk ---

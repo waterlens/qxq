@@ -136,7 +136,7 @@ impl ImageValidator {
         }
       }
       for (i, bc) in thunk.code.iter().enumerate() {
-        self.validate_bytecode(*bc, thunk.code.get(i + 1).copied(), thunk, types)?;
+        self.validate_bytecode(*bc, &thunk.code[i + 1..], thunk, types)?;
       }
     }
 
@@ -160,13 +160,14 @@ impl ImageValidator {
   fn validate_bytecode(
     &self,
     bytecode: Bytecode,
-    next: Option<Bytecode>,
+    following: &[Bytecode],
     thunk: &Thunk,
     types: &[TypeDesc],
   ) -> Result<()> {
     use Operator::*;
     // Operands as the VM decodes them: A, B and C in encoding order.
     let Bytecode(operator, operands) = bytecode;
+    let next = following.first().copied();
     let (a, b, c) = match operands {
       Operands::AB(op) => (usize::from(op.dst), usize::from(op.o1), 0),
       Operands::ABC(op) => (usize::from(op.dst), usize::from(op.o1), usize::from(op.o2)),
@@ -174,10 +175,16 @@ impl ImageValidator {
     };
     let string = |i: usize| thunk.constants.get(i).is_some_and(|v| v.is_ptr());
     let position = |i: usize| thunk.constants.get(i).is_some_and(|v| v.is_int());
-    let typed_field = || match next {
+    // Whether the exta names a type with `c` in one of its member groups.
+    let typed = |members: fn(&TypeDesc) -> usize| match next {
       Some(Bytecode(Exta, Operands::A(op))) => {
-        types.get(u32::from(op.o1) as usize).is_some_and(|t| c < t.fields.len())
+        types.get(u32::from(op.o1) as usize).is_some_and(|t| c < members(t))
       }
+      _ => false,
+    };
+    // Whether the apply word the return sequence reads follows the exta.
+    let applied = || match following.get(1) {
+      Some(Bytecode(Apply, Operands::AB(op))) => usize::from(op.dst) == a,
       _ => false,
     };
     let illegal = |what: &str| self.diag.fail(format!("illegal instruction: {what}: {bytecode}"));
@@ -185,11 +192,15 @@ impl ImageValidator {
       LoadFree if b > thunk.fvlocs.len() => illegal("free variable out of range"),
       LoadType if b >= types.len() => illegal("type out of range"),
       LoadMem | SetMem if !string(c) && !position(c) => illegal("member is not a string or int"),
-      LoadSlot | SetSlot | LoadInd | SetInd if !typed_field() => {
+      LoadSlot | SetSlot | LoadInd | SetInd if !typed(|t| t.fields.len()) => {
         illegal("field is not in the type of the exta")
       }
+      InvokeInd if !typed(|t| t.methods.len()) => illegal("method is not in the type of the exta"),
+      InvokeInd if !applied() => illegal("no apply of the destination after the exta"),
       Invoke if !string(c) => illegal("member is not a string constant"),
-      Invoke if b != a + FRAME_HEADER_SIZE => illegal("call region not after destination"),
+      Invoke | InvokeInd if b != a + FRAME_HEADER_SIZE => {
+        illegal("call region not after destination")
+      }
       WObj if !Tag::from(b as u8).is_words() => illegal("wrap tag is not a words object"),
       WObj if Tag::from(b as u8) == Tag::TYPE => illegal("type values come from the image"),
       LoadR if !Val::from_raw(b as u64).is_trivial() => illegal("nontrivial raw value"),

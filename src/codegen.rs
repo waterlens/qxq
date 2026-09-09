@@ -1675,6 +1675,18 @@ impl<'a> CodeGenCtx<'a> {
     Some(if view { MemberAccess::Ind(id, k) } else { MemberAccess::Slot(id, k) })
   }
 
+  /// A method of the type the receiver is known to have, by position.
+  fn typed_method(
+    &self,
+    bc: &BytecodeCtx,
+    receiver: ExprRef<'a, InfoKey>,
+    member: &TokenStr<'a>,
+  ) -> Option<(TypeId, Op8)> {
+    let (id, _) = self.receiver_type(receiver)?;
+    let m = bc.type_desc(id).method(member.0)?;
+    Some((id, u8::try_from(m).ok()?.into()))
+  }
+
   /// How a member is addressed: field `k` of a known type, or a constant
   /// naming or numbering it for a lookup at run time.
   fn member_access(
@@ -1878,6 +1890,7 @@ impl<'a> CodeGenCtx<'a> {
     {
       return self.emit_function_apply(bc, id, member, args, data, control, next);
     }
+    let method = self.typed_method(bc, receiver, member);
     let dst = self.allocate_temporary()?;
     let _frame_ra = self.allocate_temporary()?;
     let recv = self.allocate_temporary()?;
@@ -1892,8 +1905,19 @@ impl<'a> CodeGenCtx<'a> {
     for _ in 0..args.len() + 2 {
       reg_pop!(self);
     }
-    let m = self.member_constant(bc, member)?;
-    bc.push(Bytecode::invoke(dst.into(), recv.into(), m));
+    match method {
+      Some((id, m)) => {
+        let args_len: u16 =
+          args.len().try_into().map_err(|_| self.diagnostic.error("argument length overflow"))?;
+        bc.push(Bytecode::invokeind(dst.into(), recv.into(), m));
+        bc.push(Bytecode::exta(id.0.into()));
+        bc.push(Bytecode::apply(dst.into(), args_len.into()));
+      }
+      None => {
+        let m = self.member_constant(bc, member)?;
+        bc.push(Bytecode::invoke(dst.into(), recv.into(), m));
+      }
+    }
     self.emit_store(bc, Value::Loc(Location::Temporary), data, control, next)
   }
 

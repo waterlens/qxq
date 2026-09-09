@@ -707,6 +707,7 @@ define_bytecode! {
   Move   (ABC, OpABC, op)   fn mov(dst: Op8, o1: Op8)             { dst, o1, o2: 0.into() } => ("{:<12} r{}, r{}", "move", op.dst, op.o1),
   Apply  (AB, OpAB, op)     fn apply(dst: Op8, o1: Op16)          { dst, o1 }     => ("{:<12} r{}, #{}", "apply", op.dst, op.o1),
   Invoke (ABC, OpABC, op)   fn invoke(dst: Op8, o1: Op8, o2: Op8)  { dst, o1, o2 } => ("{:<12} r{}, r{}, @{}", "invoke", op.dst, op.o1, op.o2),
+  InvokeInd (ABC, OpABC, op) fn invokeind(dst: Op8, o1: Op8, m: Op8) { dst, o1, o2: m } => ("{:<12} r{}, r{}, #{}", "invokeind", op.dst, op.o1, op.o2),
   Call   (AB, OpAB, op)     fn call(dst: Op8, o1: Op16)           { dst, o1 }     => ("{:<12} r{}, fn{}", "call", op.dst, op.o1),
   Native (AB, OpAB, op)     fn native(o1: Op16)                   { dst: 0.into(), o1 } => ("{:<12} #{}", "native", op.o1),
   Retu   (N)                fn retu()                             {}              => ("{:<12}", "retu"),
@@ -830,6 +831,10 @@ impl TypeDesc {
 
   pub fn field(&self, name: &str) -> Option<usize> {
     self.fields.iter().position(|f| f == name)
+  }
+
+  pub fn method(&self, name: &str) -> Option<usize> {
+    self.methods.iter().position(|(m, _)| m == name)
   }
 }
 
